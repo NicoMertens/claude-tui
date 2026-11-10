@@ -1,0 +1,19 @@
+[package]
+name = "claude-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal-Arbeitsplatz für mehrere Claude-Code-Sessions"
+publish = false
+
+[dependencies]
+anyhow = "1"
+crossterm = "0.28"
+portable-pty = "0.8"
+ratatui = "0.29"
+tui-term = "0.2"
+vt100 = "0.15"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

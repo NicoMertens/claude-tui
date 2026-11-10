@@ -1,0 +1,82 @@
+name: Release
+
+# Jeder Push auf `release` baut alle Plattformen und legt das GitHub-Release v<Version aus Cargo.toml>
+# samt Tag an. Ist die Version schon veröffentlicht, bricht der Lauf vor dem Build ab.
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: read
+        name: Version lesen und prüfen
+        run: |
+          version=$(grep -m1 '^version' source/Cargo.toml | cut -d'"' -f2)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag ist bereits veröffentlicht – Version in source/Cargo.toml erhöhen."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc, ext: .exe }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, ext: '' }
+          - { os: macos-latest, target: aarch64-apple-darwin, ext: '' }
+          - { os: macos-latest, target: x86_64-apple-darwin, ext: '' }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: source
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Binary umbenennen
+        run: |
+          mkdir -p ../dist
+          cp "target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}" \
+             "../dist/claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-tui-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          generate_release_notes: true
