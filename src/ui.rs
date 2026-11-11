@@ -15,7 +15,7 @@ use crate::{
     list::Entry,
     menu::Menu,
     term_view::TermView,
-    theme,
+    theme, update,
     windows::Focus,
 };
 
@@ -86,12 +86,18 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     hint.push(Span::raw(" "));
 
     let focused = app.windows.focus() == Focus::List;
-    let title = Span::styled(
-        " ✻ claude-tui ",
-        Style::default()
-            .fg(theme::ACCENT)
-            .add_modifier(Modifier::BOLD),
-    );
+    let title = vec![
+        Span::styled(
+            " ✻ claude-tui ",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("v{} ", update::CURRENT),
+            Style::default().fg(theme::MUTED),
+        ),
+    ];
     let block = rounded(frame_color(focused))
         .title(Line::from(title))
         .title_bottom(Line::from(hint));
