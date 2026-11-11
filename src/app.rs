@@ -22,6 +22,7 @@ use crate::{
     state::{self, State},
     ui,
     update::{self, Available},
+    waiting,
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
 };
 
@@ -87,6 +88,8 @@ pub struct App {
     update_check: Option<Receiver<Available>>,
     update_install: Option<Receiver<Result<String, String>>>,
     pub should_quit: bool,
+    /// Eine Session wartet neu auf dich: einmal die Terminal-Glocke läuten (`main.rs`).
+    pub ring_bell: bool,
     command: String,
     /// Verzeichnis, aus dem claude-tui gestartet wurde.
     start_dir: PathBuf,
@@ -127,6 +130,7 @@ impl App {
             update_check: update::spawn_check(),
             update_install: None,
             should_quit: false,
+            ring_bell: false,
             command,
             start_dir: std::env::current_dir().context("current directory not readable")?,
             recent: recent::load(),
@@ -204,8 +208,15 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        let mut changes = Vec::new();
         for session in &mut self.sessions {
+            let before = session.status;
             session.refresh();
+            changes.push((session.id, before, session.status));
+        }
+        for id in waiting::newly_waiting(changes, self.windows.focused_session()) {
+            self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
+            self.ring_bell = waiting::bell_enabled();
         }
         // Beendete Prozesse verschwinden; die Claude-Session bleibt in der Liste.
         let exited: Vec<SessionId> = self
@@ -599,6 +610,7 @@ impl App {
                 self.stacked = !self.stacked;
                 self.after_layout_change();
             }
+            Action::NextWaiting => self.show_next_waiting()?,
             Action::Quit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {
@@ -641,7 +653,28 @@ impl App {
                 .map(|u| u.version.as_str()),
             list_hidden: self.list_hidden,
             stacked: self.stacked,
+            waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
         }));
+    }
+
+    /// Nächste wartende Session (Listenreihenfolge, reihum ab der aktuellen): hat sie ein Fenster,
+    /// Fokus dorthin, sonst wie Enter in der Liste.
+    fn show_next_waiting(&mut self) -> Result<()> {
+        let order: Vec<SessionId> = list::flatten(&self.groups)
+            .filter_map(|e| e.running)
+            .collect();
+        let is_waiting = |id| {
+            self.session(id)
+                .is_some_and(|s| s.status == Status::Waiting)
+        };
+        let Some(id) = waiting::next_waiting(&order, is_waiting, self.context_session()) else {
+            return Ok(());
+        };
+        if let Some(session) = self.session(id) {
+            self.cursor = Some(session.claude_id.clone());
+        }
+        let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+        self.on_list_key(enter)
     }
 
     /// Schließt Fenster und Prozess (falls laufend) und löscht das Protokoll endgültig.

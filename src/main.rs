@@ -17,9 +17,13 @@ mod term_view;
 mod theme;
 mod ui;
 mod update;
+mod waiting;
 mod windows;
 
-use std::{io, time::Duration};
+use std::{
+    io::{self, Write as _},
+    time::Duration,
+};
 
 use anyhow::Result;
 use crossterm::{
@@ -43,7 +47,8 @@ Usage:
   claude-tui update      install the newest release from GitHub
   claude-tui --version
 
-Set CLAUDE_TUI_NO_UPDATE_CHECK=1 to skip the daily update check on start.";
+Set CLAUDE_TUI_NO_UPDATE_CHECK=1 to skip the daily update check on start.
+Set CLAUDE_TUI_NO_BELL=1 to keep the terminal bell silent when a session waits for you.";
 
 fn main() -> Result<()> {
     let arg = std::env::args().nth(1);
@@ -107,6 +112,11 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
     while !app.should_quit {
         app.tick();
         terminal.draw(|f| ui::draw(f, &app))?;
+        if std::mem::take(&mut app.ring_bell) {
+            // BEL bewegt den Cursor nicht; nach dem Zeichnen stört es das Bild nicht.
+            let backend = terminal.backend_mut();
+            let _ = backend.write_all(b"\x07").and_then(|()| backend.flush());
+        }
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,

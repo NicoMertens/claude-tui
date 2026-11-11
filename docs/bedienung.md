@@ -120,6 +120,7 @@ vom Fokus ab:
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
+| `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
@@ -130,6 +131,11 @@ Fenster 1). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. D
 von selbst wieder, sobald sie den Fokus bekommt (`Ctrl+←`, `0`) oder das letzte Fenster schließt.
 Hinweise, die sonst unten in der Liste stehen, zeigt dann der untere Rahmen des Fensters mit Fokus.
 Der Zustand bleibt über einen Neustart erhalten (`state.json`).
+
+`w` („Next waiting session“) springt zur nächsten Session im Zustand **waiting for you**, in der
+Reihenfolge der Sessionliste und ab der aktuellen Session (der im Fenster mit Fokus bzw. der in der
+Liste gewählten); bei mehreren wartenden geht es mit jedem `w` reihum weiter. Hat die Session ein
+Fenster, bekommt es den Fokus; sonst geht es weiter wie mit `Enter` in der Liste (Fensterauswahl).
 
 `c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
@@ -190,6 +196,13 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 
 Die Formen unterscheiden sich auch ohne Farbe.
+
+**Hinweis auf wartende Sessions:** Wechselt eine Session, die nicht im Fenster mit Fokus liegt
+(auch eine Hintergrund-Session ohne Fenster), auf **waiting for you**, läutet claude-tui einmal die
+Terminal-Glocke (BEL) und zeigt unten in der Sessionliste `"<Titel>" is waiting for you`. Das
+passiert nur beim Wechsel, nicht dauerhaft. Hin kommt man mit `w` im Ctrl+A-Menü.
+`CLAUDE_TUI_NO_BELL=1` schaltet die Glocke ab; der Hinweis bleibt. Ob und wie die Glocke zu hören
+oder zu sehen ist, stellt das Terminal ein (Windows Terminal: `bellStyle`).
 
 Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede Session mit
 `--settings` und eigenen Hook-Einträgen, die `claude-tui hook <Event>` aufrufen (Prompt abgeschickt

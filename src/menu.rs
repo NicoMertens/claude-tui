@@ -23,6 +23,8 @@ pub enum Action {
     ToggleList,
     /// Zwei Fenster übereinander bzw. nebeneinander anordnen.
     ToggleStacked,
+    /// Zur nächsten Session springen, die auf dich wartet.
+    NextWaiting,
     /// Neuere Version von GitHub installieren.
     Update,
     Quit,
@@ -81,6 +83,8 @@ pub struct Context<'a> {
     pub list_hidden: bool,
     /// Zwei Fenster stehen übereinander.
     pub stacked: bool,
+    /// Mindestens eine Session wartet auf dich.
+    pub waiting: bool,
 }
 
 impl Menu {
@@ -110,6 +114,9 @@ impl Menu {
         }
         if in_window {
             add('0', "Focus session list", Action::Focus(Focus::List));
+        }
+        if ctx.waiting {
+            add('w', "Next waiting session", Action::NextWaiting);
         }
         // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
         if ctx.list_hidden {
@@ -242,6 +249,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            waiting: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -261,6 +269,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            waiting: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -276,6 +285,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            waiting: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
     }
@@ -290,6 +300,7 @@ mod tests {
             update: None,
             list_hidden,
             stacked: false,
+            waiting: false,
         });
         menu.items
             .iter()
@@ -320,6 +331,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked,
+            waiting: false,
         });
         menu.items
             .iter()
@@ -336,6 +348,28 @@ mod tests {
         );
         assert_eq!(layout_label(1, false), None);
         assert_eq!(layout_label(3, false), None);
+    }
+
+    #[test]
+    fn next_waiting_only_when_a_session_waits() {
+        let windows = names(1);
+        let has_next = |waiting| {
+            Menu::commands(&Context {
+                focus: Focus::List,
+                windows: &windows,
+                selected_has_window: false,
+                has_selection: true,
+                update: None,
+                list_hidden: false,
+                stacked: false,
+                waiting,
+            })
+            .items
+            .iter()
+            .any(|i| i.hotkey == 'w' && i.action == Action::NextWaiting)
+        };
+        assert!(has_next(true));
+        assert!(!has_next(false));
     }
 
     #[test]
