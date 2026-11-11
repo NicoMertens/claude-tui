@@ -22,8 +22,9 @@ pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 /// Rot für „arbeitet“ (Fensterleiste und Sessionliste).
 const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);
 
-/// Bilder des Claude-Spinners; läuft vor und zurück wie in Claude Code.
-const SPINNER: [&str; 6] = ["·", "✢", "✳", "✶", "✻", "✽"];
+/// Bilder des Claude-Spinners; läuft vor und zurück wie in Claude Code. Kein `✳` (U+2733): das
+/// stellt Windows als Emoji dar (grünes Quadrat, doppelt breit).
+const SPINNER: [&str; 6] = ["·", "✢", "✣", "✶", "✻", "✽"];
 const SPINNER_FRAME: Duration = Duration::from_millis(120);
 
 /// Symbol und Farbe eines Zustands; `None` = gespeichert, läuft nicht. `elapsed` treibt den
@@ -65,6 +66,15 @@ mod tests {
     #[test]
     fn spinner_runs_forth_and_back() {
         let frames: Vec<&str> = (0..10).map(|i| spinner(SPINNER_FRAME * i)).collect();
-        assert_eq!(frames, ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]);
+        assert_eq!(frames, ["·", "✢", "✣", "✶", "✻", "✽", "✻", "✶", "✣", "✢"]);
+    }
+
+    #[test]
+    fn spinner_has_no_emoji_characters() {
+        // Zeichen mit Emoji-Darstellung unter Windows (✳ ✴ ❇ u. a.) verschieben die Zeile.
+        const EMOJI: [char; 4] = ['✳', '✴', '❇', '❄'];
+        assert!(SPINNER
+            .iter()
+            .all(|frame| !frame.chars().any(|c| EMOJI.contains(&c))));
     }
 }
