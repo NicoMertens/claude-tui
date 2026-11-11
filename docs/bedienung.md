@@ -3,20 +3,29 @@
 ## Start
 
 ```
-claude-tui              # jede Session startet `claude`
-claude-tui "claude -c"  # beliebiger Befehl, z. B. mit Fortsetzen der letzten Unterhaltung
+claude-tui                      # Claude Code über `claude` starten
+claude-tui "claude --model opus" # anderer Befehl bzw. zusätzliche Optionen
 claude-tui --version
 ```
 
-Die erste Session startet im aktuellen Arbeitsverzeichnis, jede weitere im Verzeichnis aus der
-Verzeichnisauswahl. Unter Windows läuft der Befehl über `cmd.exe /C`,
-unter Linux/macOS über `sh -c`, damit PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
+claude-tui hängt an den Befehl selbst `--session-id <neue ID>` (neue Session) bzw. `--resume <ID>`
+(gespeicherte Session fortsetzen) an — Optionen wie `-c` oder `--resume` gehören deshalb nicht in den
+Befehl. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
+PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
+
+**Wiederherstellen:** claude-tui merkt sich, welche Session in welchem Fenster lag und wo der Fokus
+war (`state.json` im Konfigurationsordner). Beim nächsten Start werden genau diese Sessions mit
+`--resume` fortgesetzt und in ihre Fenster gelegt. Gibt es nichts wiederherzustellen, startet eine
+neue Session im aktuellen Verzeichnis.
 
 ## Aufbau
 
-Links die **Sessionliste**: alle Sessions mit Zustand; ist eine Session in einem Fenster zu sehen,
-steht dessen Nummer hinter dem Namen (`claude 2 [1]`). Sessions ohne Fenster laufen im Hintergrund
-weiter.
+Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),
+gruppiert nach Arbeitsverzeichnis — Gruppen mit der jüngsten Aktivität oben, darin laufende Sessions
+zuerst. Je Session stehen der Titel (eigener Name aus `/rename`, sonst der KI-Titel, sonst der letzte
+Prompt) und darunter der Zustand (laufend) bzw. das Alter (gespeichert). Ist eine Session in einem
+Fenster zu sehen, steht dessen Nummer hinter dem Titel (`[1]`). Laufende Sessions ohne Fenster
+arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
 Rechts bis zu **4 Fenster**, nach Position nummeriert:
 
@@ -53,7 +62,7 @@ einen Zeilenumbruch ein.
 | Taste | Wirkung |
 |---|---|
 | `↑` / `↓` | Session auswählen |
-| `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl |
+| `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
 
 ### Menü (`Ctrl+A`)
@@ -65,12 +74,13 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | gewählte Session beenden | Session dieses Fensters beenden |
+| `x` | Prozess der gewählten Session beenden | Fenster schließen und Prozess beenden |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
-`c` lässt die Session im Hintergrund weiterlaufen, `x` beendet sie und entfernt sie aus der Liste.
+`c` lässt die Session im Hintergrund weiterlaufen, `x` beendet ihren Prozess. Die Claude-Session selbst
+bleibt in beiden Fällen gespeichert und in der Liste; mit `Enter` oder `1`–`4` geht es dort weiter.
 
 **Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui unten in der Sessionliste, in
 welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.
@@ -98,7 +108,7 @@ entfällt die Auswahl und Fenster 1 wird genommen.
 | ● arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
 | ● wartet auf dich | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
 | ● bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
-| ● beendet | Der Prozess ist beendet; sein Fenster schließt sich, mit `x` aus der Liste entfernen. |
+| (Alter) | Session läuft nicht, ist aber gespeichert und lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 
 Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
 [Architektur](architektur.md).

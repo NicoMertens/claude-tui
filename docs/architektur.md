@@ -20,6 +20,10 @@
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
+| `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session |
+| `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
+| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus) als `state.json` für den Neustart |
+| `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
 | `session.rs` | eine Session: PTY starten, Lese-Thread, Statuserkennung, Schreiben, Resize |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Alt+Pfeil` als Fokuswechsel |
 | `ui.rs` | Zeichnen: Sessionliste mit Menü unten, Fenster mit Nummer und Fokusrahmen |
@@ -27,12 +31,14 @@
 
 ## Datenfluss
 
-1. `Session::spawn` öffnet ein PTY und startet den Befehl; `Windows::place` legt die Session in ein
-   Fenster.
+1. `Session::spawn` öffnet ein PTY und startet den Befehl mit `--session-id <neue UUID>` bzw.
+   `--resume <ID>`; so ist jeder Prozess einer Claude-Session zugeordnet. `Windows::place` legt ihn
+   in ein Fenster, `state.rs` speichert das Layout nach jeder Änderung.
 2. Ein Lese-Thread je Session schreibt die Ausgabe in einen `vt100::Parser` (hinter `Mutex`) und
    merkt sich den Zeitpunkt der letzten Ausgabe.
 3. Die Hauptschleife fragt bei jedem Takt den Status ab, zeichnet und leitet Tastendrücke als
-   Bytes an das PTY der Session im Fenster mit Fokus weiter. Beendete Sessions verlieren ihr Fenster.
+   Bytes an das PTY der Session im Fenster mit Fokus weiter. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
+   `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte).
 4. Nach jeder Layout-Änderung und bei Resize bekommt jede sichtbare Session die Innenmaße ihres
    Fensters. Sessions im Hintergrund behalten ihre letzte Größe; sie wird erst beim Anzeigen angepasst.
 
