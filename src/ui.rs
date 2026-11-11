@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -40,6 +40,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
     draw_sidebar(f, app, sidebar);
     draw_windows(f, app);
+    draw_overlay(f, app);
 }
 
 fn rounded(color: Color) -> Block<'static> {
@@ -57,54 +58,37 @@ fn frame_color(focused: bool) -> Color {
     }
 }
 
-/// Mindesthöhe der Sessionliste, wenn darunter das Menü offen ist.
-const MIN_LIST_HEIGHT: u16 = 5;
-
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
-    // Menü bzw. Verzeichnisauswahl: eigene Box unter der Sessionliste.
+    // Kompakte Box unter der Liste: wie sich das Menü öffnet (und ob ein Update wartet), im Rahmen
+    // was gerade den Fokus hat. Das Menü selbst erscheint als Overlay über den Fenstern.
     let panel_width = area.width.saturating_sub(2) as usize;
-    let panel = match (&app.dir_picker, &app.menu) {
-        (Some(picker), _) => (
-            "Directory".to_string(),
-            dir_picker_lines(picker, panel_width),
-        ),
-        (None, Some(menu)) => (menu.title.clone(), menu_lines(menu, panel_width)),
-        // Menü zu: die Box bleibt und zeigt nur, wie es sich öffnet (und ob ein Update wartet).
-        (None, None) => {
-            let mut hint = vec![
-                Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
-                Span::styled(" Menu", Style::default().fg(theme::MUTED)),
-            ];
-            if let Some(update) = &app.update {
-                hint.push(Span::styled(
-                    format!(" · v{} available (u)", update.version),
-                    Style::default().fg(theme::MENU),
-                ));
-            }
-            // Titel der Box: was gerade den Fokus hat — wie beim geöffneten Menü.
-            let focus = match app.windows.focus() {
-                Focus::Window(slot) => {
-                    let title = app
-                        .windows
-                        .focused_session()
-                        .map(|id| app.title_of(id))
-                        .unwrap_or_default();
-                    head(
-                        &format!("Menue {} – {title}", slot + 1),
-                        panel_width.saturating_sub(4),
-                    )
-                }
-                Focus::List => "Session list".to_string(),
-            };
-            (focus, vec![Line::from(hint)])
+    let mut hint = vec![
+        Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
+        Span::styled(" Menu", Style::default().fg(theme::MUTED)),
+    ];
+    if let Some(update) = &app.update {
+        hint.push(Span::styled(
+            format!(" · v{} available (u)", update.version),
+            Style::default().fg(theme::MENU),
+        ));
+    }
+    let focus = match app.windows.focus() {
+        Focus::Window(slot) => {
+            let title = app
+                .windows
+                .focused_session()
+                .map(|id| app.title_of(id))
+                .unwrap_or_default();
+            head(
+                &format!("Menue {} – {title}", slot + 1),
+                panel_width.saturating_sub(4),
+            )
         }
+        Focus::List => "Session list".to_string(),
     };
-    let (panel_title, panel_lines) = panel;
-    let panel_height =
-        (panel_lines.len() as u16 + 2).min(area.height.saturating_sub(MIN_LIST_HEIGHT));
     let [list_box, panel_box] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(panel_height)]).areas(area);
-    draw_panel(f, &panel_title, panel_lines, panel_box);
+        Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(area);
+    draw_panel(f, &focus, vec![Line::from(hint)], panel_box);
 
     let focused = app.windows.focus() == Focus::List;
     let title = Span::styled(
@@ -191,6 +175,9 @@ fn tail(text: &str, width: usize) -> String {
     format!("…{rest}")
 }
 
+const DIR_PICKER_HINT: &str = " Tab complete · Enter · Esc";
+const MENU_FOOTER: &str = " Esc close";
+
 fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("> ", Style::default().fg(theme::ACCENT)),
@@ -212,7 +199,7 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
             format!(" {error}"),
             Style::default().fg(theme::WAITING),
         )),
-        None => muted(" Tab complete · Enter · Esc"),
+        None => muted(DIR_PICKER_HINT),
     });
     lines
 }
@@ -326,15 +313,112 @@ fn short_age(since: Duration) -> String {
     }
 }
 
-/// Menü unten in der Sessionliste, nach unten ausgerichtet.
 fn menu_lines(menu: &Menu, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
         let text = format!(" {:<3}{}", item.hotkey.label(), item.label);
         lines.push(selectable(text, i == menu.selected, width));
     }
-    lines.push(muted(" Esc close"));
+    lines.push(muted(MENU_FOOTER));
     lines
+}
+
+/// Mindestbreite des Inhalts der Verzeichnisauswahl, damit Platz zum Tippen bleibt.
+const DIR_PICKER_MIN_WIDTH: usize = 40;
+
+/// Menü, Fensterauswahl, Löschabfrage oder Verzeichnisauswahl als Overlay über dem fokussierten
+/// Fenster; merkt sich die Fläche für die Maus.
+fn draw_overlay(f: &mut Frame, app: &App) {
+    let (title, rows, content_width) = match (&app.dir_picker, &app.menu) {
+        (Some(picker), _) => (
+            "Directory".to_string(),
+            dir_picker_rows(picker),
+            dir_picker_width(picker),
+        ),
+        (None, Some(menu)) => (menu.title.clone(), menu.items.len() + 1, menu_width(menu)),
+        (None, None) => {
+            app.overlay.set(None);
+            return;
+        }
+    };
+    let screen = f.area();
+    let [_, windows] = split(screen);
+    let target = match app.windows.focus() {
+        Focus::Window(slot) => app.window_rects().get(slot).copied().unwrap_or(windows),
+        Focus::List => windows,
+    }
+    .intersection(screen);
+    let windows = windows.intersection(screen);
+    // Rahmen links/rechts; der Titel braucht zusätzlich je ein Leerzeichen davor und dahinter.
+    let width = content_width.max(title.chars().count() + 2) + 2;
+    let height = rows + 2;
+    let area = overlay_rect(
+        target,
+        windows,
+        u16::try_from(width).unwrap_or(u16::MAX),
+        u16::try_from(height).unwrap_or(u16::MAX),
+    );
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let lines = match (&app.dir_picker, &app.menu) {
+        (Some(picker), _) => dir_picker_lines(picker, inner_width),
+        (None, Some(menu)) => menu_lines(menu, inner_width),
+        (None, None) => Vec::new(),
+    };
+    f.render_widget(Clear, area);
+    draw_panel(f, &title, lines, area);
+    app.overlay.set(Some(area));
+}
+
+/// Fläche des Overlays: `width` × `height`, zentriert in `target` und auf dessen Größe begrenzt.
+/// Passt es nicht in `target` (zu kleines Fenster), weicht es auf `fallback` aus (die ganze
+/// Fensterfläche).
+fn overlay_rect(target: Rect, fallback: Rect, width: u16, height: u16) -> Rect {
+    let fits = |r: Rect| r.width >= width && r.height >= height;
+    let area = if fits(target) || target.area() >= fallback.area() {
+        target
+    } else {
+        fallback
+    };
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    )
+}
+
+fn menu_width(menu: &Menu) -> usize {
+    menu.items
+        .iter()
+        .map(|item| 4 + item.label.chars().count())
+        .chain([MENU_FOOTER.chars().count()])
+        .max()
+        .unwrap_or(0)
+}
+
+fn dir_picker_rows(picker: &DirPicker) -> usize {
+    let recent = if picker.recent.is_empty() {
+        0
+    } else {
+        1 + picker.recent.len()
+    };
+    2 + recent
+}
+
+fn dir_picker_width(picker: &DirPicker) -> usize {
+    let input = picker.input.chars().count() + 3;
+    let recent = picker
+        .recent
+        .iter()
+        .map(|dir| dir.display().to_string().chars().count() + 1);
+    let error = picker.error.map_or(0, |e| e.chars().count() + 1);
+    recent
+        .chain([input, error, DIR_PICKER_HINT.chars().count()])
+        .max()
+        .unwrap_or(0)
+        .max(DIR_PICKER_MIN_WIDTH)
 }
 
 fn draw_windows(f: &mut Frame, app: &App) {
@@ -390,6 +474,46 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 .show_cursor(focused)
                 .selection(selection),
             inner,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WINDOWS: Rect = Rect::new(42, 0, 100, 40);
+
+    #[test]
+    fn overlay_is_centered_in_target() {
+        let target = Rect::new(42, 0, 50, 20);
+        assert_eq!(
+            overlay_rect(target, WINDOWS, 20, 10),
+            Rect::new(57, 5, 20, 10)
+        );
+    }
+
+    #[test]
+    fn overlay_falls_back_to_windows_area_when_target_too_small() {
+        let target = Rect::new(92, 20, 50, 8);
+        assert_eq!(
+            overlay_rect(target, WINDOWS, 30, 12),
+            Rect::new(77, 14, 30, 12)
+        );
+    }
+
+    #[test]
+    fn overlay_is_limited_to_area() {
+        assert_eq!(
+            overlay_rect(WINDOWS, WINDOWS, 200, 60),
+            WINDOWS,
+            "Ziel ist schon die ganze Fläche"
+        );
+        let target = Rect::new(42, 0, 50, 20);
+        assert_eq!(
+            overlay_rect(target, WINDOWS, 120, 10),
+            Rect::new(42, 15, 100, 10),
+            "auch die Ausweichfläche ist zu schmal"
         );
     }
 }

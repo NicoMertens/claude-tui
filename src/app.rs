@@ -79,6 +79,8 @@ pub struct App {
     last_list_click: Option<(Instant, String)>,
     /// Beim Zeichnen gemerkt: welche Bildschirmzeile der Liste welche Session zeigt.
     pub list_hits: RefCell<ListHits>,
+    /// Beim Zeichnen gemerkt: Fläche des Menü-Overlays (`None`, wenn keins offen ist).
+    pub overlay: std::cell::Cell<Option<Rect>>,
     /// Neuere Version auf GitHub, sobald die Prüfung beim Start eine gefunden hat.
     pub update: Option<Available>,
     update_check: Option<Receiver<Available>>,
@@ -113,6 +115,7 @@ impl App {
             last_click: None,
             last_list_click: None,
             list_hits: RefCell::new(ListHits::default()),
+            overlay: std::cell::Cell::new(None),
             update: None,
             update_check: update::spawn_check(),
             update_install: None,
@@ -325,6 +328,11 @@ impl App {
     /// = Wort) und kopiert beim Loslassen in die Zwischenablage.
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
         let position = Position::new(mouse.column, mouse.row);
+        // Das Overlay ist nur per Tastatur bedienbar; Klicks und Rad darauf erreichen das Fenster
+        // darunter nicht (keine Markierung, kein Scrollen hinter dem Menü).
+        if self.on_overlay(position) && !matches!(mouse.kind, MouseEventKind::Up(_)) {
+            return;
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let Some((_, id, cell)) = self.window_at(position) else {
@@ -391,6 +399,11 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn on_overlay(&self, position: Position) -> bool {
+        let open = self.menu.is_some() || self.dir_picker.is_some();
+        open && self.overlay.get().is_some_and(|r| r.contains(position))
     }
 
     /// Klick in die Sessionliste: Session auswählen und Fokus auf die Liste; ein zweiter Klick auf

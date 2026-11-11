@@ -33,7 +33,7 @@ claude-tui uninstall   # Programm und PATH-Eintrag entfernen (Einstellungen blei
 
 **Update-Prüfung:** Beim Start fragt claude-tui höchstens einmal am Tag im Hintergrund die GitHub-API
 nach dem neuesten Release (Zeitpunkt in `update-check.json` im Konfigurationsordner). Ist es neuer,
-zeigt die Menübox `vX.Y.Z available (u)`, und im Ctrl+A-Menü erscheint **`u` Update to vX.Y.Z**.
+zeigt die Box unter der Sessionliste `vX.Y.Z available (u)`, und im Ctrl+A-Menü erscheint **`u` Update to vX.Y.Z**.
 Das Update lädt das Archiv für die eigene Plattform, vergleicht es mit `sha256.sum` und ersetzt die
 laufende Datei; wirksam ab dem nächsten Start (die Fenster kommen über `state.json` zurück).
 Installiert wird nie ungefragt. `CLAUDE_TUI_NO_UPDATE_CHECK=1` schaltet die Prüfung ab.
@@ -81,7 +81,7 @@ you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` �
 | Taste | Wirkung |
 |---|---|
 | `Alt+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Alt+←` aus einem linken Fenster geht in die Sessionliste, `Alt+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
-| `Ctrl+A` | öffnet das Menü unter der Sessionliste |
+| `Ctrl+A` | öffnet das Menü mittig über dem fokussierten Fenster |
 
 `Alt+Pfeil` erreicht Claude dadurch nie; Wortsprünge im Eingabefeld gehen über `Ctrl+←/→`.
 
@@ -100,9 +100,12 @@ einen Zeilenumbruch ein.
 
 ### Menü (`Ctrl+A`)
 
-Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
-wird; ist es zu, zeigt die Box `Ctrl+A Menu` und im Rahmen, was gerade den Fokus hat
-(`Menue 2 – <Titel>` bzw. `Session list`). Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+Das Menü erscheint als Box mit blauem Rand mittig über dem fokussierten Fenster; hat die
+Sessionliste den Fokus oder ist kein Fenster offen, mittig über der ganzen Fensterfläche. Ist das
+fokussierte Fenster zu klein für das Menü, weicht es ebenfalls auf die ganze Fensterfläche aus.
+Genauso erscheinen Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Die kleine Box unter der
+Sessionliste zeigt immer `Ctrl+A Menu` und im Rahmen, was gerade den Fokus hat
+(`Menue 2 – <Titel>` bzw. `Session list`); die Liste bleibt beim offenen Menü gleich lang. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |
@@ -119,7 +122,7 @@ vom Fokus ab:
 (`~/.claude/projects/<Ordner>/<id>.jsonl` samt gleichnamigem Unterordner) — die Session ist danach
 auch für `claude --resume` weg.
 
-**Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui unten in der Sessionliste, in
+**Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui im Overlay, in
 welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.
 
 | Taste | Wirkung |
@@ -147,6 +150,10 @@ Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereigni
 **Auswählen per Klick:** Ein Klick in ein Fenster (auch auf Rahmen oder Titel) gibt ihm den Fokus.
 Ein Klick auf eine Session in der Sessionliste wählt sie aus und gibt der Liste den Fokus; ein
 **Doppelklick** darauf wirkt wie `Enter` (ins Fenster der Session springen bzw. Fensterauswahl).
+
+**Offenes Menü:** Ein Klick außerhalb des Menü-Overlays schließt es und wirkt wie oben beschrieben.
+Klicks und Mausrad auf dem Overlay selbst tun nichts (das Menü wird per Tastatur bedient) und
+erreichen das Fenster darunter nicht.
 
 **Markieren und Kopieren:** Mit gedrückter linker Maustaste in einem Fenster ziehen markiert Text
 (blau hinterlegt) — nur innerhalb dieses Fensters, auch wenn die Maus darüber hinaus gezogen wird.
