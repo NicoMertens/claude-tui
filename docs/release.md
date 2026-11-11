@@ -6,8 +6,8 @@ Voraussetzung: Rust über [rustup](https://rustup.rs) (unter Windows zusätzlich
 „Desktopentwicklung mit C++“-Build-Tools von Visual Studio).
 
 ```powershell
-./build.ps1     # Windows: source\target\release\claude-tui.exe → output\
-./build.sh      # Linux/macOS
+./build/build.ps1  # Windows: source\target\release\claude-tui.exe → output\
+./build/build.sh  # Linux/macOS
 ```
 
 `output/` ist im Git ignoriert, nur `.gitkeep` liegt drin.

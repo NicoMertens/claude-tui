@@ -21,12 +21,13 @@ rechts die aktive Session in einem echten PTY. Die Idee stammt von
 |---|---|
 | `source/` | Rust-Quellcode (Cargo-Projekt) |
 | `docs/` | Dokumentation: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Build & Release](docs/release.md) |
-| `output/` | Lokal gebaute App (`build.ps1` / `build.sh`), nicht im Git |
+| `build/` | Build-Skripte für lokale Builds |
+| `output/` | Lokal gebaute App (`build/build.ps1` / `build/build.sh`), nicht im Git |
 
 ## Schnellstart
 
 ```powershell
-./build.ps1            # baut und kopiert nach output\
+./build/build.ps1      # baut und kopiert nach output\
 ./output/claude-tui    # startet mit `claude` in jeder Session
 ```
 

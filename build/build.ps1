@@ -1,6 +1,6 @@
 # Baut claude-tui im Release-Modus und legt das Binary in output\ ab.
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+$root = Split-Path $PSScriptRoot -Parent
 
 Push-Location (Join-Path $root 'source')
 try {
