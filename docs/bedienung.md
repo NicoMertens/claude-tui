@@ -51,7 +51,7 @@ dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust · arbeitet`. D
 | Taste | Wirkung |
 |---|---|
 | `Alt+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Alt+←` aus einem linken Fenster geht in die Sessionliste, `Alt+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
-| `Ctrl+A` | öffnet das Menü unten in der Sessionliste |
+| `Ctrl+A` | öffnet das Menü unter der Sessionliste |
 
 `Alt+Pfeil` erreicht Claude dadurch nie; Wortsprünge im Eingabefeld gehen über `Ctrl+←/→`.
 
@@ -70,7 +70,8 @@ einen Zeilenumbruch ein.
 
 ### Menü (`Ctrl+A`)
 
-Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
+wird. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |

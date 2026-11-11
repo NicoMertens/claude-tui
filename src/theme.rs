@@ -11,6 +11,8 @@ pub const FOCUS: Color = Color::Rgb(0xF0, 0xA2, 0x7F);
 /// Rahmen und Titel aller anderen Bereiche.
 pub const UNFOCUS: Color = Color::Rgb(0x8C, 0x4A, 0x32);
 pub const BG: Color = Color::Rgb(0x1A, 0x19, 0x18);
+/// Rand, Titel und Auswahl des Menüs (eigene Box unter der Sessionliste).
+pub const MENU: Color = Color::Rgb(0x00, 0x9F, 0xDA);
 /// Hintergrund der ausgewählten Zeile in der Sessionliste.
 pub const SELECTED_BG: Color = Color::Rgb(0x33, 0x2D, 0x29);
 pub const TEXT: Color = Color::Rgb(0xEC, 0xE9, 0xE4);

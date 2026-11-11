@@ -49,7 +49,29 @@ fn frame_color(focused: bool) -> Color {
     }
 }
 
+/// Mindesthöhe der Sessionliste, wenn darunter das Menü offen ist.
+const MIN_LIST_HEIGHT: u16 = 5;
+
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    // Menü bzw. Verzeichnisauswahl: eigene Box unter der Sessionliste.
+    let panel_width = area.width.saturating_sub(2) as usize;
+    let panel = match (&app.dir_picker, &app.menu) {
+        (Some(picker), _) => Some((
+            "Verzeichnis".to_string(),
+            dir_picker_lines(picker, panel_width),
+        )),
+        (None, Some(menu)) => Some((menu.title.clone(), menu_lines(menu, panel_width))),
+        (None, None) => None,
+    };
+    let panel_height = panel.as_ref().map_or(0, |(_, lines)| {
+        (lines.len() as u16 + 2).min(area.height.saturating_sub(MIN_LIST_HEIGHT))
+    });
+    let [list_box, panel_box] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(panel_height)]).areas(area);
+    if let Some((title, lines)) = panel {
+        draw_panel(f, &title, lines, panel_box);
+    }
+
     let focused = app.windows.focus() == Focus::List;
     let title = Span::styled(
         " ✻ claude-tui ",
@@ -58,17 +80,17 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     );
     let block = rounded(frame_color(focused)).title(Line::from(title));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = block.inner(list_box);
+    f.render_widget(block, list_box);
 
     let width = inner.width as usize;
-    let mut bottom_lines = match (&app.dir_picker, &app.menu) {
-        (Some(picker), _) => dir_picker_lines(picker, width),
-        (None, Some(menu)) => menu_lines(menu, width),
-        (None, None) => vec![Line::from(vec![
+    let mut bottom_lines = if panel_height == 0 {
+        vec![Line::from(vec![
             Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
             Span::styled(" Menü", Style::default().fg(theme::MUTED)),
-        ])],
+        ])]
+    } else {
+        Vec::new()
     };
     if let Some(notice) = &app.notice {
         let line = Line::from(Span::styled(
@@ -90,6 +112,21 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(bottom_lines), bottom);
 }
 
+/// Box mit blauem Rand für Menü, Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Passt der
+/// Inhalt nicht ganz hinein, bleiben die unteren Zeilen sichtbar.
+fn draw_panel(f: &mut Frame, title: &str, mut lines: Vec<Line<'static>>, area: Rect) {
+    let block = rounded(theme::MENU).title(Line::from(Span::styled(
+        format!(" {title} "),
+        Style::default()
+            .fg(theme::MENU)
+            .add_modifier(Modifier::BOLD),
+    )));
+    let inner = block.inner(area);
+    let skip = lines.len().saturating_sub(inner.height as usize);
+    lines.drain(..skip);
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn section_title(title: &str) -> Line<'static> {
     Line::from(Span::styled(
         format!("── {title} "),
@@ -104,10 +141,10 @@ fn muted(text: &str) -> Line<'static> {
     ))
 }
 
-/// Zeile über die ganze Breite, ausgewählt in Akzentfarbe hinterlegt.
+/// Zeile über die ganze Breite, ausgewählt in der Menüfarbe hinterlegt.
 fn selectable(text: String, selected: bool, width: usize) -> Line<'static> {
     let style = if selected {
-        Style::default().fg(theme::BG).bg(theme::ACCENT)
+        Style::default().fg(theme::BG).bg(theme::MENU)
     } else {
         Style::default().fg(theme::TEXT)
     };
@@ -126,15 +163,14 @@ fn tail(text: &str, width: usize) -> String {
 }
 
 fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![section_title("Verzeichnis")];
-    lines.push(Line::from(vec![
+    let mut lines = vec![Line::from(vec![
         Span::styled("> ", Style::default().fg(theme::ACCENT)),
         Span::styled(
             tail(&picker.input, width.saturating_sub(3)),
             Style::default().fg(theme::TEXT),
         ),
         Span::styled("█", Style::default().fg(theme::ACCENT)),
-    ]));
+    ])];
     if !picker.recent.is_empty() {
         lines.push(section_title("zuletzt"));
         for (i, dir) in picker.recent.iter().enumerate() {
@@ -242,7 +278,7 @@ fn short_age(since: Duration) -> String {
 
 /// Menü unten in der Sessionliste, nach unten ausgerichtet.
 fn menu_lines(menu: &Menu, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![section_title(&menu.title)];
+    let mut lines = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
         let text = format!(" {:<3}{}", item.hotkey.label(), item.label);
         lines.push(selectable(text, i == menu.selected, width));
