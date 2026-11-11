@@ -59,10 +59,10 @@ fn frame_color(focused: bool) -> Color {
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
-    // Kompakte Box unter der Liste: wie sich das Menü öffnet (und ob ein Update wartet), im Rahmen
-    // was gerade den Fokus hat. Das Menü selbst erscheint als Overlay über den Fenstern.
-    let panel_width = area.width.saturating_sub(2) as usize;
+    // Das Menü erscheint als Overlay über den Fenstern; im unteren Rahmen der Liste steht nur, wie es
+    // sich öffnet (und ob ein Update wartet).
     let mut hint = vec![
+        Span::raw(" "),
         Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
         Span::styled(" Menu", Style::default().fg(theme::MUTED)),
     ];
@@ -72,23 +72,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(theme::MENU),
         ));
     }
-    let focus = match app.windows.focus() {
-        Focus::Window(slot) => {
-            let title = app
-                .windows
-                .focused_session()
-                .map(|id| app.title_of(id))
-                .unwrap_or_default();
-            head(
-                &format!("Menue {} – {title}", slot + 1),
-                panel_width.saturating_sub(4),
-            )
-        }
-        Focus::List => "Session list".to_string(),
-    };
-    let [list_box, panel_box] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(area);
-    draw_panel(f, &focus, vec![Line::from(hint)], panel_box);
+    hint.push(Span::raw(" "));
 
     let focused = app.windows.focus() == Focus::List;
     let title = Span::styled(
@@ -97,9 +81,11 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             .fg(theme::ACCENT)
             .add_modifier(Modifier::BOLD),
     );
-    let block = rounded(frame_color(focused)).title(Line::from(title));
-    let inner = block.inner(list_box);
-    f.render_widget(block, list_box);
+    let block = rounded(frame_color(focused))
+        .title(Line::from(title))
+        .title_bottom(Line::from(hint));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let width = inner.width as usize;
     let mut bottom_lines = Vec::new();
@@ -342,19 +328,23 @@ fn draw_overlay(f: &mut Frame, app: &App) {
         }
     };
     let screen = f.area();
-    let [_, windows] = split(screen);
-    let target = match app.windows.focus() {
-        Focus::Window(slot) => app.window_rects().get(slot).copied().unwrap_or(windows),
-        Focus::List => windows,
-    }
-    .intersection(screen);
-    let windows = windows.intersection(screen);
+    let [sidebar, windows] = split(screen);
+    // Fokus auf der Liste: mittig über der Sessionliste und auf sie begrenzt (kein Ausweichen).
+    let (target, fallback) = match app.windows.focus() {
+        Focus::Window(slot) => (
+            app.window_rects().get(slot).copied().unwrap_or(windows),
+            windows,
+        ),
+        Focus::List => (sidebar, sidebar),
+    };
+    let target = target.intersection(screen);
+    let fallback = fallback.intersection(screen);
     // Rahmen links/rechts; der Titel braucht zusätzlich je ein Leerzeichen davor und dahinter.
     let width = content_width.max(title.chars().count() + 2) + 2;
     let height = rows + 2;
     let area = overlay_rect(
         target,
-        windows,
+        fallback,
         u16::try_from(width).unwrap_or(u16::MAX),
         u16::try_from(height).unwrap_or(u16::MAX),
     );
