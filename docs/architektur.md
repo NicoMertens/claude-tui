@@ -96,8 +96,11 @@ Die Datei `hooks.json` im Konfigurationsordner wird bei jedem Start einer Sessio
 Jeder Eintrag nutzt die **Exec-Form** (`command` = Pfad der eigenen Binary aus
 `std::env::current_exe()`, `args` = `["hook", "<Event>"]`): Claude startet die Binary dann direkt
 ohne Shell, Pfade mit Leerzeichen brauchen kein Quoting (die Shell-Form liefe unter Windows über
-Git Bash oder PowerShell). Die Hooks laufen synchron mit 5 s Timeout, damit die Meldungen in der
-Reihenfolge der Events ankommen; ein Aufruf dauert Millisekunden.
+Git Bash oder PowerShell). Die Hooks laufen **asynchron** (`"async": true`) mit 30 s Timeout. Ein
+Aufruf selbst dauert Millisekunden, aber ein Virenscanner kann den Start der unsignierten Binary um
+10 s und mehr verzögern. Synchron blockierte das jeden Prompt und jedes Werkzeug und lief in den
+Timeout. Preis dafür: Die Aufrufe laufen parallel, eine verspätete Meldung kann eine neuere
+überschreiben. Die Seitenleiste zeigt dann bis zum nächsten Event einen veralteten Zustand.
 
 `claude-tui hook <Event>` liest das Hook-JSON von stdin und schreibt `<Zustand> <Unix-ms>` nach
 `<Konfigurationsordner>/status/<ID>` (erst temporäre Datei, dann umbenennen). Als `<ID>` dient

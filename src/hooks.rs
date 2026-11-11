@@ -20,8 +20,9 @@ use crate::{paths, session::Status};
 pub const SESSION_ENV: &str = "CLAUDE_TUI_SESSION";
 const STATUS_DIR: &str = "status";
 const SETTINGS_FILE: &str = "hooks.json";
-/// Obergrenze je Hook-Aufruf in Sekunden; der Aufruf selbst dauert nur Millisekunden.
-const HOOK_TIMEOUT: u64 = 5;
+/// Obergrenze je Hook-Aufruf in Sekunden. Der Aufruf selbst dauert Millisekunden, aber ein
+/// Virenscanner kann den Start der unsignierten Binary um 10 s und mehr verzögern.
+const HOOK_TIMEOUT: u64 = 30;
 /// Statusdateien, die so lange unverändert sind, stammen aus abgebrochenen Läufen.
 const STALE_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -203,6 +204,8 @@ pub fn purge_stale() {
 
 /// Inhalt der `--settings`-Datei: je Event ein Hook in Exec-Form (`command` + `args`). Claude
 /// startet die Binary dann direkt ohne Shell, Pfade mit Leerzeichen brauchen kein Quoting.
+/// `async`, weil ein langsamer Start sonst jeden Prompt und jedes Werkzeug blockiert; dafür kann
+/// eine verspätete Meldung kurz eine neuere überschreiben, bis das nächste Event kommt.
 fn settings(exe: &str) -> Value {
     let hooks: serde_json::Map<String, Value> = EVENTS
         .iter()
@@ -211,6 +214,7 @@ fn settings(exe: &str) -> Value {
                 "type": "command",
                 "command": exe,
                 "args": ["hook", event],
+                "async": true,
                 "timeout": HOOK_TIMEOUT,
             });
             (event.to_string(), json!([{ "hooks": [handler] }]))
@@ -315,6 +319,7 @@ mod tests {
             r"C:\Program Files\claude-tui\claude-tui.exe"
         );
         assert_eq!(stop["args"], json!(["hook", "Stop"]));
+        assert_eq!(stop["async"], json!(true));
         assert_eq!(value["hooks"].as_object().unwrap().len(), EVENTS.len());
     }
 }
