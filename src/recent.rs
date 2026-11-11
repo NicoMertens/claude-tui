@@ -8,18 +8,13 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use crate::paths;
+
 const MAX_ENTRIES: usize = 10;
 const FILE_NAME: &str = "recent-dirs.txt";
 
 fn file() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-    };
-    base.map(|b| b.join("claude-tui").join(FILE_NAME))
+    paths::config_dir().map(|d| d.join(FILE_NAME))
 }
 
 /// Liest die Liste; fehlt die Datei, ist sie leer.

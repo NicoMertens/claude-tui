@@ -1,0 +1,269 @@
+//! Liest die gespeicherten Sessions von Claude Code (`~/.claude/projects/<Ordner>/<id>.jsonl`).
+//!
+//! Die Protokolle wachsen nur am Ende; je Datei wird deshalb nur das Neue seit dem letzten Lesen
+//! ausgewertet. Gebraucht werden Arbeitsverzeichnis (`cwd`) und Titel: eigener Name
+//! (`custom-title`, per `/rename`), sonst KI-Titel (`ai-title`), sonst der letzte Prompt.
+
+use std::{
+    collections::HashMap,
+    fs,
+    io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
+
+use serde::Deserialize;
+
+use crate::paths;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredSession {
+    pub id: String,
+    pub cwd: PathBuf,
+    pub title: String,
+    pub modified: SystemTime,
+}
+
+#[derive(Debug, Default)]
+struct Info {
+    cwd: Option<PathBuf>,
+    custom_title: Option<String>,
+    ai_title: Option<String>,
+    last_prompt: Option<String>,
+}
+
+impl Info {
+    fn title(&self) -> Option<&str> {
+        self.custom_title
+            .as_deref()
+            .or(self.ai_title.as_deref())
+            .or(self.last_prompt.as_deref())
+    }
+}
+
+#[derive(Debug)]
+struct FileState {
+    id: String,
+    /// Bis hierhin (Bytes) ist die Datei ausgewertet; danach höchstens eine unvollständige Zeile.
+    offset: u64,
+    modified: SystemTime,
+    info: Info,
+}
+
+/// Nur die Felder, die hier gebraucht werden; alles andere ignoriert serde.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Line {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    cwd: Option<PathBuf>,
+    custom_title: Option<String>,
+    ai_title: Option<String>,
+    last_prompt: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct Store {
+    root: Option<PathBuf>,
+    files: HashMap<PathBuf, FileState>,
+}
+
+impl Store {
+    pub fn new() -> Self {
+        Self::with_root(paths::claude_projects_dir())
+    }
+
+    fn with_root(root: Option<PathBuf>) -> Self {
+        Self {
+            root,
+            files: HashMap::new(),
+        }
+    }
+
+    /// Sucht neue und gewachsene Protokolle und wertet das Neue aus. Fehler beim Lesen einzelner
+    /// Dateien werden übergangen: die Liste ist eine Anzeige, kein Muss.
+    pub fn refresh(&mut self) {
+        let Some(root) = self.root.as_deref() else {
+            return;
+        };
+        let Ok(projects) = fs::read_dir(root) else {
+            return;
+        };
+        let mut seen = Vec::new();
+        for project in projects.flatten() {
+            let Ok(files) = fs::read_dir(project.path()) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let path = file.path();
+                if path.extension().is_some_and(|e| e == "jsonl") {
+                    if let Ok(meta) = file.metadata() {
+                        update_file(&mut self.files, &path, meta.len(), meta.modified().ok());
+                        seen.push(path);
+                    }
+                }
+            }
+        }
+        self.files.retain(|path, _| seen.contains(path));
+    }
+
+    /// Sessions mit Arbeitsverzeichnis und Titel (leere Sessions ohne Prompt fallen weg).
+    pub fn sessions(&self) -> Vec<StoredSession> {
+        self.files.values().filter_map(stored).collect()
+    }
+
+    pub fn get(&self, id: &str) -> Option<StoredSession> {
+        self.files.values().find(|f| f.id == id).and_then(stored)
+    }
+}
+
+fn stored(file: &FileState) -> Option<StoredSession> {
+    Some(StoredSession {
+        id: file.id.clone(),
+        cwd: file.info.cwd.clone()?,
+        title: one_line(file.info.title()?),
+        modified: file.modified,
+    })
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn update_file(
+    files: &mut HashMap<PathBuf, FileState>,
+    path: &Path,
+    len: u64,
+    modified: Option<SystemTime>,
+) {
+    let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let state = files
+        .entry(path.to_path_buf())
+        .or_insert_with(|| FileState {
+            id: id.to_string(),
+            offset: 0,
+            modified: SystemTime::UNIX_EPOCH,
+            info: Info::default(),
+        });
+    if let Some(modified) = modified {
+        state.modified = modified;
+    }
+    if len < state.offset {
+        // Datei wurde neu geschrieben: von vorn.
+        state.offset = 0;
+        state.info = Info::default();
+    }
+    if len == state.offset {
+        return;
+    }
+    if let Ok(read) = read_from(path, state.offset) {
+        state.offset += apply(&mut state.info, &read) as u64;
+    }
+}
+
+fn read_from(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
+    let mut file = fs::File::open(path)?;
+    file.seek(SeekFrom::Start(offset))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Wertet alle vollständigen Zeilen aus und liefert, wie viele Bytes verbraucht sind.
+fn apply(info: &mut Info, bytes: &[u8]) -> usize {
+    let Some(end) = bytes.iter().rposition(|&b| b == b'\n') else {
+        return 0;
+    };
+    for raw in bytes[..end].split(|&b| b == b'\n') {
+        let Ok(text) = std::str::from_utf8(raw) else {
+            continue;
+        };
+        // Billiger Vorfilter: die meisten Zeilen sind Nachrichten, die hier nichts beitragen.
+        let wanted = (info.cwd.is_none() && text.contains("\"cwd\""))
+            || text.contains("\"custom-title\"")
+            || text.contains("\"ai-title\"")
+            || text.contains("\"last-prompt\"");
+        if !wanted {
+            continue;
+        }
+        let Ok(line) = serde_json::from_str::<Line>(text) else {
+            continue;
+        };
+        if info.cwd.is_none() {
+            info.cwd = line.cwd;
+        }
+        match line.kind.as_deref() {
+            Some("custom-title") => {
+                info.custom_title = line.custom_title.or(info.custom_title.take())
+            }
+            Some("ai-title") => info.ai_title = line.ai_title.or(info.ai_title.take()),
+            Some("last-prompt") => info.last_prompt = line.last_prompt.or(info.last_prompt.take()),
+            _ => {}
+        }
+    }
+    end + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_title_wins_over_ai_title_and_prompt() {
+        let mut info = Info::default();
+        let text = concat!(
+            r#"{"type":"user","cwd":"S:\\private","message":"hallo"}"#,
+            "\n",
+            r#"{"type":"last-prompt","lastPrompt":"mach was"}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTitle":"KI-Titel"}"#,
+            "\n",
+        );
+        apply(&mut info, text.as_bytes());
+        assert_eq!(info.cwd, Some(PathBuf::from("S:\\private")));
+        assert_eq!(info.title(), Some("KI-Titel"));
+
+        apply(
+            &mut info,
+            b"{\"type\":\"custom-title\",\"customTitle\":\"eigener Name\"}\n",
+        );
+        assert_eq!(info.title(), Some("eigener Name"));
+    }
+
+    #[test]
+    fn incomplete_last_line_is_kept_for_later() {
+        let mut info = Info::default();
+        let text = b"{\"type\":\"ai-title\",\"aiTitle\":\"A\"}\n{\"type\":\"ai-ti";
+        let used = apply(&mut info, text);
+        assert_eq!(used, text.iter().position(|&b| b == b'\n').unwrap_or(0) + 1);
+        assert_eq!(info.ai_title.as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn store_reads_files_incrementally() {
+        let root = std::env::temp_dir().join(format!("claude-tui-store-{}", std::process::id()));
+        let project = root.join("S--demo");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&project).expect("Testordner");
+        let file = project.join("abc.jsonl");
+        fs::write(&file, "{\"type\":\"user\",\"cwd\":\"/demo\"}\n").expect("schreiben");
+
+        let mut store = Store::with_root(Some(root.clone()));
+        store.refresh();
+        assert!(
+            store.sessions().is_empty(),
+            "ohne Titel/Prompt ausgeblendet"
+        );
+
+        let mut content = fs::read_to_string(&file).expect("lesen");
+        content.push_str("{\"type\":\"last-prompt\",\"lastPrompt\":\"zeile\\neins\"}\n");
+        fs::write(&file, content).expect("schreiben");
+        store.refresh();
+        let session = store.get("abc").expect("Session");
+        assert_eq!(session.cwd, PathBuf::from("/demo"));
+        assert_eq!(session.title, "zeile eins");
+        let _ = fs::remove_dir_all(root);
+    }
+}

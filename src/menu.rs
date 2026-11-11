@@ -48,7 +48,10 @@ pub struct Item {
 pub enum Purpose {
     /// Neue Session im gewählten Verzeichnis.
     NewSession(PathBuf),
+    /// Laufende Session anzeigen.
     Show(SessionId),
+    /// Gespeicherte Claude-Session fortsetzen (`--resume`).
+    Resume(String),
 }
 
 #[derive(Debug)]
@@ -74,7 +77,8 @@ pub struct Context<'a> {
     pub windows: &'a [String],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
-    pub has_sessions: bool,
+    /// Die in der Liste ausgewählte Session läuft (nur dann lässt sie sich beenden).
+    pub selected_running: bool,
 }
 
 impl Menu {
@@ -93,7 +97,7 @@ impl Menu {
         if in_window || ctx.selected_has_window {
             add(Hotkey::Char('c'), "Fenster schließen", Action::CloseWindow);
         }
-        if in_window || ctx.has_sessions {
+        if in_window || ctx.selected_running {
             add(Hotkey::Char('x'), "Session beenden", Action::KillSession);
         }
         for i in 0..ctx.windows.len() {
@@ -211,7 +215,7 @@ mod tests {
             focus: Focus::Window(0),
             windows: &windows,
             selected_has_window: true,
-            has_sessions: true,
+            selected_running: true,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -227,7 +231,7 @@ mod tests {
             focus: Focus::List,
             windows: &windows,
             selected_has_window: false,
-            has_sessions: true,
+            selected_running: true,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
         assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));

@@ -7,7 +7,9 @@ use ratatui::{
 };
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use crate::{app::App, dirpick::DirPicker, keys, menu::Menu, theme, windows::Focus};
+use std::time::SystemTime;
+
+use crate::{app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, theme, windows::Focus};
 
 const SIDEBAR_WIDTH: u16 = 34;
 
@@ -66,6 +68,13 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Menü", Style::default().fg(theme::MUTED)),
         ])],
     };
+    if let Some(notice) = &app.notice {
+        let line = Line::from(Span::styled(
+            head(notice, width),
+            Style::default().fg(theme::WAITING),
+        ));
+        bottom_lines.insert(0, line);
+    }
     // Passt der untere Teil nicht ganz hinein, bleiben seine unteren Zeilen sichtbar.
     let skip = bottom_lines.len().saturating_sub(inner.height as usize);
     bottom_lines.drain(..skip);
@@ -142,46 +151,86 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
 }
 
 fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .sessions
-        .iter()
-        .enumerate()
-        .map(|(i, session)| {
-            let selected = i == app.cursor;
-            let (label, color) = theme::status(session.status);
-            let name_style = if selected {
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::MUTED)
-            };
-            let mut first = vec![
-                Span::styled(
-                    if selected { "▌" } else { " " },
-                    Style::default().fg(theme::ACCENT),
-                ),
-                Span::styled(session.name.clone(), name_style),
-            ];
-            if let Some(slot) = app.windows.window_of(session.id) {
-                first.push(Span::styled(
-                    format!(" [{}]", slot + 1),
-                    Style::default().fg(theme::ACCENT),
-                ));
+    let width = area.width as usize;
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut selected_item = None;
+    for group in &app.groups {
+        let header = tail(&group.cwd.display().to_string(), width.saturating_sub(3));
+        items.push(ListItem::new(muted(&format!("── {header}"))));
+        for entry in &group.entries {
+            let selected = app.cursor.as_deref() == Some(entry.claude_id.as_str());
+            if selected {
+                selected_item = Some(items.len());
             }
-            ListItem::new(vec![
-                Line::from(first),
-                Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled("● ", Style::default().fg(color)),
-                    Span::styled(label, Style::default().fg(color)),
-                ]),
-            ])
-        })
-        .collect();
-
-    let mut state = ListState::default().with_selected(Some(app.cursor));
+            items.push(entry_item(app, entry, selected, width));
+        }
+    }
+    let mut state = ListState::default().with_selected(selected_item);
     f.render_stateful_widget(List::new(items), area, &mut state);
+}
+
+/// Zwei Zeilen: Titel mit Fensternummer, darunter Status (laufend) oder Alter (gespeichert).
+fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
+    let slot = entry.running.and_then(|id| app.windows.window_of(id));
+    let suffix = slot.map(|s| format!(" [{}]", s + 1)).unwrap_or_default();
+    let title_width = width.saturating_sub(2 + suffix.chars().count());
+    let name_style = match (selected, entry.running.is_some()) {
+        (true, _) => Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD),
+        (false, true) => Style::default().fg(theme::TEXT),
+        (false, false) => Style::default().fg(theme::MUTED),
+    };
+    let first = Line::from(vec![
+        Span::styled(
+            if selected { "▌ " } else { "  " },
+            Style::default().fg(theme::ACCENT),
+        ),
+        Span::styled(head(&entry.title, title_width), name_style),
+        Span::styled(suffix, Style::default().fg(theme::ACCENT)),
+    ]);
+    let status = entry
+        .running
+        .and_then(|id| app.session(id))
+        .map(|s| s.status);
+    let second = match status {
+        Some(status) => {
+            let (label, color) = theme::status(status);
+            Line::from(vec![
+                Span::raw("    "),
+                Span::styled("● ", Style::default().fg(color)),
+                Span::styled(label, Style::default().fg(color)),
+            ])
+        }
+        None => muted(&format!(
+            "    {}",
+            entry.modified.map(age).unwrap_or_default()
+        )),
+    };
+    ListItem::new(vec![first, second])
+}
+
+/// Kürzt hinten mit „…“ (für Titel).
+fn head(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let keep: String = text.chars().take(width.saturating_sub(1)).collect();
+    format!("{keep}…")
+}
+
+/// „vor 5 Min.“, „vor 3 Std.“, „vor 2 Tagen“.
+fn age(modified: SystemTime) -> String {
+    let secs = SystemTime::now()
+        .duration_since(modified)
+        .map_or(0, |d| d.as_secs());
+    match secs {
+        0..=59 => "gerade eben".to_string(),
+        60..=3599 => format!("vor {} Min.", secs / 60),
+        3600..=86_399 => format!("vor {} Std.", secs / 3600),
+        86_400..=172_799 => "vor 1 Tag".to_string(),
+        _ => format!("vor {} Tagen", secs / 86_400),
+    }
 }
 
 /// Menü unten in der Sessionliste, nach unten ausgerichtet.
@@ -214,7 +263,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let focused = app.windows.focus() == Focus::Window(slot);
         let color = frame_color(focused);
         let title = Span::styled(
-            format!(" {} · {} ", slot + 1, session.name),
+            format!(" {} · {} ", slot + 1, app.title_of(id)),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         );
         let block = rounded(color).title(Line::from(title));

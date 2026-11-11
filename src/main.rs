@@ -1,10 +1,14 @@
 mod app;
+mod claude_store;
 mod dirpick;
 mod keys;
 mod layout;
+mod list;
 mod menu;
+mod paths;
 mod recent;
 mod session;
+mod state;
 mod theme;
 mod ui;
 mod windows;
@@ -29,7 +33,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("-h" | "--help") => {
-            println!("Aufruf: claude-tui [BEFEHL]\n\nBEFEHL wird in jeder Session gestartet (Standard: claude).");
+            println!("Aufruf: claude-tui [BEFEHL]\n\nBEFEHL startet Claude Code (Standard: claude); claude-tui hängt --session-id bzw. --resume an.");
             return Ok(());
         }
         _ => {}

@@ -1,33 +1,57 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context as _, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Margin, Rect};
 
 use crate::{
+    claude_store::Store,
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
     keys,
     layout::{self, Direction},
+    list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{Action, Context, Menu, Outcome, Purpose},
     recent,
     session::{Session, Status},
-    windows::{Focus, SessionId, Windows},
+    state::{self, State},
+    windows::{Focus, SessionId, Windows, MAX_WINDOWS},
 };
 
+/// So oft wird `~/.claude/projects` nach neuen Sessions und Titeln durchsucht.
+const STORE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Wie ein Claude-Prozess gestartet wird.
+enum Launch {
+    /// Neue Session mit vorgegebener ID (`--session-id`), damit sie sich später fortsetzen lässt.
+    New,
+    /// Gespeicherte Session fortsetzen (`--resume`).
+    Resume(String),
+}
+
 pub struct App {
+    /// Laufende Claude-Prozesse.
     pub sessions: Vec<Session>,
     pub windows: Windows,
-    /// Ausgewählte Zeile der Sessionliste.
-    pub cursor: usize,
+    /// Sessionliste: gespeicherte und laufende Sessions, gruppiert nach Verzeichnis.
+    pub groups: Vec<Group>,
+    /// Claude-ID der in der Liste ausgewählten Session.
+    pub cursor: Option<String>,
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
+    /// Hinweis unten in der Sessionliste (z. B. Startfehler); verschwindet mit der nächsten Taste.
+    pub notice: Option<String>,
     pub should_quit: bool,
     command: String,
     /// Verzeichnis, aus dem claude-tui gestartet wurde.
     start_dir: PathBuf,
     /// Zuletzt genutzte Startverzeichnisse, neueste zuerst.
     recent: Vec<PathBuf>,
+    store: Store,
+    last_scan: Instant,
     /// Fläche rechts neben der Sessionliste, auf die die Fenster verteilt werden.
     area: Rect,
     next_id: SessionId,
@@ -35,24 +59,54 @@ pub struct App {
 
 impl App {
     pub fn new(command: String, area: Rect) -> Result<Self> {
+        let mut store = Store::new();
+        store.refresh();
         let mut app = Self {
             sessions: Vec::new(),
             windows: Windows::default(),
-            cursor: 0,
+            groups: Vec::new(),
+            cursor: None,
             menu: None,
             dir_picker: None,
+            notice: None,
             should_quit: false,
             command,
             start_dir: std::env::current_dir().context("aktuelles Verzeichnis nicht lesbar")?,
             recent: recent::load(),
+            store,
+            last_scan: Instant::now(),
             area,
             next_id: 0,
         };
-        // Die erste Session startet ohne Auswahl im Startverzeichnis.
-        let start_dir = app.start_dir.clone();
-        let id = app.spawn(&start_dir)?;
-        app.place(id, 0);
+        app.restore();
+        if app.windows.len() == 0 {
+            // Nichts wiederherzustellen: erste Session ohne Auswahl im Startverzeichnis.
+            let start_dir = app.start_dir.clone();
+            let id = app.spawn(&start_dir, Launch::New)?;
+            app.place(id, 0);
+        }
+        app.rebuild_list();
         Ok(app)
+    }
+
+    /// Stellt das Fensterlayout des letzten Laufs wieder her; jede Session darin wird fortgesetzt.
+    fn restore(&mut self) {
+        let saved = state::load();
+        for claude_id in saved.windows {
+            let Some(stored) = self.store.get(&claude_id) else {
+                continue;
+            };
+            match self.spawn(&stored.cwd, Launch::Resume(claude_id)) {
+                Ok(id) => self.place(id, self.windows.len()),
+                Err(e) => self.notice = Some(format!("{e:#}")),
+            }
+        }
+        let focus = match saved.focus {
+            Some(slot) if slot < self.windows.len() => Focus::Window(slot),
+            _ if self.windows.len() > 0 => Focus::Window(0),
+            _ => Focus::List,
+        };
+        self.set_focus(focus);
     }
 
     pub fn session(&self, id: SessionId) -> Option<&Session> {
@@ -63,8 +117,20 @@ impl App {
         self.sessions.iter_mut().find(|s| s.id == id)
     }
 
-    fn selected_id(&self) -> Option<SessionId> {
-        self.sessions.get(self.cursor).map(|s| s.id)
+    /// Titel einer laufenden Session, wie ihn die Sessionliste zeigt.
+    pub fn title_of(&self, id: SessionId) -> String {
+        list::flatten(&self.groups)
+            .find(|e| e.running == Some(id))
+            .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone())
+    }
+
+    pub fn selected_entry(&self) -> Option<&Entry> {
+        let cursor = self.cursor.as_deref()?;
+        list::flatten(&self.groups).find(|e| e.claude_id == cursor)
+    }
+
+    fn selected_running(&self) -> Option<SessionId> {
+        self.selected_entry().and_then(|e| e.running)
     }
 
     /// Rechtecke der Fenster in Nummernreihenfolge.
@@ -76,22 +142,53 @@ impl App {
         for session in &mut self.sessions {
             session.refresh();
         }
-        // Beendete Sessions verlieren ihr Fenster, bleiben aber als „beendet“ in der Liste.
+        // Beendete Prozesse verschwinden; die Claude-Session bleibt in der Liste.
         let exited: Vec<SessionId> = self
             .sessions
             .iter()
-            .filter(|s| s.status == Status::Exited && self.windows.window_of(s.id).is_some())
+            .filter(|s| s.status == Status::Exited)
             .map(|s| s.id)
             .collect();
-        if !exited.is_empty() {
-            for id in exited {
-                self.windows.remove_session(id);
+        for id in exited {
+            if self.windows.window_of(id).is_some() {
+                self.notice = Some(format!("„{}“ wurde beendet", self.title_of(id)));
             }
-            self.after_layout_change();
+            self.remove_process(id);
+        }
+        if self.last_scan.elapsed() >= STORE_INTERVAL {
+            self.store.refresh();
+            self.last_scan = Instant::now();
+        }
+        self.rebuild_list();
+    }
+
+    fn rebuild_list(&mut self) {
+        let running: Vec<Running> = self
+            .sessions
+            .iter()
+            .map(|s| Running {
+                id: s.id,
+                claude_id: s.claude_id.clone(),
+                cwd: s.cwd.clone(),
+            })
+            .collect();
+        self.groups = list::build(self.store.sessions(), &running);
+        if self.selected_entry().is_none() {
+            self.cursor = list::flatten(&self.groups)
+                .next()
+                .map(|e| e.claude_id.clone());
         }
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Result<()> {
+        self.notice = None;
+        if let Err(e) = self.handle_key(key) {
+            self.notice = Some(format!("{e:#}"));
+        }
+        Ok(())
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(direction) = keys::focus_direction(&key) {
             self.menu = None;
             self.dir_picker = None;
@@ -133,7 +230,7 @@ impl App {
                     }
                 }
             }
-            None => self.on_list_key(key),
+            None => self.on_list_key(key)?,
         }
         Ok(())
     }
@@ -145,7 +242,9 @@ impl App {
         }
         if let Some(id) = self.windows.focused_session() {
             if let Some(session) = self.session_mut(id) {
-                session.paste(text)?;
+                if let Err(e) = session.paste(text) {
+                    self.notice = Some(format!("{e:#}"));
+                }
             }
         }
         Ok(())
@@ -156,44 +255,76 @@ impl App {
         self.resize_windows();
     }
 
-    fn on_list_key(&mut self, key: KeyEvent) {
-        let Some(id) = self.selected_id() else {
-            return;
+    fn on_list_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(entry) = self.selected_entry().cloned() else {
+            return Ok(());
         };
         match key.code {
-            KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Down if self.cursor + 1 < self.sessions.len() => self.cursor += 1,
-            KeyCode::Enter => match self.windows.window_of(id) {
-                Some(slot) => self.set_focus(Focus::Window(slot)),
-                None if self.is_exited(id) => {}
-                None if self.windows.len() == 0 => self.place(id, 0),
-                None => self.open_pick(Purpose::Show(id)),
+            KeyCode::Up => self.move_cursor(-1),
+            KeyCode::Down => self.move_cursor(1),
+            KeyCode::Enter => match entry.running {
+                Some(id) => match self.windows.window_of(id) {
+                    Some(slot) => self.set_focus(Focus::Window(slot)),
+                    None if self.windows.len() == 0 => self.place(id, 0),
+                    None => self.open_pick(Purpose::Show(id)),
+                },
+                None if self.windows.len() == 0 => self.resume_into(&entry.claude_id, 0)?,
+                None => self.open_pick(Purpose::Resume(entry.claude_id)),
             },
-            KeyCode::Char(d @ '1'..='4') if !self.is_exited(id) => {
-                self.place(id, d as usize - '1' as usize);
+            KeyCode::Char(d @ '1'..='4') => {
+                let slot = d as usize - '1' as usize;
+                if slot <= self.windows.len() && slot < MAX_WINDOWS {
+                    match entry.running {
+                        Some(id) => self.place(id, slot),
+                        None => self.resume_into(&entry.claude_id, slot)?,
+                    }
+                }
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn move_cursor(&mut self, delta: isize) {
+        let ids: Vec<&str> = list::flatten(&self.groups)
+            .map(|e| e.claude_id.as_str())
+            .collect();
+        let current = self
+            .cursor
+            .as_deref()
+            .and_then(|c| ids.iter().position(|&id| id == c))
+            .unwrap_or(0);
+        let next = current
+            .saturating_add_signed(delta)
+            .min(ids.len().saturating_sub(1));
+        self.cursor = ids.get(next).map(|id| id.to_string());
+    }
+
+    /// Setzt eine gespeicherte Session in ihrem Verzeichnis fort und legt sie in `slot`.
+    fn resume_into(&mut self, claude_id: &str, slot: usize) -> Result<()> {
+        let stored = self
+            .store
+            .get(claude_id)
+            .context("Session nicht mehr gespeichert")?;
+        let id = self.spawn(&stored.cwd, Launch::Resume(claude_id.to_string()))?;
+        self.place(id, slot);
+        Ok(())
     }
 
     /// Verzeichnis gewählt: direkt ins Zielfenster, sonst (bei offenen Fenstern) Fensterauswahl.
     fn on_dir_chosen(&mut self, dir: PathBuf, target: Target) -> Result<()> {
         match target {
             Target::Window(slot) => {
-                let id = self.spawn(&dir)?;
+                let id = self.spawn(&dir, Launch::New)?;
                 self.place(id, slot);
             }
             Target::PickWindow if self.windows.len() == 0 => {
-                let id = self.spawn(&dir)?;
+                let id = self.spawn(&dir, Launch::New)?;
                 self.place(id, 0);
             }
             Target::PickWindow => self.open_pick(Purpose::NewSession(dir)),
         }
         Ok(())
-    }
-
-    fn is_exited(&self, id: SessionId) -> bool {
-        self.session(id).is_some_and(|s| s.status == Status::Exited)
     }
 
     fn run(&mut self, action: Action, purpose: Option<Purpose>) -> Result<()> {
@@ -208,10 +339,11 @@ impl App {
             }
             Action::Place(slot) => match purpose {
                 Some(Purpose::NewSession(dir)) => {
-                    let id = self.spawn(&dir)?;
+                    let id = self.spawn(&dir, Launch::New)?;
                     self.place(id, slot);
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
+                Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
                 None => {}
             },
             Action::CloseWindow => {
@@ -225,7 +357,7 @@ impl App {
             }
             Action::KillSession => {
                 if let Some(id) = self.context_session() {
-                    self.kill(id);
+                    self.remove_process(id);
                 }
             }
             Action::Focus(focus) => self.set_focus(focus),
@@ -241,43 +373,40 @@ impl App {
         Ok(())
     }
 
-    /// Session, auf die sich c/x beziehen: die im Fenster mit Fokus, sonst die in der Liste gewählte.
+    /// Laufende Session, auf die sich c/x beziehen: die im Fenster mit Fokus, sonst die in der
+    /// Liste gewählte.
     fn context_session(&self) -> Option<SessionId> {
         self.windows
             .focused_session()
-            .or_else(|| self.selected_id())
+            .or_else(|| self.selected_running())
     }
 
     fn window_names(&self) -> Vec<String> {
         self.windows
             .slots()
             .iter()
-            .map(|&id| {
-                self.session(id)
-                    .map_or_else(String::new, |s| s.name.clone())
-            })
+            .map(|&id| self.title_of(id))
             .collect()
     }
 
     fn open_commands(&mut self) {
         let windows = self.window_names();
-        let selected_has_window = self
-            .selected_id()
-            .is_some_and(|id| self.windows.window_of(id).is_some());
+        let selected = self.selected_running();
         self.menu = Some(Menu::commands(&Context {
             focus: self.windows.focus(),
             windows: &windows,
-            selected_has_window,
-            has_sessions: !self.sessions.is_empty(),
+            selected_has_window: selected.is_some_and(|id| self.windows.window_of(id).is_some()),
+            selected_running: selected.is_some(),
         }));
     }
 
     fn open_pick(&mut self, purpose: Purpose) {
         let title = match &purpose {
             Purpose::NewSession(_) => "Neue Session in".to_string(),
-            &Purpose::Show(id) => self
-                .session(id)
-                .map_or_else(String::new, |s| format!("{} zeigen in", s.name)),
+            &Purpose::Show(id) => format!("{} zeigen in", self.title_of(id)),
+            Purpose::Resume(_) => self
+                .selected_entry()
+                .map_or_else(String::new, |e| format!("{} öffnen in", e.title)),
         };
         self.menu = Some(Menu::pick_window(purpose, title, &self.window_names()));
     }
@@ -287,7 +416,7 @@ impl App {
             Focus::List => {
                 if direction == Direction::Right && self.windows.len() > 0 {
                     let slot = self
-                        .selected_id()
+                        .selected_running()
                         .and_then(|id| self.windows.window_of(id))
                         .unwrap_or(0);
                     self.set_focus(Focus::Window(slot));
@@ -305,12 +434,13 @@ impl App {
     fn set_focus(&mut self, focus: Focus) {
         self.windows.set_focus(focus);
         self.sync_cursor();
+        self.save_state();
     }
 
     fn sync_cursor(&mut self) {
         if let Some(id) = self.windows.focused_session() {
-            if let Some(index) = self.sessions.iter().position(|s| s.id == id) {
-                self.cursor = index;
+            if let Some(session) = self.session(id) {
+                self.cursor = Some(session.claude_id.clone());
             }
         }
     }
@@ -321,17 +451,34 @@ impl App {
         }
     }
 
-    fn kill(&mut self, id: SessionId) {
+    /// Beendet den Prozess (Drop) und schließt sein Fenster; die Claude-Session bleibt gespeichert.
+    fn remove_process(&mut self, id: SessionId) {
         self.windows.remove_session(id);
-        // Drop beendet den Prozess.
         self.sessions.retain(|s| s.id != id);
-        self.cursor = self.cursor.min(self.sessions.len().saturating_sub(1));
         self.after_layout_change();
     }
 
     fn after_layout_change(&mut self) {
         self.resize_windows();
         self.sync_cursor();
+        self.save_state();
+    }
+
+    fn save_state(&self) {
+        let state = State {
+            windows: self
+                .windows
+                .slots()
+                .iter()
+                .filter_map(|&id| self.session(id).map(|s| s.claude_id.clone()))
+                .collect(),
+            focus: match self.windows.focus() {
+                Focus::Window(slot) => Some(slot),
+                Focus::List => None,
+            },
+        };
+        // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
+        let _ = state::save(&state);
     }
 
     /// Jede sichtbare Session bekommt die Innenmaße ihres Fensters; Hintergrund-Sessions behalten
@@ -347,14 +494,19 @@ impl App {
         }
     }
 
-    fn spawn(&mut self, dir: &Path) -> Result<SessionId> {
+    fn spawn(&mut self, dir: &Path, launch: Launch) -> Result<SessionId> {
+        let (claude_id, flag) = match launch {
+            Launch::New => (uuid::Uuid::new_v4().to_string(), "--session-id"),
+            Launch::Resume(claude_id) => (claude_id, "--resume"),
+        };
+        let command = format!("{} {flag} {claude_id}", self.command);
         self.next_id += 1;
         let id = self.next_id;
         let inner = self.area.inner(Margin::new(1, 1));
         let session = Session::spawn(
             id,
-            format!("claude {id}"),
-            &self.command,
+            claude_id,
+            &command,
             dir,
             inner.height.max(1),
             inner.width.max(1),
@@ -363,6 +515,7 @@ impl App {
         recent::remember(&mut self.recent, dir);
         // Die Liste ist Komfort: lässt sie sich nicht speichern, läuft die Session trotzdem.
         let _ = recent::save(&self.recent);
+        self.rebuild_list();
         Ok(id)
     }
 }

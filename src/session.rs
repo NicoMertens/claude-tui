@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard,
@@ -29,7 +29,9 @@ pub enum Status {
 
 pub struct Session {
     pub id: SessionId,
-    pub name: String,
+    /// ID der Claude-Code-Session (`--session-id` bzw. `--resume`).
+    pub claude_id: String,
+    pub cwd: PathBuf,
     pub status: Status,
     size: (u16, u16),
     parser: Arc<Mutex<vt100::Parser>>,
@@ -43,7 +45,7 @@ pub struct Session {
 impl Session {
     pub fn spawn(
         id: SessionId,
-        name: String,
+        claude_id: String,
         command: &str,
         cwd: &Path,
         rows: u16,
@@ -90,7 +92,8 @@ impl Session {
 
         Ok(Self {
             id,
-            name,
+            claude_id,
+            cwd: cwd.to_path_buf(),
             status: Status::Working,
             size: (rows, cols),
             parser,
