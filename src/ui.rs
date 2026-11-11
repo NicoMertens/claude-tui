@@ -340,6 +340,15 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let inner = block.inner(rect);
         f.render_widget(block, rect);
         let parser = session.screen();
-        f.render_widget(TermView::new(parser.screen()).show_cursor(focused), inner);
+        let selection = app
+            .selection
+            .filter(|s| s.session == id && !s.is_empty())
+            .map(|s| s.range());
+        f.render_widget(
+            TermView::new(parser.screen())
+                .show_cursor(focused)
+                .selection(selection),
+            inner,
+        );
     }
 }

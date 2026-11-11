@@ -118,8 +118,16 @@ Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, b
 die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
 
-claude-tui fängt dafür die Maus ab. Text markieren und kopieren geht in Windows Terminal deshalb mit
-**Shift + Ziehen**.
+**Markieren und Kopieren:** Mit gedrückter linker Maustaste in einem Fenster ziehen markiert Text
+(blau hinterlegt) — nur innerhalb dieses Fensters, auch wenn die Maus darüber hinaus gezogen wird.
+Beim Loslassen landet der Text in der Zwischenablage, unten in der Sessionliste steht
+`copied N characters`. **Doppelklick** markiert und kopiert ein Wort. Ein einfacher Klick setzt nur
+den Fokus auf das Fenster. Die Markierung verschwindet mit der nächsten Taste, dem nächsten Klick
+oder beim Scrollen; markiert wird der sichtbare Ausschnitt (zum Markieren älterer Ausgabe vorher
+hochscrollen). `Ctrl+C` bleibt bei Claude.
+
+claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt es weiter mit
+**Shift + Ziehen**, sie erfasst aber ganze Bildschirmzeilen samt Sessionliste.
 
 ## Zustände in der Seitenleiste
 

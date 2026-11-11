@@ -10,9 +10,15 @@ use ratatui::{
     widgets::Widget,
 };
 
+use crate::selection::{self, Cell};
+
+/// Hintergrund markierter Zellen — das Blau der Menübox.
+const SELECTION_BG: Color = crate::theme::MENU;
+
 pub struct TermView<'a> {
     screen: &'a vt100::Screen,
     show_cursor: bool,
+    selection: Option<(Cell, Cell)>,
 }
 
 impl<'a> TermView<'a> {
@@ -20,11 +26,18 @@ impl<'a> TermView<'a> {
         Self {
             screen,
             show_cursor: true,
+            selection: None,
         }
     }
 
     pub fn show_cursor(mut self, show: bool) -> Self {
         self.show_cursor = show;
+        self
+    }
+
+    /// Markierter Bereich (Leserichtung, Enden eingeschlossen); wird invers gezeichnet.
+    pub fn selection(mut self, range: Option<(Cell, Cell)>) -> Self {
+        self.selection = range;
         self
     }
 }
@@ -52,7 +65,14 @@ impl Widget for TermView<'_> {
                 } else {
                     target.set_symbol(" ");
                 }
-                target.set_style(style_of(cell));
+                let mut style = style_of(cell);
+                if self
+                    .selection
+                    .is_some_and(|range| selection::contains(range, Cell { row, col }))
+                {
+                    style = style.bg(SELECTION_BG).fg(Color::Black);
+                }
+                target.set_style(style);
             }
         }
         let (cursor_row, cursor_col) = self.screen.cursor_position();

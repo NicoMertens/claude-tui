@@ -7,6 +7,7 @@ mod list;
 mod menu;
 mod paths;
 mod recent;
+mod selection;
 mod session;
 mod state;
 mod term_view;

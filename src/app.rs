@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Margin, Position, Rect};
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{Action, Context, Menu, Outcome, Purpose},
     recent,
+    selection::{self, Cell, Selection},
     session::{Session, Status},
     state::{self, State},
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
@@ -22,6 +23,8 @@ use crate::{
 
 /// So oft wird `~/.claude/projects` nach neuen Sessions und Titeln durchsucht.
 const STORE_INTERVAL: Duration = Duration::from_secs(2);
+/// Zweiter Klick auf dieselbe Zelle innerhalb dieser Zeit = Doppelklick (Wort markieren).
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// Wie ein Claude-Prozess gestartet wird.
 enum Launch {
@@ -44,6 +47,11 @@ pub struct App {
     pub dir_picker: Option<DirPicker>,
     /// Hinweis unten in der Sessionliste (z. B. Startfehler); verschwindet mit der nächsten Taste.
     pub notice: Option<String>,
+    /// Mausmarkierung in einem Fenster; bleibt sichtbar bis zur nächsten Taste oder zum nächsten
+    /// Klick.
+    pub selection: Option<Selection>,
+    dragging: bool,
+    last_click: Option<(Instant, SessionId, Cell)>,
     pub should_quit: bool,
     command: String,
     /// Verzeichnis, aus dem claude-tui gestartet wurde.
@@ -69,6 +77,9 @@ impl App {
             menu: None,
             dir_picker: None,
             notice: None,
+            selection: None,
+            dragging: false,
+            last_click: None,
             should_quit: false,
             command,
             start_dir: std::env::current_dir().context("current directory not readable")?,
@@ -189,6 +200,7 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        self.selection = None;
         if let Some(direction) = keys::focus_direction(&key) {
             self.menu = None;
             self.dir_picker = None;
@@ -250,30 +262,98 @@ impl App {
         Ok(())
     }
 
-    /// Mausrad über einem Fenster scrollt dessen Verlauf; alles andere an der Maus wird ignoriert.
+    /// Maus über einem Fenster: Rad scrollt den Verlauf, linke Taste markiert (Ziehen, Doppelklick
+    /// = Wort) und kopiert beim Loslassen in die Zwischenablage.
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
-        let up = match mouse.kind {
-            MouseEventKind::ScrollUp => true,
-            MouseEventKind::ScrollDown => false,
-            _ => return,
-        };
         let position = Position::new(mouse.column, mouse.row);
-        let hit = self
-            .window_rects()
+        match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let Some((_, id, cell)) = self.window_at(position) else {
+                    return;
+                };
+                // Die Markierung bezieht sich auf den sichtbaren Ausschnitt; Scrollen hebt sie auf.
+                self.selection = None;
+                let up = mouse.kind == MouseEventKind::ScrollUp;
+                if let Some(session) = self.session_mut(id) {
+                    if let Err(e) = session.wheel(up, cell.col, cell.row) {
+                        self.notice = Some(format!("{e:#}"));
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some((slot, id, cell)) = self.window_at(position) else {
+                    return;
+                };
+                self.menu = None;
+                self.dir_picker = None;
+                self.set_focus(Focus::Window(slot));
+                let double = self.last_click.is_some_and(|(at, last_id, last_cell)| {
+                    at.elapsed() < DOUBLE_CLICK && last_id == id && last_cell == cell
+                });
+                self.last_click = Some((Instant::now(), id, cell));
+                if double {
+                    let word = self
+                        .session(id)
+                        .and_then(|s| selection::word_at(id, s.screen().screen(), cell));
+                    self.selection = word;
+                    self.dragging = false;
+                    self.copy_selection();
+                } else {
+                    self.selection = Some(Selection::new(id, cell));
+                    self.dragging = true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
+                let Some(session) = self.selection.map(|s| s.session) else {
+                    return;
+                };
+                // Auch außerhalb des Fensters weiterziehen, aber auf dessen Inhalt begrenzt.
+                let inner = self
+                    .windows
+                    .window_of(session)
+                    .and_then(|slot| self.window_rects().get(slot).copied())
+                    .map(|r| r.inner(Margin::new(1, 1)));
+                if let (Some(inner), Some(selection)) = (inner, self.selection.as_mut()) {
+                    selection.head = cell_in(inner, position);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.dragging => {
+                self.dragging = false;
+                if self.selection.is_some_and(|s| s.is_empty()) {
+                    self.selection = None;
+                } else {
+                    self.copy_selection();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Fenster unter der Mausposition: Fensterindex, Session und Zelle im Fensterinhalt.
+    fn window_at(&self, position: Position) -> Option<(usize, SessionId, Cell)> {
+        self.window_rects()
             .into_iter()
-            .zip(self.windows.slots().to_vec())
-            .find(|(rect, _)| rect.contains(position));
-        let Some((rect, id)) = hit else {
+            .zip(self.windows.slots().iter().copied())
+            .enumerate()
+            .find(|(_, (rect, _))| rect.contains(position))
+            .map(|(slot, (rect, id))| (slot, id, cell_in(rect.inner(Margin::new(1, 1)), position)))
+    }
+
+    fn copy_selection(&mut self) {
+        let Some(selection) = self.selection else {
             return;
         };
-        let inner = rect.inner(Margin::new(1, 1));
-        let col = mouse.column.saturating_sub(inner.x);
-        let row = mouse.row.saturating_sub(inner.y);
-        if let Some(session) = self.session_mut(id) {
-            if let Err(e) = session.wheel(up, col, row) {
-                self.notice = Some(format!("{e:#}"));
-            }
-        }
+        let Some(text) = self
+            .session(selection.session)
+            .map(|s| selection.text(s.screen().screen()))
+        else {
+            return;
+        };
+        let copied = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.clone()));
+        self.notice = Some(match copied {
+            Ok(()) => format!("copied {} characters", text.chars().count()),
+            Err(e) => format!("clipboard: {e}"),
+        });
     }
 
     pub fn resize(&mut self, area: Rect) {
@@ -575,4 +655,11 @@ impl App {
         self.rebuild_list();
         Ok(id)
     }
+}
+
+/// Zelle im Fensterinhalt `inner` unter der Mausposition, an den Rand geklemmt.
+fn cell_in(inner: Rect, position: Position) -> Cell {
+    let col = position.x.clamp(inner.x, inner.right().saturating_sub(1)) - inner.x;
+    let row = position.y.clamp(inner.y, inner.bottom().saturating_sub(1)) - inner.y;
+    Cell { row, col }
 }
