@@ -21,8 +21,16 @@ pub fn config_dir() -> Option<PathBuf> {
 /// Ordner mit den Session-Protokollen von Claude Code: `$CLAUDE_CONFIG_DIR/projects`, sonst
 /// `~/.claude/projects`.
 pub fn claude_projects_dir() -> Option<PathBuf> {
+    claude_dir().map(|d| d.join("projects"))
+}
+
+/// Ordner, in dem jeder laufende Claude-Code-Prozess `<PID>.json` mit seiner Session-ID ablegt.
+pub fn claude_sessions_dir() -> Option<PathBuf> {
+    claude_dir().map(|d| d.join("sessions"))
+}
+
+fn claude_dir() -> Option<PathBuf> {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(|| home().map(|h| h.join(".claude")))
-        .map(|d| d.join("projects"))
 }

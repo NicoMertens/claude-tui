@@ -102,6 +102,12 @@ einen Zeilenumbruch ein.
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
 
+Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `◇ … ext`, siehe
+[Zustände](#zustände-in-der-seitenleiste)), fragen `Enter`, Doppelklick und `1`–`4` erst nach:
+„<Titel> runs elsewhere – open anyway?“. `y` startet sie trotzdem ein zweites Mal (bei `Enter` folgt
+danach die Fensterauswahl), `n`, `Esc` und `Enter` brechen ab — die Vorauswahl ist „No“, denn zwei
+Prozesse schreiben sonst in dasselbe Protokoll.
+
 ### Menü (`Ctrl+A`)
 
 Das Menü erscheint als Box mit blauem Rand mittig über dem Bereich mit dem Fokus: über dem
@@ -186,8 +192,16 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | ▲ | gelb | waiting for you | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
 | ● | grau | ready | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
+| ◇ … `ext` | graublau | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach. |
 
 Die Formen unterscheiden sich auch ohne Farbe.
 
 Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
 [Architektur](architektur.md).
+
+**Läuft anderswo** erkennt claude-tui an der Datei, die Claude Code je laufendem Prozess unter
+`~/.claude/sessions/<PID>.json` ablegt, solange der Prozess noch existiert; bei älteren
+Claude-Code-Versionen ohne diese Datei daran, dass das Protokoll in den letzten 10 s geschrieben
+wurde, ohne dass die Session in claude-tui läuft (dann nur, solange sie arbeitet). Die Kennzeichnung
+folgt mit einigen Sekunden Verzögerung. Beim Start setzt claude-tui eine Session aus `state.json`, die
+gerade anderswo läuft, nicht fort, sondern meldet „… runs elsewhere – not reopened“.

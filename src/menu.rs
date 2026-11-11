@@ -17,6 +17,8 @@ pub enum Action {
     DeleteSession,
     /// Bestätigung: Session löschen (Ziel steht in [Purpose::Delete]).
     ConfirmDelete,
+    /// Bestätigung: anderswo laufende Session trotzdem öffnen (Ziel in [Purpose::OpenElsewhere]).
+    ConfirmOpen,
     Cancel,
     Focus(Focus),
     /// Sessionliste ein- bzw. ausblenden.
@@ -48,6 +50,9 @@ pub enum Purpose {
     Resume(String),
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
+    /// Claude-Session, die außerhalb von claude-tui läuft und trotzdem geöffnet werden soll; mit
+    /// Zielfenster (`None` = danach Fensterauswahl).
+    OpenElsewhere(String, Option<usize>),
 }
 
 #[derive(Debug)]
@@ -183,6 +188,33 @@ impl Menu {
             ],
             selected: 0,
             purpose: Some(Purpose::Delete(claude_id)),
+        }
+    }
+
+    /// Rückfrage, bevor eine anderswo laufende Session ein zweites Mal gestartet wird. Enter wählt
+    /// „No“: zwei Prozesse in einem Protokoll sollen nie aus Versehen entstehen.
+    pub fn confirm_open(title: &str, claude_id: String, slot: Option<usize>) -> Self {
+        let item = |c, label: &str, action| Item {
+            hotkey: c,
+            label: label.to_string(),
+            action,
+        };
+        // Lange Titel kürzen, damit die Frage selbst im Rahmen sichtbar bleibt.
+        const TITLE_MAX: usize = 30;
+        let title = if title.chars().count() > TITLE_MAX {
+            let keep: String = title.chars().take(TITLE_MAX - 1).collect();
+            format!("{keep}…")
+        } else {
+            title.to_string()
+        };
+        Self {
+            title: format!("{title} runs elsewhere – open anyway?"),
+            items: vec![
+                item('y', "Yes, open a second instance", Action::ConfirmOpen),
+                item('n', "No", Action::Cancel),
+            ],
+            selected: 1,
+            purpose: Some(Purpose::OpenElsewhere(claude_id, slot)),
         }
     }
 
@@ -389,5 +421,23 @@ mod tests {
             Outcome::Run(Action::ConfirmDelete)
         );
         assert_eq!(menu.on_key(&key(KeyCode::Esc)), Outcome::Close);
+    }
+
+    #[test]
+    fn open_elsewhere_needs_confirmation_and_enter_cancels() {
+        let mut menu = Menu::confirm_open("Analyse", "abc".into(), Some(1));
+        assert_eq!(menu.title, "Analyse runs elsewhere – open anyway?");
+        assert_eq!(
+            menu.purpose,
+            Some(Purpose::OpenElsewhere("abc".into(), Some(1)))
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Enter)),
+            Outcome::Run(Action::Cancel)
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('y'))),
+            Outcome::Run(Action::ConfirmOpen)
+        );
     }
 }

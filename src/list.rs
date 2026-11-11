@@ -1,6 +1,6 @@
 //! Sessionliste: gespeicherte Claude-Sessions und laufende Prozesse, gruppiert nach Verzeichnis.
 
-use std::{path::PathBuf, time::SystemTime};
+use std::{collections::HashSet, path::PathBuf, time::SystemTime};
 
 use crate::{claude_store::StoredSession, windows::SessionId};
 
@@ -22,6 +22,8 @@ pub struct Entry {
     pub modified: Option<SystemTime>,
     /// Laufender Prozess, falls die Session gerade in claude-tui läuft.
     pub running: Option<SessionId>,
+    /// Läuft außerhalb von claude-tui (siehe `external.rs`); Öffnen fragt erst nach.
+    pub external: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,13 +35,19 @@ pub struct Group {
 pub const NEW_SESSION_TITLE: &str = "new session";
 
 /// Baut die Gruppen. Reihenfolge: Gruppen nach jüngster Aktivität (laufend zählt als jetzt),
-/// darin laufende Sessions zuerst, dann nach letzter Aktivität.
-pub fn build(stored: Vec<StoredSession>, running: &[Running]) -> Vec<Group> {
+/// darin laufende Sessions zuerst, dann nach letzter Aktivität. `external`: Claude-IDs, die
+/// außerhalb von claude-tui laufen.
+pub fn build(
+    stored: Vec<StoredSession>,
+    running: &[Running],
+    external: &HashSet<String>,
+) -> Vec<Group> {
     let mut entries: Vec<(PathBuf, Entry)> = stored
         .into_iter()
         .map(|s| {
             let running = running.iter().find(|r| r.claude_id == s.id).map(|r| r.id);
             let entry = Entry {
+                external: running.is_none() && external.contains(&s.id),
                 claude_id: s.id,
                 title: s.title,
                 color: s.color,
@@ -59,6 +67,7 @@ pub fn build(stored: Vec<StoredSession>, running: &[Running]) -> Vec<Group> {
                     color: None,
                     modified: None,
                     running: Some(r.id),
+                    external: false,
                 },
             ));
         }
@@ -123,6 +132,7 @@ mod tests {
                 stored("c", "/x", 5),
             ],
             &[],
+            &HashSet::new(),
         );
         let dirs: Vec<_> = groups.iter().map(|g| g.cwd.clone()).collect();
         assert_eq!(dirs, [PathBuf::from("/x"), PathBuf::from("/y")]);
@@ -144,7 +154,12 @@ mod tests {
                 cwd: "/z".into(),
             },
         ];
-        let groups = build(vec![stored("a", "/x", 500), stored("b", "/y", 1)], &running);
+        let external = HashSet::from(["a".to_string(), "b".to_string()]);
+        let groups = build(
+            vec![stored("a", "/x", 500), stored("b", "/y", 1)],
+            &running,
+            &external,
+        );
         // Gruppen mit laufenden Sessions stehen vor rein gespeicherten.
         assert_eq!(
             groups.last().map(|g| g.cwd.clone()),
@@ -157,5 +172,8 @@ mod tests {
         assert_eq!(neu.running, Some(2));
         let a = flatten(&groups).find(|e| e.claude_id == "a").expect("a");
         assert_eq!(a.running, Some(1));
+        assert!(!a.external, "läuft in claude-tui, also nicht extern");
+        let b = flatten(&groups).find(|e| e.claude_id == "b").expect("b");
+        assert!(b.external);
     }
 }

@@ -33,6 +33,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
 | `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session |
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
+| `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik) |
 | `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander) als `state.json` für den Neustart |
 | `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
 | `session.rs` | eine Session: PTY starten, Lese-Thread, Statuserkennung, Schreiben, Resize |
@@ -66,6 +67,35 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 - **wartet auf dich:** sonst, wenn der sichtbare Bildschirm eine Rückfrage-Markierung enthält
   (`session.rs`, `waits_for_decision`).
 - **bereit:** alles andere.
+
+## Extern laufende Sessions
+
+Wird eine Session, die schon in einem anderen Terminal läuft, mit `--resume` ein zweites Mal
+gestartet, schreiben zwei Prozesse in dasselbe Protokoll. `external.rs` erkennt solche Sessions:
+
+1. **`~/.claude/sessions/<PID>.json`** (bzw. unter `$CLAUDE_CONFIG_DIR`): Claude Code legt die
+   Datei je laufendem Prozess an — auch ohne `--resume` in der Kommandozeile — mit `pid` und
+   `sessionId`, und entfernt sie beim Beenden. Weil ein abgestürzter Prozess sie liegen lassen kann,
+   zählt sie nur, solange die PID noch läuft: Windows über `%SystemRoot%\System32\tasklist.exe`
+   (fester Pfad wie bei `curl`), Linux über `/proc/<PID>`, sonst `ps -A -o pid=`. Keine neue
+   Abhängigkeit (`sysinfo` o. Ä. hätte die Binary deutlich vergrößert; Windows-API direkt ginge nur
+   mit `unsafe`).
+2. **Rückfall** für Versionen ohne diese Datei: Protokoll seit dem Start von claude-tui und in den
+   letzten 10 s geändert (`RECENT_WRITE`).
+
+In beiden Fällen zählen Sessions nicht, die in claude-tui laufen oder dort vor weniger als 30 s
+endeten (`ENDED_GRACE` in `app.rs`) — deren Datei und letzte Schreibzugriffe stammen von claude-tui
+selbst. Ein Hintergrund-Thread liest das Verzeichnis alle 2 s; `tasklist` (unter Windows knapp 1 s)
+läuft nur, wenn sich die PIDs geändert haben, sonst alle 20 s. Die Hauptschleife holt das Ergebnis
+per Kanal ab und verrechnet es beim Neuaufbau der Liste (`list::Entry::external`). Öffnen einer
+solchen Session (`Enter`, `1`–`4`) geht erst über `Menu::confirm_open` (Vorauswahl „No“); beim
+Wiederherstellen aus `state.json` prüft `external::claimed_now` einmal synchron (die Prozessliste nur,
+wenn eine der Sessions in einer Datei steht) und überspringt solche Sessions.
+
+Grenzen: Eine PID, die nach einem Absturz an einen anderen Prozess vergeben wurde, hält eine
+liegengebliebene Datei am Leben (nur eine überflüssige Rückfrage). Wechselt eine Session in
+claude-tui per `/resume` intern auf eine andere ID, gilt diese als extern. Ohne Datei (alte
+Versionen) wird eine untätige externe Session nicht erkannt.
 
 ## Grenzen / nächste Schritte
 
