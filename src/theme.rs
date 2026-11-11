@@ -48,6 +48,22 @@ pub fn status_label(status: Status) -> (&'static str, Color) {
     }
 }
 
+/// Sessionfarbe aus Claudes `/color` als Textfarbe; unbekannte Namen bleiben ungefärbt.
+pub fn session_color(name: &str) -> Option<Color> {
+    let rgb = match name {
+        "red" => (0xE5, 0x53, 0x4B),
+        "orange" => (0xE8, 0x8A, 0x4F),
+        "yellow" => (0xE5, 0xC0, 0x7B),
+        "green" => (0x8F, 0xBF, 0x7F),
+        "cyan" => (0x56, 0xC2, 0xC9),
+        "blue" => (0x4F, 0xA3, 0xE0),
+        "purple" => (0xB4, 0x8E, 0xDB),
+        "pink" => (0xE0, 0x7A, 0xB8),
+        _ => return None,
+    };
+    Some(Color::Rgb(rgb.0, rgb.1, rgb.2))
+}
+
 fn spinner(elapsed: Duration) -> &'static str {
     let cycle = 2 * SPINNER.len() - 2;
     let step = (elapsed.as_millis() / SPINNER_FRAME.as_millis()) as usize % cycle;

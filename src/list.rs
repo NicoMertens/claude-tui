@@ -16,6 +16,8 @@ pub struct Running {
 pub struct Entry {
     pub claude_id: String,
     pub title: String,
+    /// Sessionfarbe aus `/color`.
+    pub color: Option<String>,
     /// Letzte Aktivität laut Protokoll; `None` für eine neue Session ohne Protokoll.
     pub modified: Option<SystemTime>,
     /// Laufender Prozess, falls die Session gerade in claude-tui läuft.
@@ -40,6 +42,7 @@ pub fn build(stored: Vec<StoredSession>, running: &[Running]) -> Vec<Group> {
             let entry = Entry {
                 claude_id: s.id,
                 title: s.title,
+                color: s.color,
                 modified: Some(s.modified),
                 running,
             };
@@ -53,6 +56,7 @@ pub fn build(stored: Vec<StoredSession>, running: &[Running]) -> Vec<Group> {
                 Entry {
                     claude_id: r.claude_id.clone(),
                     title: NEW_SESSION_TITLE.to_string(),
+                    color: None,
                     modified: None,
                     running: Some(r.id),
                 },
@@ -105,6 +109,7 @@ mod tests {
             id: id.to_string(),
             cwd: PathBuf::from(cwd),
             title: id.to_uppercase(),
+            color: None,
             modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 - age_secs),
         }
     }

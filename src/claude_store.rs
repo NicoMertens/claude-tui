@@ -23,6 +23,8 @@ pub struct StoredSession {
     pub id: String,
     pub cwd: PathBuf,
     pub title: String,
+    /// Sessionfarbe aus `/color` (z. B. `orange`); `None` = keine bzw. zurückgesetzt.
+    pub color: Option<String>,
     pub modified: SystemTime,
 }
 
@@ -32,6 +34,7 @@ struct Info {
     custom_title: Option<String>,
     ai_title: Option<String>,
     last_prompt: Option<String>,
+    color: Option<String>,
 }
 
 impl Info {
@@ -62,6 +65,7 @@ struct Line {
     custom_title: Option<String>,
     ai_title: Option<String>,
     last_prompt: Option<String>,
+    agent_color: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -157,6 +161,7 @@ fn stored(file: &FileState) -> Option<StoredSession> {
         id: file.id.clone(),
         cwd: file.info.cwd.clone()?,
         title: one_line(file.info.title()?),
+        color: file.info.color.clone(),
         modified: file.modified,
     })
 }
@@ -219,7 +224,8 @@ fn apply(info: &mut Info, bytes: &[u8]) -> usize {
         let wanted = (info.cwd.is_none() && text.contains("\"cwd\""))
             || text.contains("\"custom-title\"")
             || text.contains("\"ai-title\"")
-            || text.contains("\"last-prompt\"");
+            || text.contains("\"last-prompt\"")
+            || text.contains("\"agent-color\"");
         if !wanted {
             continue;
         }
@@ -235,6 +241,10 @@ fn apply(info: &mut Info, bytes: &[u8]) -> usize {
             }
             Some("ai-title") => info.ai_title = line.ai_title.or(info.ai_title.take()),
             Some("last-prompt") => info.last_prompt = line.last_prompt.or(info.last_prompt.take()),
+            // Die jeweils letzte Zeile gilt; „default“ setzt die Farbe zurück.
+            Some("agent-color") => {
+                info.color = line.agent_color.filter(|c| c != "default" && !c.is_empty())
+            }
             _ => {}
         }
     }
@@ -265,6 +275,26 @@ mod tests {
             b"{\"type\":\"custom-title\",\"customTitle\":\"eigener Name\"}\n",
         );
         assert_eq!(info.title(), Some("eigener Name"));
+    }
+
+    #[test]
+    fn last_agent_color_wins_and_default_resets() {
+        let mut info = Info::default();
+        apply(
+            &mut info,
+            b"{\"type\":\"agent-color\",\"agentColor\":\"orange\"}\n",
+        );
+        assert_eq!(info.color.as_deref(), Some("orange"));
+        apply(
+            &mut info,
+            b"{\"type\":\"agent-color\",\"agentColor\":\"blue\"}\n",
+        );
+        assert_eq!(info.color.as_deref(), Some("blue"));
+        apply(
+            &mut info,
+            b"{\"type\":\"agent-color\",\"agentColor\":\"default\"}\n",
+        );
+        assert_eq!(info.color, None);
     }
 
     #[test]

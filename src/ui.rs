@@ -232,10 +232,13 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     let title = head(&entry.title, title_width);
     let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
 
-    let name_style = if session.is_some() || selected {
-        Style::default().fg(theme::TEXT)
-    } else {
-        Style::default().fg(theme::MUTED)
+    // Hat die Session per `/color` eine Farbe, trägt der Titel sie; sonst hell (laufend/gewählt)
+    // bzw. grau (gespeichert).
+    let session_color = entry.color.as_deref().and_then(theme::session_color);
+    let name_style = match session_color {
+        Some(color) => Style::default().fg(color),
+        None if session.is_some() || selected => Style::default().fg(theme::TEXT),
+        None => Style::default().fg(theme::MUTED),
     };
     let line = Line::from(vec![
         Span::styled(format!("{symbol} "), Style::default().fg(color)),

@@ -27,6 +27,10 @@ sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit sei
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
+Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, yellow, green, cyan,
+blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
+claude-tui liest dafür die letzte `agent-color`-Zeile aus dem Protokoll der Session.
+
 Rechts bis zu **4 Fenster**, nach Position nummeriert:
 
 ```
