@@ -11,13 +11,14 @@ publish = false
 anyhow = "1"
 arboard = { version = "3", default-features = false }
 crossterm = "0.29"
+# Entpacken (gzip für .tar.gz, Deflate für .zip) mit dem reinen Rust-Backend.
+flate2 = "1"
 portable-pty = "0.8"
 ratatui = "0.30"
 self-replace = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-ureq = "3"
 uuid = { version = "1", features = ["v4"] }
 vt100 = "0.18"
 
@@ -26,8 +27,11 @@ vt100 = "0.18"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(not(windows))'.dependencies]
-flate2 = "1"
 tar = { version = "0.4", default-features = false }
+
+# Rückfall für Updates, wenn curl fehlt: HTTPS über das TLS des Betriebssystems (siehe http.rs).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -36,3 +40,7 @@ unsafe_code = "forbid"
 lto = true
 codegen-units = 1
 strip = true
+# Auf Größe optimiert; für eine TUI ist der Geschwindigkeitsunterschied nicht spürbar.
+opt-level = "z"
+# Kein Abwickeln bei einem Absturz: spart Code. Das Terminal setzt der Panic-Hook in main.rs zurück.
+panic = "abort"

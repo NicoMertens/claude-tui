@@ -1,6 +1,7 @@
 mod app;
 mod claude_store;
 mod dirpick;
+mod http;
 mod install;
 mod keys;
 mod layout;
@@ -61,6 +62,14 @@ fn main() -> Result<()> {
     }
     let command = arg.unwrap_or_else(|| "claude".to_string());
 
+    // Bei einem Absturz erst das Terminal zurücksetzen, dann die Meldung ausgeben — sonst bliebe
+    // die Shell im Rohmodus mit Mausabfrage. Läuft auch mit `panic = "abort"`.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        default_hook(info);
+    }));
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -73,12 +82,17 @@ fn main() -> Result<()> {
 
     let result = run(&mut terminal, command);
 
-    let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
-    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    restore_terminal();
     terminal.show_cursor()?;
     result
+}
+
+/// Terminal in den Normalzustand: Maus und Bracketed Paste aus, Rohmodus aus, Hauptbildschirm.
+fn restore_terminal() {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, DisableMouseCapture, DisableBracketedPaste);
+    let _ = disable_raw_mode();
+    let _ = execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show);
 }
 
 fn run(terminal: &mut Term, command: String) -> Result<()> {

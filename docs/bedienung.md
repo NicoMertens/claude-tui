@@ -38,6 +38,11 @@ Das Update lädt das Archiv für die eigene Plattform, vergleicht es mit `sha256
 laufende Datei; wirksam ab dem nächsten Start (die Fenster kommen über `state.json` zurück).
 Installiert wird nie ungefragt. `CLAUDE_TUI_NO_UPDATE_CHECK=1` schaltet die Prüfung ab.
 
+Heruntergeladen wird mit dem `curl` des Systems (unter Windows fest
+`C:\Windows\System32\curl.exe`, vorhanden seit Windows 10 1803) — mit dessen Zertifikaten und
+Proxy-Einstellungen. Fehlt `curl`, nimmt claude-tui unter Windows und macOS das TLS des
+Betriebssystems; unter Linux muss `curl` installiert sein.
+
 ## Aufbau
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),

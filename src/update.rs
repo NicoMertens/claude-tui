@@ -18,11 +18,10 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::paths;
+use crate::{http, paths};
 
 const REPO: &str = "NicoMertens/claude-tui";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
-const USER_AGENT: &str = concat!("claude-tui/", env!("CARGO_PKG_VERSION"));
 /// Höchstens so oft fragt claude-tui beim Start nach einer neuen Version.
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const CHECK_FILE: &str = "update-check.json";
@@ -71,14 +70,6 @@ pub struct Available {
     sums_url: String,
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(30)))
-        .user_agent(USER_AGENT)
-        .build()
-        .into()
-}
-
 /// Fragt das neueste Release ab; `None`, wenn es nicht neuer ist als die laufende Version.
 pub fn check() -> Result<Option<Available>> {
     check_against(CURRENT)
@@ -87,14 +78,9 @@ pub fn check() -> Result<Option<Available>> {
 fn check_against(current: &str) -> Result<Option<Available>> {
     let target = TARGET.context("no release builds for this platform")?;
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let text = agent()
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .context("cannot reach GitHub")?
-        .body_mut()
-        .read_to_string()?;
-    let release: Release = serde_json::from_str(&text).context("unexpected answer from GitHub")?;
+    let body = http::get(&url, http::Kind::Api).context("cannot reach GitHub")?;
+    let release: Release =
+        serde_json::from_slice(&body).context("unexpected answer from GitHub")?;
     let version = release.tag_name.trim_start_matches('v').to_string();
     if !is_newer(&version, current) {
         return Ok(None);
@@ -132,17 +118,8 @@ pub fn install(update: &Available) -> Result<()> {
 
 /// Archiv und `sha256.sum` laden, Prüfsumme vergleichen, Binary entpacken.
 fn fetch_binary(update: &Available) -> Result<Vec<u8>> {
-    let agent = agent();
-    let download = |url: &str| -> Result<Vec<u8>> {
-        Ok(agent
-            .get(url)
-            .call()
-            .with_context(|| format!("cannot download {url}"))?
-            .body_mut()
-            .read_to_vec()?)
-    };
-    let archive = download(&update.archive_url)?;
-    let sums = String::from_utf8(download(&update.sums_url)?)?;
+    let archive = http::get(&update.archive_url, http::Kind::File)?;
+    let sums = String::from_utf8(http::get(&update.sums_url, http::Kind::File)?)?;
     let expected = expected_sum(&sums, &update.archive_name)
         .with_context(|| format!("sha256.sum lists no {}", update.archive_name))?;
     let actual = hex(&Sha256::digest(&archive));

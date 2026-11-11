@@ -9,6 +9,12 @@
 | `vt100` 0.18 | Terminal-Emulation: wertet die Ausgabe der Session zu einem Bildschirm aus |
 | `serde` + `serde_json`, `uuid` | Claude-Protokolle und `state.json` lesen/schreiben, Session-IDs |
 
+**Größe der Binary:** Das Release-Profil optimiert auf Größe (`opt-level = "z"`, `panic = "abort"`,
+LTO, gestrippt). Für HTTPS steckt bewusst kein eigener TLS-Stack in der Datei (`rustls` + `ring` +
+Mozilla-Zertifikate hätten rund 1,3 MB gekostet): Updates laden über `curl` bzw. das TLS des
+Betriebssystems. Ergebnis unter Windows x64: rund 1,06 MB statt 3,17 MB. Ein Panic-Hook in
+`main.rs` setzt das Terminal auch beim Abbruch zurück.
+
 Den `vt100`-Bildschirm zeichnet das eigene Widget `term_view.rs`, nicht `tui-term`: dessen Version
 für ratatui 0.29 hing an `vt100` 0.15, und das verwirft das Attribut *dim* (SGR 2), mit dem Claude
 Code z. B. Prompt-Vorschläge grau darstellt. Neuere `vt100` brauchen `unicode-width` ≥ 0.2.1, was
@@ -34,7 +40,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `ui.rs` | Zeichnen: Sessionliste, blaue Menübox darunter, Fenster mit Nummer, Zustand und Fokusrahmen |
 | `selection.rs` | Mausmarkierung im Fenster, Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |
 | `install.rs` | `install` / `uninstall`: Binary an festen Ort, Benutzer-PATH (Windows über PowerShell/Registry) |
-| `update.rs` | Update über GitHub-Releases: tägliche Prüfung im Hintergrund, Download (`ureq`), SHA-256 (`sha2`), Entpacken (`zip` bzw. `tar`+`flate2`), Austausch der laufenden Datei (`self-replace`) |
+| `update.rs` | Update über GitHub-Releases: tägliche Prüfung im Hintergrund, SHA-256 (`sha2`), Entpacken (`zip` bzw. `tar`+`flate2`), Austausch der laufenden Datei (`self-replace`) |
+| `http.rs` | HTTPS-Abrufe ohne eigenen TLS-Stack: `curl` des Systems, Rückfall auf `ureq` mit System-TLS (nur Windows/macOS) |
 | `term_view.rs` | zeichnet einen `vt100`-Bildschirm (Farben, fett, *dim*, kursiv, unterstrichen, invers, Cursor) |
 | `theme.rs` | Farben (Claude-Orange `#D97757` auf dunklem Grund) und Status-Beschriftungen |
 
