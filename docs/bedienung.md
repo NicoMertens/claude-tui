@@ -74,13 +74,15 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | Prozess der gewählten Session beenden | Fenster schließen und Prozess beenden |
+| `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
-`c` lässt die Session im Hintergrund weiterlaufen, `x` beendet ihren Prozess. Die Claude-Session selbst
-bleibt in beiden Fällen gespeichert und in der Liste; mit `Enter` oder `1`–`4` geht es dort weiter.
+`c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („… löschen?“, `j`/Enter bestätigt,
+`n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
+(`~/.claude/projects/<Ordner>/<id>.jsonl` samt gleichnamigem Unterordner) — die Session ist danach
+auch für `claude --resume` weg.
 
 **Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui unten in der Sessionliste, in
 welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.
