@@ -42,7 +42,7 @@ Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **F
 oder die Sessionliste) hat einen hellorangen Rahmen, alle anderen einen dunkelorangen.
 
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **arbeitet** (rot), **wartet auf
-dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust │ arbeitet`. Die Sessionliste nutzt dieselben Farben.
+dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust · arbeitet`. Die Sessionliste nutzt dieselben Farben.
 
 ## Tasten
 
