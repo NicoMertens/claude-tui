@@ -7,11 +7,11 @@ use ratatui::{
 };
 use tui_term::widget::{Cursor, PseudoTerminal};
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::{app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, theme, windows::Focus};
 
-const SIDEBAR_WIDTH: u16 = 34;
+const SIDEBAR_WIDTH: u16 = 42;
 
 fn split(area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(10)]).areas(area)
@@ -169,45 +169,48 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(List::new(items), area, &mut state);
 }
 
-/// Zwei Zeilen: Titel mit Fensternummer, darunter Status (laufend) oder Alter (gespeichert).
+/// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
 fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
+    let session = entry.running.and_then(|id| app.session(id));
+    let clock = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let (symbol, color) = theme::status_symbol(session.map(|s| s.status), clock);
     let slot = entry.running.and_then(|id| app.windows.window_of(id));
-    let suffix = slot.map(|s| format!(" [{}]", s + 1)).unwrap_or_default();
-    let title_width = width.saturating_sub(2 + suffix.chars().count());
-    let name_style = match (selected, entry.running.is_some()) {
-        (true, _) => Style::default()
-            .fg(theme::TEXT)
-            .add_modifier(Modifier::BOLD),
-        (false, true) => Style::default().fg(theme::TEXT),
-        (false, false) => Style::default().fg(theme::MUTED),
+    let window = slot.map_or_else(|| " ".repeat(4), |s| format!(" [{}]", s + 1));
+    let since = match session {
+        Some(s) => Some(s.last_output().elapsed()),
+        None => entry
+            .modified
+            .map(|m| SystemTime::now().duration_since(m).unwrap_or_default()),
     };
-    let first = Line::from(vec![
-        Span::styled(
-            if selected { "▌ " } else { "  " },
-            Style::default().fg(theme::ACCENT),
-        ),
-        Span::styled(head(&entry.title, title_width), name_style),
-        Span::styled(suffix, Style::default().fg(theme::ACCENT)),
+    let time = since.map(short_age).unwrap_or_default();
+    // Symbol + Leerzeichen, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
+    let title_width = width.saturating_sub(2 + 4 + 6);
+    let title = head(&entry.title, title_width);
+    let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
+
+    let name_style = if session.is_some() || selected {
+        Style::default().fg(theme::TEXT)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    let line = Line::from(vec![
+        Span::styled(format!("{symbol} "), Style::default().fg(color)),
+        Span::styled(format!("{title}{padding}"), name_style),
+        Span::styled(window, Style::default().fg(theme::ACCENT)),
+        Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
     ]);
-    let status = entry
-        .running
-        .and_then(|id| app.session(id))
-        .map(|s| s.status);
-    let second = match status {
-        Some(status) => {
-            let (label, color) = theme::status(status);
-            Line::from(vec![
-                Span::raw("    "),
-                Span::styled("● ", Style::default().fg(color)),
-                Span::styled(label, Style::default().fg(color)),
-            ])
-        }
-        None => muted(&format!(
-            "    {}",
-            entry.modified.map(age).unwrap_or_default()
-        )),
-    };
-    ListItem::new(vec![first, second])
+    let item = ListItem::new(line);
+    if selected {
+        item.style(
+            Style::default()
+                .bg(theme::SELECTED_BG)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        item
+    }
 }
 
 /// Kürzt hinten mit „…“ (für Titel).
@@ -219,17 +222,14 @@ fn head(text: &str, width: usize) -> String {
     format!("{keep}…")
 }
 
-/// „vor 5 Min.“, „vor 3 Std.“, „vor 2 Tagen“.
-fn age(modified: SystemTime) -> String {
-    let secs = SystemTime::now()
-        .duration_since(modified)
-        .map_or(0, |d| d.as_secs());
+/// „jetzt“, „5m“, „3h“, „2d“.
+fn short_age(since: Duration) -> String {
+    let secs = since.as_secs();
     match secs {
-        0..=59 => "gerade eben".to_string(),
-        60..=3599 => format!("vor {} Min.", secs / 60),
-        3600..=86_399 => format!("vor {} Std.", secs / 3600),
-        86_400..=172_799 => "vor 1 Tag".to_string(),
-        _ => format!("vor {} Tagen", secs / 86_400),
+        0..=59 => "jetzt".to_string(),
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86_399 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
     }
 }
 

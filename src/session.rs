@@ -109,6 +109,11 @@ impl Session {
         lock(&self.parser)
     }
 
+    /// Zeitpunkt der letzten Ausgabe — bei einer wartenden Session also, seit wann sie wartet.
+    pub fn last_output(&self) -> Instant {
+        *lock(&self.last_output)
+    }
+
     pub fn application_cursor(&self) -> bool {
         self.screen().screen().application_cursor()
     }
