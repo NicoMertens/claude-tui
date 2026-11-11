@@ -6,8 +6,8 @@ use crate::session::Status;
 
 /// Claude-Orange, die Akzentfarbe des Themes.
 pub const ACCENT: Color = Color::Rgb(0xD9, 0x77, 0x57);
-/// Rahmen und Titel des Bereichs mit Fokus.
-pub const FOCUS: Color = Color::Rgb(0xF0, 0xA2, 0x7F);
+/// Rahmen und Titel des Bereichs mit Fokus — dasselbe Blau wie die Menübox.
+pub const FOCUS: Color = Color::Rgb(0x00, 0x9F, 0xDA);
 /// Rahmen und Titel aller anderen Bereiche.
 pub const UNFOCUS: Color = Color::Rgb(0x8C, 0x4A, 0x32);
 pub const BG: Color = Color::Rgb(0x1A, 0x19, 0x18);

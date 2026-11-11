@@ -43,7 +43,8 @@ Rechts bis zu **4 Fenster**, nach Position nummeriert:
 ```
 
 Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **Fokus** (ein Fenster
-oder die Sessionliste) hat einen hellorangen Rahmen, alle anderen einen dunkelorangen.
+oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie die Menübox), alle anderen einen
+dunkelorangen.
 
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
 you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
