@@ -95,10 +95,10 @@ fn function_key(n: u8) -> Option<Vec<u8>> {
     Some(seq.to_vec())
 }
 
-/// Alt+Pfeil wechselt den Fokus und erreicht die Session nie. Nur reines Alt — Ctrl+Alt ist unter
-/// Windows AltGr.
+/// Ctrl+Pfeil wechselt den Fokus und erreicht die Session nie; Claudes Wortsprung geht dafür über
+/// Alt+←/→. Nur reines Ctrl — Ctrl+Alt ist unter Windows AltGr.
 pub fn focus_direction(key: &KeyEvent) -> Option<Direction> {
-    if key.modifiers != KeyModifiers::ALT {
+    if key.modifiers != KeyModifiers::CONTROL {
         return None;
     }
     match key.code {
@@ -115,11 +115,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn alt_arrow_is_focus_change_but_ctrl_arrow_is_not() {
+    fn ctrl_arrow_is_focus_change_but_alt_arrow_is_not() {
         let alt_left = KeyEvent::new(KeyCode::Left, KeyModifiers::ALT);
         let ctrl_left = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
-        assert_eq!(focus_direction(&alt_left), Some(Direction::Left));
-        assert_eq!(focus_direction(&ctrl_left), None);
+        let altgr_left = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL | KeyModifiers::ALT);
+        assert_eq!(focus_direction(&ctrl_left), Some(Direction::Left));
+        assert_eq!(focus_direction(&alt_left), None);
+        assert_eq!(focus_direction(&altgr_left), None);
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

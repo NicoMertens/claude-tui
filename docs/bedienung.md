@@ -84,10 +84,10 @@ you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` �
 
 | Taste | Wirkung |
 |---|---|
-| `Alt+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Alt+←` aus einem linken Fenster geht in die Sessionliste, `Alt+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
+| `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 
-`Alt+Pfeil` erreicht Claude dadurch nie; Wortsprünge im Eingabefeld gehen über `Ctrl+←/→`.
+`Ctrl+Pfeil` erreicht Claude dadurch nie; Wortsprünge im Eingabefeld gehen über `Alt+←/→`.
 
 ### Fokus auf einem Fenster
 
@@ -126,7 +126,7 @@ vom Fokus ab:
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
 mindestens einem offenen Fenster; hatte die Liste den Fokus, geht er ins Fenster ihrer Session bzw.
 Fenster 1). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. Die Liste erscheint auch
-von selbst wieder, sobald sie den Fokus bekommt (`Alt+←`, `0`) oder das letzte Fenster schließt.
+von selbst wieder, sobald sie den Fokus bekommt (`Ctrl+←`, `0`) oder das letzte Fenster schließt.
 Hinweise, die sonst unten in der Liste stehen, zeigt dann der untere Rahmen des Fensters mit Fokus.
 Der Zustand bleibt über einen Neustart erhalten (`state.json`).
 

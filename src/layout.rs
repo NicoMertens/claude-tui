@@ -1,4 +1,4 @@
-//! Geometrie der Fenster: Anordnung für 0–4 Fenster und Nachbarsuche für Alt+Pfeil.
+//! Geometrie der Fenster: Anordnung für 0–4 Fenster und Nachbarsuche für Ctrl+Pfeil.
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(r[0].bottom(), r[1].y);
         assert_eq!(neighbor(&r, 0, Down), Some(1));
         assert_eq!(neighbor(&r, 1, Up), Some(0));
-        // Beide liegen ganz links: Alt+← führt aus jedem in die Sessionliste.
+        // Beide liegen ganz links: Ctrl+← führt aus jedem in die Sessionliste.
         assert_eq!(neighbor(&r, 1, Left), None);
     }
 

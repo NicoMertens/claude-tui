@@ -17,8 +17,8 @@ rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 ╰─────────────────────╯╰────────────────────╯╰────────────────────╯
 ```
 
-Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Alt+Pfeil`, alle Befehle im `Ctrl+A`-Menü unten in
-der Sessionliste.
+Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Ctrl+Pfeil`, alle Befehle im `Ctrl+A`-Menü, das
+über dem Bereich mit dem Fokus erscheint.
 
 ## Aufbau
 
