@@ -42,7 +42,7 @@ Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **F
 oder die Sessionliste) hat einen hellorangen Rahmen, alle anderen einen dunkelorangen.
 
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **arbeitet** (rot), **wartet auf
-dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust arbeitet`.
+dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust │ arbeitet`. Die Sessionliste nutzt dieselben Farben.
 
 ## Tasten
 
@@ -110,9 +110,9 @@ entfällt die Auswahl und Fenster 1 wird genommen.
 
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
-| ✻ (animiert) | orange | arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
+| ✻ (animiert) | rot | arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
 | ▲ | gelb | wartet auf dich | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
-| ● | grün | bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
+| ● | grau | bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 
 Die Formen unterscheiden sich auch ohne Farbe.
