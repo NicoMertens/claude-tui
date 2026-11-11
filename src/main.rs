@@ -9,6 +9,7 @@ mod paths;
 mod recent;
 mod session;
 mod state;
+mod term_view;
 mod theme;
 mod ui;
 mod windows;

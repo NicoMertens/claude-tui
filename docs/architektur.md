@@ -4,10 +4,15 @@
 
 | Crate | Zweck |
 |---|---|
-| `ratatui` + `crossterm` | Oberfläche und Tastatur-/Resize-Ereignisse |
+| `ratatui` 0.30 + `crossterm` 0.29 | Oberfläche, Tastatur-, Maus- und Resize-Ereignisse |
 | `portable-pty` | echtes Pseudo-Terminal je Session (ConPTY unter Windows) |
-| `vt100` | Terminal-Emulation: wertet die Ausgabe der Session zu einem Bildschirm aus |
-| `tui-term` | zeichnet einen `vt100`-Bildschirm als ratatui-Widget |
+| `vt100` 0.18 | Terminal-Emulation: wertet die Ausgabe der Session zu einem Bildschirm aus |
+| `serde` + `serde_json`, `uuid` | Claude-Protokolle und `state.json` lesen/schreiben, Session-IDs |
+
+Den `vt100`-Bildschirm zeichnet das eigene Widget `term_view.rs`, nicht `tui-term`: dessen Version
+für ratatui 0.29 hing an `vt100` 0.15, und das verwirft das Attribut *dim* (SGR 2), mit dem Claude
+Code z. B. Prompt-Vorschläge grau darstellt. Neuere `vt100` brauchen `unicode-width` ≥ 0.2.1, was
+ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 ## Module (`src/`)
 
@@ -26,7 +31,8 @@
 | `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
 | `session.rs` | eine Session: PTY starten, Lese-Thread, Statuserkennung, Schreiben, Resize |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Alt+Pfeil` als Fokuswechsel |
-| `ui.rs` | Zeichnen: Sessionliste mit Menü unten, Fenster mit Nummer und Fokusrahmen |
+| `ui.rs` | Zeichnen: Sessionliste, blaue Menübox darunter, Fenster mit Nummer, Zustand und Fokusrahmen |
+| `term_view.rs` | zeichnet einen `vt100`-Bildschirm (Farben, fett, *dim*, kursiv, unterstrichen, invers, Cursor) |
 | `theme.rs` | Farben (Claude-Orange `#D97757` auf dunklem Grund) und Status-Beschriftungen |
 
 ## Datenfluss

@@ -5,11 +5,13 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
-use tui_term::widget::{Cursor, PseudoTerminal};
 
 use std::time::{Duration, SystemTime};
 
-use crate::{app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, theme, windows::Focus};
+use crate::{
+    app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, term_view::TermView, theme,
+    windows::Focus,
+};
 
 const SIDEBAR_WIDTH: u16 = 42;
 /// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
@@ -326,16 +328,9 @@ fn draw_windows(f: &mut Frame, app: &App) {
             ));
         }
         let block = rounded(color).title(Line::from(spans));
-        let mut cursor = Cursor::default();
-        if !focused || scrolled > 0 {
-            cursor.hide();
-        }
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
         let parser = session.screen();
-        f.render_widget(
-            PseudoTerminal::new(parser.screen())
-                .block(block)
-                .cursor(cursor),
-            rect,
-        );
+        f.render_widget(TermView::new(parser.screen()).show_cursor(focused), inner);
     }
 }

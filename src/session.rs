@@ -1,5 +1,6 @@
 use std::{
     io::{Read, Write},
+    num::NonZeroU16,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -69,7 +70,11 @@ impl Session {
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, SCROLLBACK)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(
+            non_zero(rows),
+            non_zero(cols),
+            SCROLLBACK,
+        )));
         let last_output = Arc::new(Mutex::new(Instant::now()));
         let reader_done = Arc::new(AtomicBool::new(false));
 
@@ -160,7 +165,7 @@ impl Session {
             } else {
                 offset.saturating_sub(WHEEL_LINES)
             };
-            parser.set_scrollback(next);
+            parser.screen_mut().set_scrollback(next);
             return Ok(());
         }
         let button = if up { 64 } else { 65 };
@@ -183,7 +188,7 @@ impl Session {
 
     /// Zurück zur aktuellen Ansicht, z. B. sobald getippt wird.
     pub fn scroll_to_bottom(&mut self) {
-        lock(&self.parser).set_scrollback(0);
+        lock(&self.parser).screen_mut().set_scrollback(0);
     }
 
     /// Schickt Eingabe an die Session; wie in einem Terminal springt die Ansicht dabei ans Ende.
@@ -211,7 +216,7 @@ impl Session {
         }
         self.size = (rows, cols);
         let _ = self.master.resize(pty_size(rows, cols));
-        lock(&self.parser).set_size(rows, cols);
+        lock(&self.parser).set_size(non_zero(rows), non_zero(cols));
     }
 }
 
@@ -238,6 +243,11 @@ fn shell_command(command: &str) -> CommandBuilder {
         cmd.args(["-c", &format!("exec {command}")]);
         cmd
     }
+}
+
+/// vt100 verlangt Größen > 0; ein winziges Fenster wird zu 1.
+fn non_zero(n: u16) -> NonZeroU16 {
+    NonZeroU16::new(n).unwrap_or(NonZeroU16::MIN)
 }
 
 fn pty_size(rows: u16, cols: u16) -> PtySize {
