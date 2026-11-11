@@ -22,9 +22,9 @@ neue Session im aktuellen Verzeichnis.
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),
 gruppiert nach Arbeitsverzeichnis — Gruppen mit der jüngsten Aktivität oben, darin laufende Sessions
-zuerst. Je Session stehen der Titel (eigener Name aus `/rename`, sonst der KI-Titel, sonst der letzte
-Prompt) und darunter der Zustand (laufend) bzw. das Alter (gespeichert). Ist eine Session in einem
-Fenster zu sehen, steht dessen Nummer hinter dem Titel (`[1]`). Laufende Sessions ohne Fenster
+zuerst. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
+sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
+Aktivität (`jetzt`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
 Rechts bis zu **4 Fenster**, nach Position nummeriert:
@@ -103,12 +103,14 @@ entfällt die Auswahl und Fenster 1 wird genommen.
 
 ## Zustände in der Seitenleiste
 
-| Anzeige | Bedeutung |
-|---|---|
-| ● arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
-| ● wartet auf dich | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
-| ● bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
-| (Alter) | Session läuft nicht, ist aber gespeichert und lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
+| Symbol | Farbe | Zustand | Bedeutung |
+|---|---|---|---|
+| ✻ (animiert) | orange | arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
+| ▲ | gelb | wartet auf dich | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
+| ● | grün | bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
+| ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
+
+Die Formen unterscheiden sich auch ohne Farbe.
 
 Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
 [Architektur](architektur.md).
