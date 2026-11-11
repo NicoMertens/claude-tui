@@ -12,6 +12,8 @@ use std::time::{Duration, SystemTime};
 use crate::{app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, theme, windows::Focus};
 
 const SIDEBAR_WIDTH: u16 = 42;
+/// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
+const FOLDER_ICON: &str = "📁";
 
 fn split(area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(10)]).areas(area)
@@ -155,8 +157,13 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let mut items: Vec<ListItem> = Vec::new();
     let mut selected_item = None;
     for group in &app.groups {
-        let header = tail(&group.cwd.display().to_string(), width.saturating_sub(3));
-        items.push(ListItem::new(muted(&format!("── {header}"))));
+        let header = tail(&group.cwd.display().to_string(), width.saturating_sub(4));
+        // Das Ordner-Emoji ist zwei Spalten breit.
+        let line = Line::from(vec![
+            Span::raw(format!("{FOLDER_ICON} ")),
+            Span::styled(header, Style::default().fg(theme::MUTED)),
+        ]);
+        items.push(ListItem::new(line));
         for entry in &group.entries {
             let selected = app.cursor.as_deref() == Some(entry.claude_id.as_str());
             if selected {
