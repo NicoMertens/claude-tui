@@ -9,7 +9,13 @@ use ratatui::{
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    app::App, dirpick::DirPicker, keys, list::Entry, menu::Menu, term_view::TermView, theme,
+    app::{App, ListHits},
+    dirpick::DirPicker,
+    keys,
+    list::Entry,
+    menu::Menu,
+    term_view::TermView,
+    theme,
     windows::Focus,
 };
 
@@ -75,7 +81,22 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(theme::MENU),
                 ));
             }
-            (String::new(), vec![Line::from(hint)])
+            // Titel der Box: was gerade den Fokus hat — wie beim geöffneten Menü.
+            let focus = match app.windows.focus() {
+                Focus::Window(slot) => {
+                    let title = app
+                        .windows
+                        .focused_session()
+                        .map(|id| app.title_of(id))
+                        .unwrap_or_default();
+                    head(
+                        &format!("Window {} · {title}", slot + 1),
+                        panel_width.saturating_sub(4),
+                    )
+                }
+                Focus::List => "Session list".to_string(),
+            };
+            (focus, vec![Line::from(hint)])
         }
     };
     let (panel_title, panel_lines) = panel;
@@ -199,6 +220,8 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
 fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let width = area.width as usize;
     let mut items: Vec<ListItem> = Vec::new();
+    // Claude-ID je Listenzeile (Überschriften: `None`) — für Mausklicks in die Liste.
+    let mut rows: Vec<Option<String>> = Vec::new();
     let mut selected_item = None;
     for group in &app.groups {
         let header = tail(&group.cwd.display().to_string(), width.saturating_sub(4));
@@ -208,16 +231,28 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(header, Style::default().fg(theme::MUTED)),
         ]);
         items.push(ListItem::new(line));
+        rows.push(None);
         for entry in &group.entries {
             let selected = app.cursor.as_deref() == Some(entry.claude_id.as_str());
             if selected {
                 selected_item = Some(items.len());
             }
             items.push(entry_item(app, entry, selected, width));
+            rows.push(Some(entry.claude_id.clone()));
         }
     }
     let mut state = ListState::default().with_selected(selected_item);
     f.render_stateful_widget(List::new(items), area, &mut state);
+
+    // Sichtbare Zeilen merken (jede Listenzeile ist eine Bildschirmzeile).
+    let hits = rows
+        .into_iter()
+        .skip(state.offset())
+        .take(area.height as usize)
+        .enumerate()
+        .filter_map(|(i, id)| id.map(|id| (area.y + i as u16, id)))
+        .collect();
+    app.list_hits.replace(ListHits { area, rows: hits });
 }
 
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.

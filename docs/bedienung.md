@@ -96,7 +96,8 @@ einen Zeilenumbruch ein.
 ### Menü (`Ctrl+A`)
 
 Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
-wird; ist es zu, zeigt die Box nur `Ctrl+A Menu`. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+wird; ist es zu, zeigt die Box `Ctrl+A Menu` und im Rahmen, was gerade den Fokus hat
+(`Window 2 · <Titel>` bzw. `Session list`). Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |
@@ -137,6 +138,10 @@ entfällt die Auswahl und Fenster 1 wird genommen.
 Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen);
 die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
+
+**Auswählen per Klick:** Ein Klick in ein Fenster (auch auf Rahmen oder Titel) gibt ihm den Fokus.
+Ein Klick auf eine Session in der Sessionliste wählt sie aus und gibt der Liste den Fokus; ein
+**Doppelklick** darauf wirkt wie `Enter` (ins Fenster der Session springen bzw. Fensterauswahl).
 
 **Markieren und Kopieren:** Mit gedrückter linker Maustaste in einem Fenster ziehen markiert Text
 (blau hinterlegt) — nur innerhalb dieses Fensters, auch wenn die Maus darüber hinaus gezogen wird.

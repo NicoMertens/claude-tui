@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     path::{Path, PathBuf},
     sync::mpsc::Receiver,
     time::{Duration, Instant},
@@ -28,6 +29,26 @@ const STORE_INTERVAL: Duration = Duration::from_secs(2);
 /// Zweiter Klick auf dieselbe Zelle innerhalb dieser Zeit = Doppelklick (Wort markieren).
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
+/// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
+/// Claude-ID) je Session. Gruppenüberschriften fehlen absichtlich.
+#[derive(Debug, Default)]
+pub struct ListHits {
+    pub area: Rect,
+    pub rows: Vec<(u16, String)>,
+}
+
+impl ListHits {
+    fn at(&self, position: Position) -> Option<&str> {
+        if !self.area.contains(position) {
+            return None;
+        }
+        self.rows
+            .iter()
+            .find(|(y, _)| *y == position.y)
+            .map(|(_, id)| id.as_str())
+    }
+}
+
 /// Wie ein Claude-Prozess gestartet wird.
 enum Launch {
     /// Neue Session mit vorgegebener ID (`--session-id`), damit sie sich später fortsetzen lässt.
@@ -54,6 +75,10 @@ pub struct App {
     pub selection: Option<Selection>,
     dragging: bool,
     last_click: Option<(Instant, SessionId, Cell)>,
+    /// Letzter Klick in die Sessionliste (für Doppelklick = Enter).
+    last_list_click: Option<(Instant, String)>,
+    /// Beim Zeichnen gemerkt: welche Bildschirmzeile der Liste welche Session zeigt.
+    pub list_hits: RefCell<ListHits>,
     /// Neuere Version auf GitHub, sobald die Prüfung beim Start eine gefunden hat.
     pub update: Option<Available>,
     update_check: Option<Receiver<Available>>,
@@ -86,6 +111,8 @@ impl App {
             selection: None,
             dragging: false,
             last_click: None,
+            last_list_click: None,
+            list_hits: RefCell::new(ListHits::default()),
             update: None,
             update_check: update::spawn_check(),
             update_install: None,
@@ -313,6 +340,11 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                let list_hit = self.list_hits.borrow().at(position).map(str::to_string);
+                if let Some(claude_id) = list_hit {
+                    self.on_list_click(claude_id);
+                    return;
+                }
                 let Some((slot, id, cell)) = self.window_at(position) else {
                     return;
                 };
@@ -358,6 +390,28 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Klick in die Sessionliste: Session auswählen und Fokus auf die Liste; ein zweiter Klick auf
+    /// dieselbe Session kurz danach wirkt wie Enter.
+    fn on_list_click(&mut self, claude_id: String) {
+        self.menu = None;
+        self.dir_picker = None;
+        self.selection = None;
+        let double = self
+            .last_list_click
+            .as_ref()
+            .is_some_and(|(at, id)| at.elapsed() < DOUBLE_CLICK && *id == claude_id);
+        self.last_list_click = Some((Instant::now(), claude_id.clone()));
+        self.cursor = Some(claude_id);
+        self.set_focus(Focus::List);
+        if double {
+            self.last_list_click = None;
+            let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+            if let Err(e) = self.on_list_key(enter) {
+                self.notice = Some(format!("{e:#}"));
+            }
         }
     }
 
@@ -705,4 +759,37 @@ fn cell_in(inner: Rect, position: Position) -> Cell {
     let col = position.x.clamp(inner.x, inner.right().saturating_sub(1)) - inner.x;
     let row = position.y.clamp(inner.y, inner.bottom().saturating_sub(1)) - inner.y;
     Cell { row, col }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_click_finds_session_row_but_not_headers_or_outside() {
+        let hits = ListHits {
+            area: Rect::new(1, 1, 40, 10),
+            rows: vec![(2, "a".into()), (3, "b".into())],
+        };
+        assert_eq!(hits.at(Position::new(5, 3)), Some("b"));
+        assert_eq!(hits.at(Position::new(5, 1)), None, "Überschrift");
+        assert_eq!(
+            hits.at(Position::new(45, 3)),
+            None,
+            "rechts neben der Liste"
+        );
+    }
+
+    #[test]
+    fn mouse_cell_is_clamped_to_window_content() {
+        let inner = Rect::new(10, 5, 20, 8);
+        assert_eq!(
+            cell_in(inner, Position::new(12, 6)),
+            Cell { row: 1, col: 2 }
+        );
+        assert_eq!(
+            cell_in(inner, Position::new(0, 100)),
+            Cell { row: 7, col: 0 }
+        );
+    }
 }
