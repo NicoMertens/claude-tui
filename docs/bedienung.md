@@ -41,6 +41,9 @@ Rechts bis zu **4 Fenster**, nach Position nummeriert:
 Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **Fokus** (ein Fenster
 oder die Sessionliste) hat einen hellorangen Rahmen, alle anderen einen dunkelorangen.
 
+Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **arbeitet** (rot), **wartet auf
+dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust arbeitet`.
+
 ## Tasten
 
 ### Überall

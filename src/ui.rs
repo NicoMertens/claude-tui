@@ -273,7 +273,9 @@ fn draw_windows(f: &mut Frame, app: &App) {
             format!(" {} · {} ", slot + 1, app.title_of(id)),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         );
-        let block = rounded(color).title(Line::from(title));
+        let (label, label_color) = theme::status_label(session.status);
+        let status = Span::styled(format!("{label} "), Style::default().fg(label_color));
+        let block = rounded(color).title(Line::from(vec![title, status]));
         let mut cursor = Cursor::default();
         if !focused {
             cursor.hide();

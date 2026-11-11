@@ -18,6 +18,8 @@ pub const MUTED: Color = Color::Rgb(0x8C, 0x88, 0x82);
 
 pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 const IDLE: Color = Color::Rgb(0x8F, 0xBF, 0x7F);
+/// Rot für „arbeitet“ in der Fensterleiste.
+const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);
 
 /// Bilder des Claude-Spinners; läuft vor und zurück wie in Claude Code.
 const SPINNER: [&str; 6] = ["·", "✢", "✳", "✶", "✻", "✽"];
@@ -31,6 +33,16 @@ pub fn status_symbol(status: Option<Status>, elapsed: Duration) -> (&'static str
         Some(Status::Waiting) => ("▲", WAITING),
         Some(Status::Idle) => ("●", IDLE),
         Some(Status::Exited) | None => ("○", MUTED),
+    }
+}
+
+/// Statustext in der Fensterleiste: rot = arbeitet, gelb = Rückfrage, grau = bereit.
+pub fn status_label(status: Status) -> (&'static str, Color) {
+    match status {
+        Status::Working => ("arbeitet", BUSY),
+        Status::Waiting => ("wartet auf dich", WAITING),
+        Status::Idle => ("bereit", MUTED),
+        Status::Exited => ("beendet", MUTED),
     }
 }
 
