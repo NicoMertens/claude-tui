@@ -147,21 +147,19 @@ impl Menu {
     }
 
     /// Fensterauswahl: belegte Fenster ersetzen oder (bei < 4) ein neues öffnen.
-    pub fn pick_window(purpose: Purpose, title: String, windows: &[String]) -> Self {
-        let mut items: Vec<Item> = windows
-            .iter()
-            .enumerate()
-            .map(|(i, name)| Item {
+    pub fn pick_window(purpose: Purpose, title: String, open: usize) -> Self {
+        let mut items: Vec<Item> = (0..open)
+            .map(|i| Item {
                 hotkey: Hotkey::Char(digit(i + 1)),
-                label: format!("Replace {name}"),
+                label: format!("Replace Window {}", i + 1),
                 action: Action::Place(i),
             })
             .collect();
-        if windows.len() < MAX_WINDOWS {
+        if open < MAX_WINDOWS {
             items.push(Item {
-                hotkey: Hotkey::Char(digit(windows.len() + 1)),
+                hotkey: Hotkey::Char(digit(open + 1)),
                 label: "New window".to_string(),
-                action: Action::Place(windows.len()),
+                action: Action::Place(open),
             });
         }
         Self {
@@ -286,11 +284,7 @@ mod tests {
 
     #[test]
     fn hotkey_and_arrows_select_items() {
-        let mut menu = Menu::pick_window(
-            Purpose::NewSession(PathBuf::from(".")),
-            "Neu".into(),
-            &names(2),
-        );
+        let mut menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 2);
         assert_eq!(menu.items.len(), 3);
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('3'))),
@@ -306,13 +300,17 @@ mod tests {
 
     #[test]
     fn pick_window_without_new_window_when_full() {
-        let menu = Menu::pick_window(
-            Purpose::NewSession(PathBuf::from(".")),
-            "Neu".into(),
-            &names(4),
+        let menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 4);
+        let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Replace Window 1",
+                "Replace Window 2",
+                "Replace Window 3",
+                "Replace Window 4"
+            ]
         );
-        assert_eq!(menu.items.len(), 4);
-        assert!(menu.items.iter().all(|i| i.label.starts_with("Replace")));
     }
 
     #[test]

@@ -642,7 +642,11 @@ impl App {
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
             Purpose::Delete(_) => return,
         };
-        self.menu = Some(Menu::pick_window(purpose, title, &self.window_names()));
+        self.menu = Some(Menu::pick_window(
+            purpose,
+            title,
+            self.windows.slots().len(),
+        ));
     }
 
     fn move_focus(&mut self, direction: Direction) {

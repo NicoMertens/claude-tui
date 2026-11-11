@@ -134,9 +134,9 @@ Die zuletzt genutzten Verzeichnisse (höchstens 10) stehen in `%APPDATA%\claude-
 bzw. `~/.config/claude-tui/recent-dirs.txt`. Die erste Session beim Programmstart läuft ohne Auswahl
 im aktuellen Verzeichnis.
 
-**Fensterauswahl:** listet die belegten Fenster („Replace claude 1“) und, solange weniger als 4 offen
-sind, „New window“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen,
-entfällt die Auswahl und Fenster 1 wird genommen.
+**Fensterauswahl:** listet die belegten Fenster („Replace Window 1“, Nummer wie in der Fensterleiste)
+und, solange weniger als 4 offen sind, „New window“. Eine ersetzte Session läuft im Hintergrund
+weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
 
 ## Maus
 
