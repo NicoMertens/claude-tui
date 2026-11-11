@@ -2,18 +2,23 @@
 
 Ein Terminal-Arbeitsplatz für mehrere Claude-Code-Sessions, geschrieben in Rust. Links eine
 Seitenleiste mit allen Sessions und ihrem Zustand (arbeitet, wartet auf dich, bereit, beendet),
-rechts die aktive Session in einem echten PTY. Die Idee stammt von
+rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 [herdr](https://github.com/ogulcancelik/herdr); Code ist nicht übernommen.
 
 ```
-╭ ✻ claude-tui ──────────╮╭ claude 1 ─────────────────────────────╮
-│▌1 claude 1             ││                                       │
-│   ● arbeitet           ││  (Claude Code läuft hier)             │
-│ 2 claude 2             ││                                       │
-│   ● wartet auf dich    ││                                       │
-╰────────────────────────╯╰───────────────────────────────────────╯
- Ctrl+A dann: c neu · x schließen · n/p wechseln · 1–9 wählen · q beenden
+╭ ✻ claude-tui ───────╮╭ 1 · claude 1 ──────╮╭ 2 · claude 3 ──────╮
+│▌claude 1 [1]        ││                    ││                    │
+│  ● arbeitet         ││                    │╰────────────────────╯
+│ claude 2            ││                    │╭ 3 · claude 4 ──────╮
+│  ● wartet auf dich  ││                    ││                    │
+│ claude 3 [2]        ││                    ││                    │
+│  ● bereit           ││                    ││                    │
+│ Ctrl+A Menü         ││                    ││                    │
+╰─────────────────────╯╰────────────────────╯╰────────────────────╯
 ```
+
+Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Alt+Pfeil`, alle Befehle im `Ctrl+A`-Menü unten in
+der Sessionliste.
 
 ## Aufbau
 
