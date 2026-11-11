@@ -10,5 +10,5 @@ Rust-TUI, die mehrere Claude-Code-Sessions in PTYs mit Status-Seitenleiste verwa
   `cargo clippy --all-targets -- -D warnings` sauber.
 - **Code-Richtlinien:** [docs/code-richtlinien.md](docs/code-richtlinien.md) — vor jeder Code-Änderung
   beachten.
-- `docs/` beschreibt das Projekt für Nutzer und Mitwirkende (liegt mit auf GitHub). Hintergrundwissen
-  und Entscheidungen gehören ins Brain: `S:\.brain\wiki\private\architektur\claude-tui.md`.
+- `docs/` beschreibt das Projekt für Nutzer und Mitwirkende (liegt mit auf GitHub). Wo lokales
+  Hintergrundwissen liegt, steht in `CLAUDE.local.md` (nicht versioniert).

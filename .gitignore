@@ -1,2 +1,5 @@
 /target/
 /dist/
+# Arbeits-Worktrees von Claude Code und lokale Notizen
+/.claude/worktrees/
+/CLAUDE.local.md

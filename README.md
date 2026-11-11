@@ -36,3 +36,7 @@ cargo run --release    # bauen und starten, jede Session startet `claude`
 Die gebaute App liegt danach unter `target/release/claude-tui`.
 
 Fertige Archive für Windows, Linux und macOS gibt es unter **Releases**.
+
+## Lizenz
+
+[MIT](LICENSE)
