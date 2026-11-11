@@ -23,22 +23,33 @@ const SIDEBAR_WIDTH: u16 = 42;
 /// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
 const FOLDER_ICON: &str = "📁";
 
-fn split(area: Rect) -> [Rect; 2] {
+/// Teilt den Bildschirm in Sessionliste und Fensterfläche; bei ausgeblendeter Liste bekommen die
+/// Fenster die volle Breite (die Liste ist dann leer).
+fn split(area: Rect, list_hidden: bool) -> [Rect; 2] {
+    if list_hidden {
+        return [Rect::new(area.x, area.y, 0, area.height), area];
+    }
     Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(10)]).areas(area)
 }
 
-/// Fläche rechts neben der Sessionliste, auf die die Fenster verteilt werden.
-pub fn windows_area(width: u16, height: u16) -> Rect {
-    split(Rect::new(0, 0, width, height))[1]
+/// Fläche, auf die die Fenster verteilt werden: rechts neben der Sessionliste bzw. der ganze
+/// Bildschirm, wenn sie ausgeblendet ist.
+pub fn windows_area(screen: Rect, list_hidden: bool) -> Rect {
+    split(screen, list_hidden)[1]
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
-    let [sidebar, _] = split(f.area());
+    let [sidebar, _] = split(f.area(), app.list_hidden);
     f.render_widget(
         Block::default().style(Style::default().bg(theme::BG)),
         f.area(),
     );
-    draw_sidebar(f, app, sidebar);
+    if app.list_hidden {
+        // Keine sichtbare Liste: alte Klickflächen dürfen nicht mehr greifen.
+        app.list_hits.replace(ListHits::default());
+    } else {
+        draw_sidebar(f, app, sidebar);
+    }
     draw_windows(f, app);
     draw_overlay(f, app);
 }
@@ -328,7 +339,7 @@ fn draw_overlay(f: &mut Frame, app: &App) {
         }
     };
     let screen = f.area();
-    let [sidebar, windows] = split(screen);
+    let [sidebar, windows] = split(screen, app.list_hidden);
     // Fokus auf der Liste: mittig über der Sessionliste und auf sie begrenzt (kein Ausweichen).
     let (target, fallback) = match app.windows.focus() {
         Focus::Window(slot) => (
@@ -414,7 +425,7 @@ fn dir_picker_width(picker: &DirPicker) -> usize {
 fn draw_windows(f: &mut Frame, app: &App) {
     let rects = app.window_rects();
     if rects.is_empty() {
-        let [_, area] = split(f.area());
+        let [_, area] = split(f.area(), app.list_hidden);
         let hint = format!(" No window open – {} n starts a session", keys::PREFIX_HINT);
         let text = Paragraph::new(Span::styled(hint, Style::default().fg(theme::MUTED)));
         f.render_widget(text.block(rounded(theme::UNFOCUS)), area);
@@ -451,7 +462,16 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 Style::default().fg(theme::MENU),
             ));
         }
-        let block = rounded(color).title(Line::from(spans));
+        let mut block = rounded(color).title(Line::from(spans));
+        // Ohne Sessionliste fehlt deren Hinweiszeile; der Hinweis steht dann unten im Fenster
+        // mit Fokus.
+        if let Some(notice) = app.notice.as_deref().filter(|_| app.list_hidden && focused) {
+            let width = (rect.width as usize).saturating_sub(4);
+            block = block.title_bottom(Line::from(Span::styled(
+                format!(" {} ", head(notice, width)),
+                Style::default().fg(theme::WAITING),
+            )));
+        }
         let inner = block.inner(rect);
         f.render_widget(block, rect);
         let parser = session.screen();

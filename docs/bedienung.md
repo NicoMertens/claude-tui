@@ -115,7 +115,15 @@ vom Fokus ab:
 | `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
+| `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
+
+`s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
+mindestens einem offenen Fenster; hatte die Liste den Fokus, geht er ins Fenster ihrer Session bzw.
+Fenster 1). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. Die Liste erscheint auch
+von selbst wieder, sobald sie den Fokus bekommt (`Alt+←`, `0`) oder das letzte Fenster schließt.
+Hinweise, die sonst unten in der Liste stehen, zeigt dann der untere Rahmen des Fensters mit Fokus.
+Der Zustand bleibt über einen Neustart erhalten (`state.json`).
 
 `c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**

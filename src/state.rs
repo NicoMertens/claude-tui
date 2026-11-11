@@ -16,6 +16,9 @@ pub struct State {
     pub windows: Vec<String>,
     /// Fensterindex mit Fokus; `None` = Sessionliste.
     pub focus: Option<usize>,
+    /// Sessionliste ausgeblendet (fehlt in älteren Dateien = eingeblendet).
+    #[serde(default)]
+    pub list_hidden: bool,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -43,6 +46,7 @@ mod tests {
         let state = State {
             windows: vec!["a".into(), "b".into()],
             focus: Some(1),
+            list_hidden: true,
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);

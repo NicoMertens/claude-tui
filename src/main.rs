@@ -29,7 +29,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -97,7 +97,7 @@ fn restore_terminal() {
 
 fn run(terminal: &mut Term, command: String) -> Result<()> {
     let size = terminal.size()?;
-    let mut app = app::App::new(command, ui::windows_area(size.width, size.height))?;
+    let mut app = app::App::new(command, Rect::new(0, 0, size.width, size.height))?;
 
     while !app.should_quit {
         app.tick();
@@ -107,7 +107,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
                 Event::Paste(text) => app.on_paste(&text)?,
                 Event::Mouse(mouse) => app.on_mouse(mouse),
-                Event::Resize(w, h) => app.resize(ui::windows_area(w, h)),
+                Event::Resize(w, h) => app.resize(Rect::new(0, 0, w, h)),
                 _ => {}
             }
         }

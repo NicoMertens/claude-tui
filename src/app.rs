@@ -20,6 +20,7 @@ use crate::{
     selection::{self, Cell, Selection},
     session::{Session, Status},
     state::{self, State},
+    ui,
     update::{self, Available},
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
 };
@@ -93,13 +94,16 @@ pub struct App {
     recent: Vec<PathBuf>,
     store: Store,
     last_scan: Instant,
-    /// Fläche rechts neben der Sessionliste, auf die die Fenster verteilt werden.
-    area: Rect,
+    /// Ganzer Bildschirm; die Fensterfläche ergibt sich daraus und aus `list_hidden`.
+    screen: Rect,
+    /// Sessionliste ausgeblendet: die Fenster bekommen die volle Breite. Nur mit mindestens einem
+    /// Fenster und nie bei Fokus auf der Liste.
+    pub list_hidden: bool,
     next_id: SessionId,
 }
 
 impl App {
-    pub fn new(command: String, area: Rect) -> Result<Self> {
+    pub fn new(command: String, screen: Rect) -> Result<Self> {
         let mut store = Store::new();
         store.refresh();
         let mut app = Self {
@@ -125,7 +129,8 @@ impl App {
             recent: recent::load(),
             store,
             last_scan: Instant::now(),
-            area,
+            screen,
+            list_hidden: false,
             next_id: 0,
         };
         app.restore();
@@ -157,6 +162,7 @@ impl App {
             _ => Focus::List,
         };
         self.set_focus(focus);
+        self.set_list_hidden(saved.list_hidden);
     }
 
     pub fn session(&self, id: SessionId) -> Option<&Session> {
@@ -185,7 +191,10 @@ impl App {
 
     /// Rechtecke der Fenster in Nummernreihenfolge.
     pub fn window_rects(&self) -> Vec<Rect> {
-        layout::windows(self.area, self.windows.len())
+        layout::windows(
+            ui::windows_area(self.screen, self.list_hidden),
+            self.windows.len(),
+        )
     }
 
     pub fn tick(&mut self) {
@@ -455,8 +464,8 @@ impl App {
         });
     }
 
-    pub fn resize(&mut self, area: Rect) {
-        self.area = area;
+    pub fn resize(&mut self, screen: Rect) {
+        self.screen = screen;
         self.resize_windows();
     }
 
@@ -579,6 +588,7 @@ impl App {
             }
             Action::Cancel => {}
             Action::Focus(focus) => self.set_focus(focus),
+            Action::ToggleList => self.set_list_hidden(!self.list_hidden),
             Action::SendPrefix => {
                 if let Some(id) = self.windows.focused_session() {
                     if let Some(session) = self.session_mut(id) {
@@ -626,6 +636,7 @@ impl App {
                 .as_ref()
                 .filter(|_| self.update_install.is_none())
                 .map(|u| u.version.as_str()),
+            list_hidden: self.list_hidden,
         }));
     }
 
@@ -684,8 +695,36 @@ impl App {
     /// Setzt den Fokus; bei einem Fenster folgt die Listenauswahl dessen Session.
     fn set_focus(&mut self, focus: Focus) {
         self.windows.set_focus(focus);
+        self.keep_list_reachable();
         self.sync_cursor();
         self.save_state();
+    }
+
+    /// Blendet die Sessionliste aus oder ein. Ausblenden geht nur mit einem offenen Fenster; hat
+    /// die Liste den Fokus, wandert er ins Fenster ihrer Session (sonst Fenster 1).
+    fn set_list_hidden(&mut self, hidden: bool) {
+        if hidden && self.windows.len() == 0 {
+            return;
+        }
+        if hidden && self.windows.focus() == Focus::List {
+            let slot = self
+                .selected_running()
+                .and_then(|id| self.windows.window_of(id))
+                .unwrap_or(0);
+            self.windows.set_focus(Focus::Window(slot));
+            self.sync_cursor();
+        }
+        self.list_hidden = hidden;
+        self.resize_windows();
+        self.save_state();
+    }
+
+    /// Fokus auf der Liste oder kein Fenster mehr offen: die Liste muss sichtbar sein.
+    fn keep_list_reachable(&mut self) {
+        if self.list_hidden && (self.windows.focus() == Focus::List || self.windows.len() == 0) {
+            self.list_hidden = false;
+            self.resize_windows();
+        }
     }
 
     fn sync_cursor(&mut self) {
@@ -710,6 +749,7 @@ impl App {
     }
 
     fn after_layout_change(&mut self) {
+        self.keep_list_reachable();
         self.resize_windows();
         self.sync_cursor();
         self.save_state();
@@ -727,6 +767,7 @@ impl App {
                 Focus::Window(slot) => Some(slot),
                 Focus::List => None,
             },
+            list_hidden: self.list_hidden,
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);
@@ -753,7 +794,7 @@ impl App {
         let command = format!("{} {flag} {claude_id}", self.command);
         self.next_id += 1;
         let id = self.next_id;
-        let inner = self.area.inner(Margin::new(1, 1));
+        let inner = ui::windows_area(self.screen, self.list_hidden).inner(Margin::new(1, 1));
         let session = Session::spawn(
             id,
             claude_id,

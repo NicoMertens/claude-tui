@@ -20,6 +20,8 @@ pub enum Action {
     Cancel,
     Focus(Focus),
     SendPrefix,
+    /// Sessionliste ein- bzw. ausblenden.
+    ToggleList,
     /// Neuere Version von GitHub installieren.
     Update,
     Quit,
@@ -89,6 +91,8 @@ pub struct Context<'a> {
     pub has_selection: bool,
     /// Version eines verfügbaren Updates (`None` = keins oder läuft schon).
     pub update: Option<&'a str>,
+    /// Die Sessionliste ist ausgeblendet.
+    pub list_hidden: bool,
 }
 
 impl Menu {
@@ -127,6 +131,12 @@ impl Menu {
                 Action::Focus(Focus::List),
             );
             add(Hotkey::Prefix, "Send Ctrl+A to Claude", Action::SendPrefix);
+        }
+        // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
+        if ctx.list_hidden {
+            add(Hotkey::Char('s'), "Show session list", Action::ToggleList);
+        } else if !ctx.windows.is_empty() {
+            add(Hotkey::Char('s'), "Hide session list", Action::ToggleList);
         }
         if let Some(version) = ctx.update {
             let label = format!("Update to v{version}");
@@ -247,6 +257,7 @@ mod tests {
             selected_has_window: true,
             has_selection: true,
             update: None,
+            list_hidden: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -264,6 +275,7 @@ mod tests {
             selected_has_window: true,
             has_selection: true,
             update: None,
+            list_hidden: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -277,9 +289,39 @@ mod tests {
             selected_has_window: false,
             has_selection: true,
             update: None,
+            list_hidden: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
         assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));
+    }
+
+    fn toggle_label(windows: usize, list_hidden: bool) -> Option<String> {
+        let windows = names(windows);
+        let menu = Menu::commands(&Context {
+            focus: Focus::List,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection: true,
+            update: None,
+            list_hidden,
+        });
+        menu.items
+            .iter()
+            .find(|i| i.action == Action::ToggleList)
+            .map(|i| format!("{} {}", i.hotkey.label(), i.label))
+    }
+
+    #[test]
+    fn session_list_toggle_needs_a_window_to_hide() {
+        assert_eq!(
+            toggle_label(1, false).as_deref(),
+            Some("s Hide session list")
+        );
+        assert_eq!(
+            toggle_label(1, true).as_deref(),
+            Some("s Show session list")
+        );
+        assert_eq!(toggle_label(0, false), None);
     }
 
     #[test]
