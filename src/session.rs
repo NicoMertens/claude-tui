@@ -7,13 +7,16 @@ use std::{
         Arc, Mutex, MutexGuard,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
-use crate::windows::SessionId;
+use crate::{
+    hooks::{self, Report},
+    windows::SessionId,
+};
 
 /// Ausgabe innerhalb dieses Fensters gilt als „arbeitet“ — Claude Code animiert seinen Spinner,
 /// solange es rechnet, und schreibt nichts, wenn es auf Eingabe wartet.
@@ -21,6 +24,8 @@ const WORKING_WINDOW: Duration = Duration::from_millis(1500);
 const SCROLLBACK: usize = 10_000;
 /// Zeilen je Mausrad-Raste.
 const WHEEL_LINES: usize = 3;
+/// So oft wird die Statusdatei der Hooks gelesen.
+const HOOK_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -40,16 +45,23 @@ pub struct Session {
     parser: Arc<Mutex<vt100::Parser>>,
     last_output: Arc<Mutex<Instant>>,
     reader_done: Arc<AtomicBool>,
+    /// Zeitpunkt der letzten Eingabe in die Session.
+    last_input: SystemTime,
+    /// Letzte Meldung der Claude-Code-Hooks; `None`, solange keine vorliegt.
+    hook: Option<Report>,
+    hook_checked: Option<Instant>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
 }
 
 impl Session {
+    /// `extra_args` werden einzeln an `command` gehängt und dabei für die Shell gequotet.
     pub fn spawn(
         id: SessionId,
         claude_id: String,
         command: &str,
+        extra_args: &[String],
         cwd: &Path,
         rows: u16,
         cols: u16,
@@ -58,9 +70,10 @@ impl Session {
             .openpty(pty_size(rows, cols))
             .context("cannot open PTY")?;
 
-        let mut cmd = shell_command(command);
+        let mut cmd = shell_command(command, extra_args);
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+        cmd.env(hooks::SESSION_ENV, &claude_id);
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -106,6 +119,9 @@ impl Session {
             parser,
             last_output,
             reader_done,
+            last_input: SystemTime::UNIX_EPOCH,
+            hook: None,
+            hook_checked: None,
             master: pair.master,
             writer,
             child,
@@ -132,17 +148,17 @@ impl Session {
         // Unter ConPTY endet der Lesekanal nicht zuverlässig mit dem Prozess, daher zusätzlich try_wait.
         let exited =
             self.reader_done.load(Ordering::SeqCst) || matches!(self.child.try_wait(), Ok(Some(_)));
+        if exited {
+            self.status = Status::Exited;
+            return;
+        }
+        if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
+            self.hook = hooks::read(&self.claude_id);
+            self.hook_checked = Some(Instant::now());
+        }
         let recently_active = lock(&self.last_output).elapsed() < WORKING_WINDOW;
-        let waiting = !recently_active && waits_for_decision(&self.screen().screen().contents());
-        self.status = if exited {
-            Status::Exited
-        } else if recently_active {
-            Status::Working
-        } else if waiting {
-            Status::Waiting
-        } else {
-            Status::Idle
-        };
+        let on_screen = || waits_for_decision(&self.screen().screen().contents());
+        self.status = resolve(self.hook, self.last_input, recently_active, on_screen);
     }
 
     /// Mausrad: scrollt den Verlauf (positiv = nach oben). Hat das Programm in der Session selbst
@@ -194,6 +210,7 @@ impl Session {
     /// Schickt Eingabe an die Session; wie in einem Terminal springt die Ansicht dabei ans Ende.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
         self.scroll_to_bottom();
+        self.last_input = SystemTime::now();
         self.writer.write_all(bytes)?;
         self.writer.flush()?;
         Ok(())
@@ -223,6 +240,39 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        hooks::clear(&self.claude_id);
+    }
+}
+
+/// Zustand aus der letzten Hook-Meldung, sonst aus der Heuristik (Ausgabe-Aktivität,
+/// Rückfrage-Text auf dem Bildschirm). Hooks melden nicht jeden Übergang: Eine beantwortete
+/// Rückfrage meldet sich erst mit dem nächsten Tool-Ende, ein mit Esc abgebrochener Lauf gar nicht.
+/// Kam nach der Meldung „wartet“ bzw. „arbeitet“ eine Eingabe, entscheidet daher wieder die
+/// Heuristik bis zur nächsten Meldung. Nach „bereit“ nicht: Tippen erzeugt Ausgabe (Echo), Claude
+/// arbeitet aber erst nach dem Absenden — und das meldet `UserPromptSubmit`.
+fn resolve(
+    hook: Option<Report>,
+    last_input: SystemTime,
+    recently_active: bool,
+    decision_on_screen: impl FnOnce() -> bool,
+) -> Status {
+    let heuristic = |on_screen: bool| {
+        if recently_active {
+            Status::Working
+        } else if on_screen {
+            Status::Waiting
+        } else {
+            Status::Idle
+        }
+    };
+    match hook {
+        None => heuristic(decision_on_screen()),
+        Some(report) => match report.status {
+            Status::Waiting | Status::Working if last_input > report.at => {
+                heuristic(decision_on_screen())
+            }
+            status => status,
+        },
     }
 }
 
@@ -232,17 +282,31 @@ fn waits_for_decision(screen: &str) -> bool {
     MARKERS.iter().any(|m| screen.contains(m))
 }
 
-fn shell_command(command: &str) -> CommandBuilder {
+fn shell_command(command: &str, extra_args: &[String]) -> CommandBuilder {
     // Über die Shell starten, damit auch npm-Wrapper (claude.cmd) und PATH-Auflösung funktionieren.
     if cfg!(windows) {
+        // portable-pty quotet jedes Argument nach den C-Runtime-Regeln (`\"` für Anführungszeichen),
+        // die cmd.exe nicht kennt. Deshalb den Befehl wortweise übergeben: Nur Argumente mit
+        // Leerzeichen bekommen dann äußere Anführungszeichen, und die versteht cmd.exe.
         let mut cmd = CommandBuilder::new("cmd.exe");
-        cmd.args(["/C", command]);
+        cmd.arg("/C");
+        cmd.args(command.split_whitespace());
+        cmd.args(extra_args);
         cmd
     } else {
+        let extra: String = extra_args
+            .iter()
+            .map(|a| format!(" {}", sh_quote(a)))
+            .collect();
         let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", &format!("exec {command}")]);
+        cmd.args(["-c", &format!("exec {command}{extra}")]);
         cmd
     }
+}
+
+/// Ein Argument für `sh -c` in einfache Anführungszeichen setzen.
+fn sh_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', r"'\''"))
 }
 
 /// vt100 verlangt Größen > 0; ein winziges Fenster wird zu 1.
@@ -263,4 +327,77 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(secs: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    fn report(status: Status, secs: u64) -> Option<Report> {
+        Some(Report {
+            status,
+            at: at(secs),
+        })
+    }
+
+    #[test]
+    fn without_hooks_the_heuristic_decides() {
+        assert_eq!(resolve(None, at(0), true, || false), Status::Working);
+        assert_eq!(resolve(None, at(0), false, || true), Status::Waiting);
+        assert_eq!(resolve(None, at(0), false, || false), Status::Idle);
+    }
+
+    #[test]
+    fn hook_state_beats_output_and_screen_text() {
+        // Tippen im Eingabefeld erzeugt Ausgabe, macht eine bereite Session aber nicht „working“.
+        assert_eq!(
+            resolve(report(Status::Idle, 10), at(20), true, || true),
+            Status::Idle
+        );
+        assert_eq!(
+            resolve(report(Status::Waiting, 10), at(5), false, || false),
+            Status::Waiting
+        );
+        assert_eq!(
+            resolve(report(Status::Working, 10), at(5), false, || false),
+            Status::Working
+        );
+    }
+
+    #[test]
+    fn input_after_waiting_hands_back_to_heuristic() {
+        // Freigabe erteilt, Claude arbeitet weiter.
+        assert_eq!(
+            resolve(report(Status::Waiting, 10), at(11), true, || false),
+            Status::Working
+        );
+        // Abgelehnt: keine Ausgabe, keine Rückfrage mehr.
+        assert_eq!(
+            resolve(report(Status::Waiting, 10), at(11), false, || false),
+            Status::Idle
+        );
+    }
+
+    #[test]
+    fn interrupted_work_without_output_is_idle() {
+        assert_eq!(
+            resolve(report(Status::Working, 10), at(11), false, || false),
+            Status::Idle
+        );
+        // Vorab getippt, während Claude noch arbeitet.
+        assert_eq!(
+            resolve(report(Status::Working, 10), at(11), true, || false),
+            Status::Working
+        );
+    }
+
+    #[test]
+    fn sh_quote_survives_spaces_and_quotes() {
+        assert_eq!(sh_quote("/home/a b/x.json"), "'/home/a b/x.json'");
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+    }
 }

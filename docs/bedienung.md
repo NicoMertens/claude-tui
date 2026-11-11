@@ -10,7 +10,9 @@ claude-tui --version
 
 claude-tui hängt an den Befehl selbst `--session-id <neue ID>` (neue Session) bzw. `--resume <ID>`
 (gespeicherte Session fortsetzen) an — Optionen wie `-c` oder `--resume` gehören deshalb nicht in den
-Befehl. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
+Befehl. Dazu kommt `--settings <Konfigurationsordner>/hooks.json`: Hooks, über die Claude Code
+seinen Zustand meldet (siehe [Zustände](#zustände-in-der-seitenleiste)). Sie gelten nur für die von
+claude-tui gestarteten Prozesse; die eigene `~/.claude/settings.json` bleibt unverändert. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
 PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
 
 **Wiederherstellen:** claude-tui merkt sich, welche Session in welchem Fenster lag und wo der Fokus
@@ -124,6 +126,7 @@ vom Fokus ab:
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
+| `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
@@ -142,6 +145,11 @@ Menüpunkt heißt „Unzoom“. Die Sessionliste bleibt, wie sie ist (`s` wirkt 
 von selbst, sobald sich das Layout ändert: Fokus auf ein anderes Fenster oder die Liste (`Ctrl+Pfeil`
 — der Nachbar wird im normalen Layout gesucht —, `0`–`4`, Mausklick), Fenster öffnen, schließen
 oder ersetzen, `l`. Er wird nicht in `state.json` gespeichert.
+
+`w` („Next waiting session“) springt zur nächsten Session im Zustand **waiting for you**, in der
+Reihenfolge der Sessionliste und ab der aktuellen Session (der im Fenster mit Fokus bzw. der in der
+Liste gewählten); bei mehreren wartenden geht es mit jedem `w` reihum weiter. Hat die Session ein
+Fenster, bekommt es den Fokus; sonst geht es weiter wie mit `Enter` in der Liste (Fensterauswahl).
 
 `c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
@@ -196,9 +204,9 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
-| ✻ (animiert) | rot | working | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
-| ▲ | gelb | waiting for you | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
-| ● | grau | ready | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
+| ✻ (animiert) | rot | working | Claude bearbeitet einen Prompt oder nutzt ein Tool. |
+| ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe. |
+| ● | grau | ready | Claude ist fertig und wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 | ◇ … `ext` | graublau | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach. |
 
@@ -213,3 +221,20 @@ Claude-Code-Versionen ohne diese Datei daran, dass das Protokoll in den letzten 
 wurde, ohne dass die Session in claude-tui läuft (dann nur, solange sie arbeitet). Die Kennzeichnung
 folgt mit einigen Sekunden Verzögerung. Beim Start setzt claude-tui eine Session aus `state.json`, die
 gerade anderswo läuft, nicht fort, sondern meldet „… runs elsewhere – not reopened“.
+
+**Hinweis auf wartende Sessions:** Wechselt eine Session, die nicht im Fenster mit Fokus liegt
+(auch eine Hintergrund-Session ohne Fenster), auf **waiting for you**, läutet claude-tui einmal die
+Terminal-Glocke (BEL) und zeigt unten in der Sessionliste `"<Titel>" is waiting for you`. Das
+passiert nur beim Wechsel, nicht dauerhaft. Hin kommt man mit `w` im Ctrl+A-Menü.
+`CLAUDE_TUI_NO_BELL=1` schaltet die Glocke ab; der Hinweis bleibt. Ob und wie die Glocke zu hören
+oder zu sehen ist, stellt das Terminal ein (Windows Terminal: `bellStyle`).
+
+Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede Session mit
+`--settings` und eigenen Hook-Einträgen, die `claude-tui hook <Event>` aufrufen (Prompt abgeschickt
+oder Tool genutzt = working, Freigabedialog = waiting for you, Antwort fertig = ready). Liegt für
+eine Session (noch) keine Meldung vor — etwa bei einem eigenen Befehl ohne Hook-Unterstützung —,
+greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working, Rückfrage-Text auf dem
+Bildschirm („Do you want to …“) = waiting for you, sonst ready. Nach einer Eingabe in eine Session,
+die gerade wartet oder arbeitet, entscheidet bis zur nächsten Meldung ebenfalls die Heuristik
+(z. B. nach einer abgelehnten Freigabe oder einem Abbruch mit `Esc`). Details in
+[Architektur](architektur.md#hooks).

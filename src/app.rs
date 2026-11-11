@@ -13,7 +13,7 @@ use ratatui::layout::{Margin, Position, Rect};
 use crate::{
     claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
-    external, keys,
+    external, hooks, keys,
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{Action, Context, Menu, Outcome, Purpose},
@@ -23,6 +23,7 @@ use crate::{
     state::{self, State},
     ui,
     update::{self, Available},
+    waiting,
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
 };
 
@@ -97,6 +98,8 @@ pub struct App {
     update_check: Option<Receiver<Available>>,
     update_install: Option<Receiver<Result<String, String>>>,
     pub should_quit: bool,
+    /// Eine Session wartet neu auf dich: einmal die Terminal-Glocke läuten (`main.rs`).
+    pub ring_bell: bool,
     command: String,
     /// Verzeichnis, aus dem claude-tui gestartet wurde.
     start_dir: PathBuf,
@@ -125,6 +128,7 @@ impl App {
     pub fn new(command: String, screen: Rect) -> Result<Self> {
         let mut store = Store::new();
         store.refresh();
+        hooks::purge_stale();
         let mut app = Self {
             sessions: Vec::new(),
             windows: Windows::default(),
@@ -144,6 +148,7 @@ impl App {
             update_check: update::spawn_check(),
             update_install: None,
             should_quit: false,
+            ring_bell: false,
             command,
             start_dir: std::env::current_dir().context("current directory not readable")?,
             recent: recent::load(),
@@ -249,8 +254,15 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        let mut changes = Vec::new();
         for session in &mut self.sessions {
+            let before = session.status;
             session.refresh();
+            changes.push((session.id, before, session.status));
+        }
+        for id in waiting::newly_waiting(changes, self.windows.focused_session()) {
+            self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
+            self.ring_bell = waiting::bell_enabled();
         }
         // Beendete Prozesse verschwinden; die Claude-Session bleibt in der Liste.
         let exited: Vec<SessionId> = self
@@ -718,6 +730,7 @@ impl App {
                 self.windows.set_zoomed(zoom);
                 self.resize_windows();
             }
+            Action::NextWaiting => self.show_next_waiting()?,
             Action::Quit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {
@@ -761,7 +774,28 @@ impl App {
             list_hidden: self.list_hidden,
             stacked: self.stacked,
             zoomed: self.windows.zoomed().is_some(),
+            waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
         }));
+    }
+
+    /// Nächste wartende Session (Listenreihenfolge, reihum ab der aktuellen): hat sie ein Fenster,
+    /// Fokus dorthin, sonst wie Enter in der Liste.
+    fn show_next_waiting(&mut self) -> Result<()> {
+        let order: Vec<SessionId> = list::flatten(&self.groups)
+            .filter_map(|e| e.running)
+            .collect();
+        let is_waiting = |id| {
+            self.session(id)
+                .is_some_and(|s| s.status == Status::Waiting)
+        };
+        let Some(id) = waiting::next_waiting(&order, is_waiting, self.context_session()) else {
+            return Ok(());
+        };
+        if let Some(session) = self.session(id) {
+            self.cursor = Some(session.claude_id.clone());
+        }
+        let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+        self.on_list_key(enter)
     }
 
     /// Schließt Fenster und Prozess (falls laufend) und löscht das Protokoll endgültig.
@@ -935,6 +969,17 @@ impl App {
             Launch::Resume(claude_id) => (claude_id, "--resume"),
         };
         let command = format!("{} {flag} {claude_id}", self.command);
+        // Ohne Hook-Einstellungen bleibt es bei der Heuristik; die Session startet trotzdem.
+        let extra: Vec<String> = hooks::write_settings()
+            .map(|file| {
+                vec![
+                    "--settings".to_string(),
+                    file.to_string_lossy().into_owned(),
+                ]
+            })
+            .unwrap_or_default();
+        // Meldung eines früheren Laufs derselben Claude-Session gilt nicht mehr.
+        hooks::clear(&claude_id);
         self.next_id += 1;
         let id = self.next_id;
         let inner = ui::windows_area(self.screen, self.list_hidden).inner(Margin::new(1, 1));
@@ -942,6 +987,7 @@ impl App {
             id,
             claude_id,
             &command,
+            &extra,
             dir,
             inner.height.max(1),
             inner.width.max(1),
