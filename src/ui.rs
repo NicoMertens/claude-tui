@@ -63,14 +63,20 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             dir_picker_lines(picker, panel_width),
         ),
         (None, Some(menu)) => (menu.title.clone(), menu_lines(menu, panel_width)),
-        // Menü zu: die Box bleibt und zeigt nur, wie es sich öffnet.
-        (None, None) => (
-            String::new(),
-            vec![Line::from(vec![
+        // Menü zu: die Box bleibt und zeigt nur, wie es sich öffnet (und ob ein Update wartet).
+        (None, None) => {
+            let mut hint = vec![
                 Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
                 Span::styled(" Menu", Style::default().fg(theme::MUTED)),
-            ])],
-        ),
+            ];
+            if let Some(update) = &app.update {
+                hint.push(Span::styled(
+                    format!(" · v{} available (u)", update.version),
+                    Style::default().fg(theme::MENU),
+                ));
+            }
+            (String::new(), vec![Line::from(hint)])
+        }
     };
     let (panel_title, panel_lines) = panel;
     let panel_height =

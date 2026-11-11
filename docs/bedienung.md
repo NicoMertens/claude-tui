@@ -18,6 +18,26 @@ war (`state.json` im Konfigurationsordner). Beim nächsten Start werden genau di
 `--resume` fortgesetzt und in ihre Fenster gelegt. Gibt es nichts wiederherzustellen, startet eine
 neue Session im aktuellen Verzeichnis.
 
+## Installieren, aktualisieren, entfernen
+
+```
+claude-tui install     # an festen Ort kopieren und in den PATH eintragen
+claude-tui update      # neuestes Release von GitHub installieren
+claude-tui uninstall   # Programm und PATH-Eintrag entfernen (Einstellungen bleiben)
+```
+
+| | Windows | Linux / macOS |
+|---|---|---|
+| Ort | `%LOCALAPPDATA%\Programs\claude-tui\claude-tui.exe` | `~/.local/bin/claude-tui` |
+| PATH | Eintrag im **Benutzer**-PATH, ohne Adminrechte; gilt für neu geöffnete Terminals | nicht verändert — steht `~/.local/bin` nicht im PATH, nennt `install` die Zeile fürs Shell-Profil |
+
+**Update-Prüfung:** Beim Start fragt claude-tui höchstens einmal am Tag im Hintergrund die GitHub-API
+nach dem neuesten Release (Zeitpunkt in `update-check.json` im Konfigurationsordner). Ist es neuer,
+zeigt die Menübox `vX.Y.Z available (u)`, und im Ctrl+A-Menü erscheint **`u` Update to vX.Y.Z**.
+Das Update lädt das Archiv für die eigene Plattform, vergleicht es mit `sha256.sum` und ersetzt die
+laufende Datei; wirksam ab dem nächsten Start (die Fenster kommen über `state.json` zurück).
+Installiert wird nie ungefragt. `CLAUDE_TUI_NO_UPDATE_CHECK=1` schaltet die Prüfung ab.
+
 ## Aufbau
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),

@@ -20,6 +20,8 @@ pub enum Action {
     Cancel,
     Focus(Focus),
     SendPrefix,
+    /// Neuere Version von GitHub installieren.
+    Update,
     Quit,
     /// Fensterauswahl: Ziel-Fensterindex.
     Place(usize),
@@ -85,6 +87,8 @@ pub struct Context<'a> {
     pub selected_has_window: bool,
     /// In der Liste ist eine Session ausgewählt.
     pub has_selection: bool,
+    /// Version eines verfügbaren Updates (`None` = keins oder läuft schon).
+    pub update: Option<&'a str>,
 }
 
 impl Menu {
@@ -123,6 +127,10 @@ impl Menu {
                 Action::Focus(Focus::List),
             );
             add(Hotkey::Prefix, "Send Ctrl+A to Claude", Action::SendPrefix);
+        }
+        if let Some(version) = ctx.update {
+            let label = format!("Update to v{version}");
+            add(Hotkey::Char('u'), &label, Action::Update);
         }
         add(Hotkey::Char('q'), "Quit claude-tui", Action::Quit);
 
@@ -240,6 +248,7 @@ mod tests {
             windows: &windows,
             selected_has_window: true,
             has_selection: true,
+            update: None,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -256,6 +265,7 @@ mod tests {
             windows: &windows,
             selected_has_window: false,
             has_selection: true,
+            update: None,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
         assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));

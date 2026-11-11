@@ -1,6 +1,7 @@
 mod app;
 mod claude_store;
 mod dirpick;
+mod install;
 mod keys;
 mod layout;
 mod list;
@@ -13,6 +14,7 @@ mod state;
 mod term_view;
 mod theme;
 mod ui;
+mod update;
 mod windows;
 
 use std::{io, time::Duration};
@@ -30,6 +32,17 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
+const HELP: &str = "\
+Usage:
+  claude-tui [COMMAND]   start the workspace; COMMAND starts Claude Code (default: claude),
+                         claude-tui appends --session-id or --resume
+  claude-tui install     copy claude-tui to a fixed place and add it to your PATH
+  claude-tui uninstall   remove it again (settings are kept)
+  claude-tui update      install the newest release from GitHub
+  claude-tui --version
+
+Set CLAUDE_TUI_NO_UPDATE_CHECK=1 to skip the daily update check on start.";
+
 fn main() -> Result<()> {
     let arg = std::env::args().nth(1);
     match arg.as_deref() {
@@ -38,9 +51,12 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("-h" | "--help") => {
-            println!("Usage: claude-tui [COMMAND]\n\nCOMMAND starts Claude Code (default: claude); claude-tui appends --session-id or --resume.");
+            println!("{HELP}");
             return Ok(());
         }
+        Some("install") => return install::install(),
+        Some("uninstall") => return install::uninstall(),
+        Some("update") => return update::run_cli(),
         _ => {}
     }
     let command = arg.unwrap_or_else(|| "claude".to_string());

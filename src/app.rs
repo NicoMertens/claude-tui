@@ -1,5 +1,6 @@
 use std::{
     path::{Path, PathBuf},
+    sync::mpsc::Receiver,
     time::{Duration, Instant},
 };
 
@@ -18,6 +19,7 @@ use crate::{
     selection::{self, Cell, Selection},
     session::{Session, Status},
     state::{self, State},
+    update::{self, Available},
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
 };
 
@@ -52,6 +54,10 @@ pub struct App {
     pub selection: Option<Selection>,
     dragging: bool,
     last_click: Option<(Instant, SessionId, Cell)>,
+    /// Neuere Version auf GitHub, sobald die Prüfung beim Start eine gefunden hat.
+    pub update: Option<Available>,
+    update_check: Option<Receiver<Available>>,
+    update_install: Option<Receiver<Result<String, String>>>,
     pub should_quit: bool,
     command: String,
     /// Verzeichnis, aus dem claude-tui gestartet wurde.
@@ -80,6 +86,9 @@ impl App {
             selection: None,
             dragging: false,
             last_click: None,
+            update: None,
+            update_check: update::spawn_check(),
+            update_install: None,
             should_quit: false,
             command,
             start_dir: std::env::current_dir().context("current directory not readable")?,
@@ -166,11 +175,34 @@ impl App {
             }
             self.remove_process(id);
         }
+        self.poll_update();
         if self.last_scan.elapsed() >= STORE_INTERVAL {
             self.store.refresh();
             self.last_scan = Instant::now();
         }
         self.rebuild_list();
+    }
+
+    /// Ergebnisse der Update-Prüfung bzw. -Installation aus den Hintergrund-Threads abholen.
+    fn poll_update(&mut self) {
+        if let Some(found) = self.update_check.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.update = Some(found);
+            self.update_check = None;
+        }
+        if let Some(result) = self
+            .update_install
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.update_install = None;
+            match result {
+                Ok(message) => {
+                    self.update = None;
+                    self.notice = Some(message);
+                }
+                Err(message) => self.notice = Some(message),
+            }
+        }
     }
 
     fn rebuild_list(&mut self) {
@@ -488,6 +520,12 @@ impl App {
                 }
             }
             Action::Quit => self.should_quit = true,
+            Action::Update => {
+                if let Some(available) = self.update.clone() {
+                    self.notice = Some(format!("downloading v{} …", available.version));
+                    self.update_install = Some(update::spawn_install(available));
+                }
+            }
         }
         Ok(())
     }
@@ -516,6 +554,11 @@ impl App {
             windows: &windows,
             selected_has_window: selected.is_some_and(|id| self.windows.window_of(id).is_some()),
             has_selection: self.selected_entry().is_some(),
+            update: self
+                .update
+                .as_ref()
+                .filter(|_| self.update_install.is_none())
+                .map(|u| u.version.as_str()),
         }));
     }
 
