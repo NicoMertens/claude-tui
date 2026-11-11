@@ -22,6 +22,8 @@ pub enum Action {
     SendPrefix,
     /// Sessionliste ein- bzw. ausblenden.
     ToggleList,
+    /// Zwei Fenster übereinander bzw. nebeneinander anordnen.
+    ToggleStacked,
     /// Neuere Version von GitHub installieren.
     Update,
     Quit,
@@ -93,6 +95,8 @@ pub struct Context<'a> {
     pub update: Option<&'a str>,
     /// Die Sessionliste ist ausgeblendet.
     pub list_hidden: bool,
+    /// Zwei Fenster stehen übereinander.
+    pub stacked: bool,
 }
 
 impl Menu {
@@ -137,6 +141,15 @@ impl Menu {
             add(Hotkey::Char('s'), "Show session list", Action::ToggleList);
         } else if !ctx.windows.is_empty() {
             add(Hotkey::Char('s'), "Hide session list", Action::ToggleList);
+        }
+        // Die Anordnung ist nur bei genau zwei Fenstern wählbar.
+        if ctx.windows.len() == 2 {
+            let label = if ctx.stacked {
+                "Windows side by side"
+            } else {
+                "Stack windows"
+            };
+            add(Hotkey::Char('l'), label, Action::ToggleStacked);
         }
         if let Some(version) = ctx.update {
             let label = format!("Update to v{version}");
@@ -258,6 +271,7 @@ mod tests {
             has_selection: true,
             update: None,
             list_hidden: false,
+            stacked: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -276,6 +290,7 @@ mod tests {
             has_selection: true,
             update: None,
             list_hidden: false,
+            stacked: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -290,6 +305,7 @@ mod tests {
             has_selection: true,
             update: None,
             list_hidden: false,
+            stacked: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
         assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));
@@ -304,6 +320,7 @@ mod tests {
             has_selection: true,
             update: None,
             list_hidden,
+            stacked: false,
         });
         menu.items
             .iter()
@@ -322,6 +339,34 @@ mod tests {
             Some("s Show session list")
         );
         assert_eq!(toggle_label(0, false), None);
+    }
+
+    fn layout_label(windows: usize, stacked: bool) -> Option<String> {
+        let windows = names(windows);
+        let menu = Menu::commands(&Context {
+            focus: Focus::Window(0),
+            windows: &windows,
+            selected_has_window: true,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            stacked,
+        });
+        menu.items
+            .iter()
+            .find(|i| i.action == Action::ToggleStacked)
+            .map(|i| format!("{} {}", i.hotkey.label(), i.label))
+    }
+
+    #[test]
+    fn layout_toggle_only_with_two_windows() {
+        assert_eq!(layout_label(2, false).as_deref(), Some("l Stack windows"));
+        assert_eq!(
+            layout_label(2, true).as_deref(),
+            Some("l Windows side by side")
+        );
+        assert_eq!(layout_label(1, false), None);
+        assert_eq!(layout_label(3, false), None);
     }
 
     #[test]

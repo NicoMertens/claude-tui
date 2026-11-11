@@ -99,6 +99,8 @@ pub struct App {
     /// Sessionliste ausgeblendet: die Fenster bekommen die volle Breite. Nur mit mindestens einem
     /// Fenster und nie bei Fokus auf der Liste.
     pub list_hidden: bool,
+    /// Zwei Fenster übereinander statt nebeneinander (gilt nur bei genau zwei Fenstern).
+    stacked: bool,
     next_id: SessionId,
 }
 
@@ -131,6 +133,7 @@ impl App {
             last_scan: Instant::now(),
             screen,
             list_hidden: false,
+            stacked: false,
             next_id: 0,
         };
         app.restore();
@@ -147,6 +150,7 @@ impl App {
     /// Stellt das Fensterlayout des letzten Laufs wieder her; jede Session darin wird fortgesetzt.
     fn restore(&mut self) {
         let saved = state::load();
+        self.stacked = saved.stacked;
         for claude_id in saved.windows {
             let Some(stored) = self.store.get(&claude_id) else {
                 continue;
@@ -194,6 +198,7 @@ impl App {
         layout::windows(
             ui::windows_area(self.screen, self.list_hidden),
             self.windows.len(),
+            self.stacked,
         )
     }
 
@@ -589,6 +594,10 @@ impl App {
             Action::Cancel => {}
             Action::Focus(focus) => self.set_focus(focus),
             Action::ToggleList => self.set_list_hidden(!self.list_hidden),
+            Action::ToggleStacked => {
+                self.stacked = !self.stacked;
+                self.after_layout_change();
+            }
             Action::SendPrefix => {
                 if let Some(id) = self.windows.focused_session() {
                     if let Some(session) = self.session_mut(id) {
@@ -637,6 +646,7 @@ impl App {
                 .filter(|_| self.update_install.is_none())
                 .map(|u| u.version.as_str()),
             list_hidden: self.list_hidden,
+            stacked: self.stacked,
         }));
     }
 
@@ -768,6 +778,7 @@ impl App {
                 Focus::List => None,
             },
             list_hidden: self.list_hidden,
+            stacked: self.stacked,
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);

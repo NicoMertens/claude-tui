@@ -13,13 +13,14 @@ pub enum Direction {
 /// Rechtecke der Fenster in Nummernreihenfolge (Index 0 = Fenster 1).
 ///
 /// - 1: ganze Fläche
-/// - 2: nebeneinander
+/// - 2: nebeneinander, mit `stacked` übereinander (1 oben)
 /// - 3: Fenster 1 links, 2 und 3 rechts übereinander
 /// - 4: 2 × 2 (1 oben links, 2 oben rechts, 3 unten links, 4 unten rechts)
-pub fn windows(area: Rect, count: usize) -> Vec<Rect> {
+pub fn windows(area: Rect, count: usize, stacked: bool) -> Vec<Rect> {
     match count {
         0 => Vec::new(),
         1 => vec![area],
+        2 if stacked => halves_vertical(area).to_vec(),
         2 => halves_horizontal(area).to_vec(),
         3 => {
             let [left, right] = halves_horizontal(area);
@@ -84,17 +85,19 @@ mod tests {
 
     #[test]
     fn layouts_cover_area_without_overlap() {
-        for count in 1..=4 {
-            let rects = windows(AREA, count);
-            assert_eq!(rects.len(), count);
-            let total: u32 = rects.iter().map(|r| r.area()).sum();
-            assert_eq!(total, AREA.area(), "{count} Fenster");
+        for stacked in [false, true] {
+            for count in 1..=4 {
+                let rects = windows(AREA, count, stacked);
+                assert_eq!(rects.len(), count);
+                let total: u32 = rects.iter().map(|r| r.area()).sum();
+                assert_eq!(total, AREA.area(), "{count} Fenster");
+            }
         }
     }
 
     #[test]
     fn three_windows_have_one_large_left() {
-        let r = windows(AREA, 3);
+        let r = windows(AREA, 3, false);
         assert_eq!(r[0].height, AREA.height);
         assert_eq!(r[1].x, r[2].x);
         assert!(r[1].y < r[2].y);
@@ -102,7 +105,7 @@ mod tests {
 
     #[test]
     fn neighbors_with_two_windows() {
-        let r = windows(AREA, 2);
+        let r = windows(AREA, 2, false);
         assert_eq!(neighbor(&r, 0, Right), Some(1));
         assert_eq!(neighbor(&r, 1, Left), Some(0));
         assert_eq!(neighbor(&r, 0, Left), None);
@@ -110,8 +113,19 @@ mod tests {
     }
 
     #[test]
+    fn two_stacked_windows_are_above_each_other() {
+        let r = windows(AREA, 2, true);
+        assert_eq!(r[0].width, AREA.width);
+        assert_eq!(r[0].bottom(), r[1].y);
+        assert_eq!(neighbor(&r, 0, Down), Some(1));
+        assert_eq!(neighbor(&r, 1, Up), Some(0));
+        // Beide liegen ganz links: Alt+← führt aus jedem in die Sessionliste.
+        assert_eq!(neighbor(&r, 1, Left), None);
+    }
+
+    #[test]
     fn neighbors_with_three_windows_prefer_lower_number() {
-        let r = windows(AREA, 3);
+        let r = windows(AREA, 3, false);
         assert_eq!(neighbor(&r, 0, Right), Some(1));
         assert_eq!(neighbor(&r, 1, Left), Some(0));
         assert_eq!(neighbor(&r, 2, Left), Some(0));
@@ -122,7 +136,7 @@ mod tests {
 
     #[test]
     fn neighbors_with_four_windows() {
-        let r = windows(AREA, 4);
+        let r = windows(AREA, 4, false);
         assert_eq!(neighbor(&r, 0, Right), Some(1));
         assert_eq!(neighbor(&r, 0, Down), Some(2));
         assert_eq!(neighbor(&r, 3, Left), Some(2));

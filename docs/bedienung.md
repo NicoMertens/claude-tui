@@ -67,6 +67,10 @@ Rechts bis zu **4 Fenster**, nach Position nummeriert:
 └───────┘    └───┴───┘    └───┴───┘    └───┴───┘
 ```
 
+Zwei Fenster lassen sich mit `l` im Menü auch **übereinander** anordnen (1 oben, 2 unten) und mit
+`l` wieder nebeneinander; die Wahl bleibt über einen Neustart erhalten (`state.json`) und gilt,
+sobald wieder genau zwei Fenster offen sind.
+
 Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **Fokus** (ein Fenster
 oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie das Menü), alle anderen einen
 dunkelorangen.
@@ -116,6 +120,7 @@ vom Fokus ab:
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
+| `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
