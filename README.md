@@ -5,17 +5,7 @@ Seitenleiste mit allen Sessions und ihrem Zustand (working, waiting for you, rea
 rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 [herdr](https://github.com/ogulcancelik/herdr); Code ist nicht übernommen.
 
-```
-╭ ✻ claude-tui ───────╮╭ 1 · claude 1 ──────╮╭ 2 · claude 3 ──────╮
-│▌claude 1 [1]        ││                    ││                    │
-│  ● working          ││                    │╰────────────────────╯
-│ claude 2            ││                    │╭ 3 · claude 4 ──────╮
-│  ● waiting for you  ││                    ││                    │
-│ claude 3 [2]        ││                    ││                    │
-│  ● ready            ││                    ││                    │
-│ Ctrl+A Menu         ││                    ││                    │
-╰─────────────────────╯╰────────────────────╯╰────────────────────╯
-```
+![claude-tui mit drei Sessions: working, waiting for you, ready](docs/screenshot.png)
 
 Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Ctrl+Pfeil`, alle Befehle im `Ctrl+A`-Menü, das
 über dem Bereich mit dem Fokus erscheint.
