@@ -29,6 +29,8 @@ use crate::{
 const STORE_INTERVAL: Duration = Duration::from_secs(2);
 /// Zweiter Klick auf dieselbe Zelle innerhalb dieser Zeit = Doppelklick (Wort markieren).
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// So lange bleiben befristete Hinweise (z. B. „copied N characters“) stehen.
+const FLASH_DURATION: Duration = Duration::from_secs(5);
 
 /// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
 /// Claude-ID) je Session. Gruppenüberschriften fehlen absichtlich.
@@ -69,8 +71,12 @@ pub struct App {
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
-    /// Hinweis unten in der Sessionliste (z. B. Startfehler); verschwindet mit der nächsten Taste.
+    /// Hinweis unten in der Sessionliste (z. B. Startfehler); verschwindet mit der nächsten Taste,
+    /// befristete Hinweise zusätzlich nach [`FLASH_DURATION`].
     pub notice: Option<String>,
+    /// Befristeter Hinweis samt Ablaufzeit; `tick` entfernt ihn danach, sofern `notice` noch
+    /// denselben Text zeigt.
+    notice_expiry: Option<(String, Instant)>,
     /// Mausmarkierung in einem Fenster; bleibt sichtbar bis zur nächsten Taste oder zum nächsten
     /// Klick.
     pub selection: Option<Selection>,
@@ -116,6 +122,7 @@ impl App {
             menu: None,
             dir_picker: None,
             notice: None,
+            notice_expiry: None,
             selection: None,
             dragging: false,
             last_click: None,
@@ -219,6 +226,7 @@ impl App {
             }
             self.remove_process(id);
         }
+        self.expire_notice();
         self.poll_update();
         if self.last_scan.elapsed() >= STORE_INTERVAL {
             self.store.refresh();
@@ -463,10 +471,29 @@ impl App {
             return;
         };
         let copied = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.clone()));
-        self.notice = Some(match copied {
-            Ok(()) => format!("copied {} characters", text.chars().count()),
-            Err(e) => format!("clipboard: {e}"),
-        });
+        match copied {
+            Ok(()) => self.flash_notice(format!("copied {} characters", text.chars().count())),
+            Err(e) => self.notice = Some(format!("clipboard: {e}")),
+        }
+    }
+
+    /// Zeigt einen Hinweis, der nach [`FLASH_DURATION`] von selbst verschwindet.
+    fn flash_notice(&mut self, message: String) {
+        self.notice_expiry = Some((message.clone(), Instant::now() + FLASH_DURATION));
+        self.notice = Some(message);
+    }
+
+    fn expire_notice(&mut self) {
+        let Some((message, deadline)) = &self.notice_expiry else {
+            return;
+        };
+        if Instant::now() < *deadline {
+            return;
+        }
+        if self.notice.as_ref() == Some(message) {
+            self.notice = None;
+        }
+        self.notice_expiry = None;
     }
 
     pub fn resize(&mut self, screen: Rect) {
