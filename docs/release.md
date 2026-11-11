@@ -44,8 +44,10 @@ Dazu `sha256.sum` mit den SHA-256-Prüfsummen aller Archive (prüfen mit `sha256
 
 ## Release erstellen
 
-1. Auf `develop` die Version in `Cargo.toml` erhöhen und committen.
-2. `develop` in `release` mergen und pushen:
+Released wird die Version, die gerade in `develop` steht; erst danach wird sie für die nächste
+Runde erhöht.
+
+1. `develop` in `release` mergen und pushen:
 
    ```
    git checkout release
@@ -53,8 +55,12 @@ Dazu `sha256.sum` mit den SHA-256-Prüfsummen aller Archive (prüfen mit `sha256
    git push origin release
    ```
 
-3. Der Workflow legt Tag und Release mit automatisch erzeugten Release-Notes an. Gibt es den Tag
-   schon (Version vergessen zu erhöhen), bricht er vor dem Build mit einer Fehlermeldung ab.
+   Der Workflow legt Tag `v<Version>` und Release mit automatisch erzeugten Release-Notes an.
+2. Zurück auf `develop` die Version in `Cargo.toml` erhöhen (z. B. `0.1.0` → `0.2.0`), `cargo build`
+   aktualisiert `Cargo.lock`, beides committen und pushen.
+
+Wird die Erhöhung vergessen, bricht der nächste Release-Lauf vor dem Build ab, weil es den Tag
+schon gibt. Weil `release` nur per Fast-Forward nachgezogen wird, enthält er nie eigene Commits.
 
 `Cargo.lock` ist eingecheckt, und alle Workflows bauen mit `--locked` — Releases enthalten
 damit exakt die getesteten Abhängigkeitsversionen. Abhängigkeiten aktualisieren: `cargo update`,
