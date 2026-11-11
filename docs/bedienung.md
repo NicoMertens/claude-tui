@@ -10,7 +10,9 @@ claude-tui --version
 
 claude-tui hängt an den Befehl selbst `--session-id <neue ID>` (neue Session) bzw. `--resume <ID>`
 (gespeicherte Session fortsetzen) an — Optionen wie `-c` oder `--resume` gehören deshalb nicht in den
-Befehl. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
+Befehl. Dazu kommt `--settings <Konfigurationsordner>/hooks.json`: Hooks, über die Claude Code
+seinen Zustand meldet (siehe [Zustände](#zustände-in-der-seitenleiste)). Sie gelten nur für die von
+claude-tui gestarteten Prozesse; die eigene `~/.claude/settings.json` bleibt unverändert. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
 PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
 
 **Wiederherstellen:** claude-tui merkt sich, welche Session in welchem Fenster lag und wo der Fokus
@@ -182,12 +184,19 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
-| ✻ (animiert) | rot | working | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
-| ▲ | gelb | waiting for you | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
-| ● | grau | ready | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
+| ✻ (animiert) | rot | working | Claude bearbeitet einen Prompt oder nutzt ein Tool. |
+| ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe. |
+| ● | grau | ready | Claude ist fertig und wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 
 Die Formen unterscheiden sich auch ohne Farbe.
 
-Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
-[Architektur](architektur.md).
+Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede Session mit
+`--settings` und eigenen Hook-Einträgen, die `claude-tui hook <Event>` aufrufen (Prompt abgeschickt
+oder Tool genutzt = working, Freigabedialog = waiting for you, Antwort fertig = ready). Liegt für
+eine Session (noch) keine Meldung vor — etwa bei einem eigenen Befehl ohne Hook-Unterstützung —,
+greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working, Rückfrage-Text auf dem
+Bildschirm („Do you want to …“) = waiting for you, sonst ready. Nach einer Eingabe in eine Session,
+die gerade wartet oder arbeitet, entscheidet bis zur nächsten Meldung ebenfalls die Heuristik
+(z. B. nach einer abgelehnten Freigabe oder einem Abbruch mit `Esc`). Details in
+[Architektur](architektur.md#hooks).

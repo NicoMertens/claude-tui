@@ -1,6 +1,7 @@
 mod app;
 mod claude_store;
 mod dirpick;
+mod hooks;
 mod http;
 mod install;
 mod keys;
@@ -58,6 +59,10 @@ fn main() -> Result<()> {
         Some("install") => return install::install(),
         Some("uninstall") => return install::uninstall(),
         Some("update") => return update::run_cli(),
+        Some("hook") => {
+            hooks::run_cli(std::env::args().nth(2).as_deref());
+            return Ok(());
+        }
         _ => {}
     }
     let command = arg.unwrap_or_else(|| "claude".to_string());

@@ -12,7 +12,7 @@ use ratatui::layout::{Margin, Position, Rect};
 use crate::{
     claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
-    keys,
+    hooks, keys,
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{Action, Context, Menu, Outcome, Purpose},
@@ -108,6 +108,7 @@ impl App {
     pub fn new(command: String, screen: Rect) -> Result<Self> {
         let mut store = Store::new();
         store.refresh();
+        hooks::purge_stale();
         let mut app = Self {
             sessions: Vec::new(),
             windows: Windows::default(),
@@ -796,6 +797,17 @@ impl App {
             Launch::Resume(claude_id) => (claude_id, "--resume"),
         };
         let command = format!("{} {flag} {claude_id}", self.command);
+        // Ohne Hook-Einstellungen bleibt es bei der Heuristik; die Session startet trotzdem.
+        let extra: Vec<String> = hooks::write_settings()
+            .map(|file| {
+                vec![
+                    "--settings".to_string(),
+                    file.to_string_lossy().into_owned(),
+                ]
+            })
+            .unwrap_or_default();
+        // Meldung eines früheren Laufs derselben Claude-Session gilt nicht mehr.
+        hooks::clear(&claude_id);
         self.next_id += 1;
         let id = self.next_id;
         let inner = ui::windows_area(self.screen, self.list_hidden).inner(Margin::new(1, 1));
@@ -803,6 +815,7 @@ impl App {
             id,
             claude_id,
             &command,
+            &extra,
             dir,
             inner.height.max(1),
             inner.width.max(1),
