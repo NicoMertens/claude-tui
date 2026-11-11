@@ -108,10 +108,33 @@ pub fn flatten(groups: &[Group]) -> impl Iterator<Item = &Entry> {
     groups.iter().flat_map(|g| g.entries.iter())
 }
 
+/// Nachfolger für einen verschwundenen Eintrag `gone`: der nächste noch vorhandene Eintrag
+/// darunter in der alten Reihenfolge `before`, sonst der nächste darüber.
+pub fn successor<'a>(before: &[&'a str], gone: &str, still: &HashSet<&str>) -> Option<&'a str> {
+    let index = before.iter().position(|&id| id == gone)?;
+    let (above, below) = (&before[..index], &before[index + 1..]);
+    below
+        .iter()
+        .chain(above.iter().rev())
+        .find(|id| still.contains(*id))
+        .copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn successor_prefers_entry_below_then_above() {
+        let before = ["a", "b", "c", "d"];
+        let still: HashSet<&str> = ["a", "b", "d"].into();
+        assert_eq!(successor(&before, "c", &still), Some("d"));
+        let still: HashSet<&str> = ["a", "b"].into();
+        assert_eq!(successor(&before, "c", &still), Some("b"));
+        assert_eq!(successor(&before, "x", &still), None);
+        assert_eq!(successor(&before, "c", &HashSet::new()), None);
+    }
 
     fn stored(id: &str, cwd: &str, age_secs: u64) -> StoredSession {
         StoredSession {

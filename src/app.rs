@@ -351,11 +351,26 @@ impl App {
             self.started,
             SystemTime::now(),
         );
+        let before: Vec<String> = list::flatten(&self.groups)
+            .map(|e| e.claude_id.clone())
+            .collect();
         self.groups = list::build(stored, &running, &elsewhere);
         if self.selected_entry().is_none() {
-            self.cursor = list::flatten(&self.groups)
-                .next()
-                .map(|e| e.claude_id.clone());
+            let still: HashSet<&str> = list::flatten(&self.groups)
+                .map(|e| e.claude_id.as_str())
+                .collect();
+            let before: Vec<&str> = before.iter().map(String::as_str).collect();
+            let successor = self
+                .cursor
+                .as_deref()
+                .and_then(|gone| list::successor(&before, gone, &still));
+            self.cursor = successor
+                .or_else(|| {
+                    list::flatten(&self.groups)
+                        .next()
+                        .map(|e| e.claude_id.as_str())
+                })
+                .map(str::to_string);
         }
     }
 
