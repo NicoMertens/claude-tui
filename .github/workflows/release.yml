@@ -54,11 +54,18 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Binary umbenennen
+      - name: Archiv packen
         run: |
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}" \
-             "dist/claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+          name="claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}" README.md "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: claude-tui-${{ matrix.target }}
@@ -72,6 +79,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Prüfsummen
+        run: cd dist && sha256sum * > sha256.sum
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}

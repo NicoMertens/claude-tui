@@ -1,6 +1,2 @@
 /target/
 /dist/
-
-# Lokale Builds; Releases baut GitHub Actions.
-/output/*
-!/output/.gitkeep

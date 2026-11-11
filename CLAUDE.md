@@ -2,8 +2,8 @@
 
 Rust-TUI, die mehrere Claude-Code-Sessions in PTYs mit Status-Seitenleiste verwaltet (Idee: herdr).
 
-- Cargo-Projekt im Wurzelordner (Code in `src/`), Benutzer-/Entwickler-Doku in `docs/`, lokale Builds in `output/`
-  (ignoriert).
+- Cargo-Projekt im Wurzelordner (Code in `src/`), Benutzer-/Entwickler-Doku in `docs/`. Builds landen
+  nach Rust-Konvention in `target/` (ignoriert).
 - Branches: `develop` ist der Hauptbranch; ein Push auf `release` baut über
   `.github/workflows/release.yml` das Release `v<Version aus Cargo.toml>`.
 - CI verlangt `cargo fmt --check` und

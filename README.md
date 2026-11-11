@@ -21,14 +21,13 @@ rechts die aktive Session in einem echten PTY. Die Idee stammt von
 |---|---|
 | `src/` | Rust-Quellcode; `Cargo.toml` liegt im Wurzelordner |
 | `docs/` | Dokumentation: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Build & Release](docs/release.md), [Code-Richtlinien](docs/code-richtlinien.md) |
-| `build/` | Build-Skripte für lokale Builds |
-| `output/` | Lokal gebaute App (`build/build.ps1` / `build/build.sh`), nicht im Git |
 
 ## Schnellstart
 
-```powershell
-./build/build.ps1      # baut und kopiert nach output\
-./output/claude-tui    # startet mit `claude` in jeder Session
+```
+cargo run --release    # bauen und starten, jede Session startet `claude`
 ```
 
-Fertige Binaries für Windows, Linux und macOS gibt es unter **Releases**.
+Die gebaute App liegt danach unter `target/release/claude-tui`.
+
+Fertige Archive für Windows, Linux und macOS gibt es unter **Releases**.
