@@ -135,7 +135,7 @@ impl Menu {
         add(Hotkey::Char('q'), "Quit claude-tui", Action::Quit);
 
         let title = match ctx.focus {
-            Focus::Window(i) => format!("Window {}", i + 1),
+            Focus::Window(i) => format!("Menue {}", i + 1),
             Focus::List => "Session list".to_string(),
         };
         Self {
@@ -255,6 +255,19 @@ mod tests {
         assert!(actions.contains(&Action::Focus(Focus::List)));
         assert!(actions.contains(&Action::Focus(Focus::Window(1))));
         assert!(!actions.contains(&Action::Focus(Focus::Window(0))));
+    }
+
+    #[test]
+    fn window_context_title_names_menu_number() {
+        let windows = names(2);
+        let menu = Menu::commands(&Context {
+            focus: Focus::Window(1),
+            windows: &windows,
+            selected_has_window: true,
+            has_selection: true,
+            update: None,
+        });
+        assert_eq!(menu.title, "Menue 2");
     }
 
     #[test]
