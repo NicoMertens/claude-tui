@@ -1,8 +1,9 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::mpsc::Receiver,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context as _, Result};
@@ -12,7 +13,7 @@ use ratatui::layout::{Margin, Position, Rect};
 use crate::{
     claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
-    keys,
+    external, keys,
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{Action, Context, Menu, Outcome, Purpose},
@@ -31,6 +32,9 @@ const STORE_INTERVAL: Duration = Duration::from_secs(2);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// So lange bleiben befristete Hinweise (z. B. „copied N characters“) stehen.
 const FLASH_DURATION: Duration = Duration::from_secs(5);
+/// So lange nach dem Ende eines eigenen Prozesses gilt seine Session noch als eigene: Datei in
+/// `~/.claude/sessions` und letzte Schreibzugriffe stammen noch von ihm.
+const ENDED_GRACE: Duration = Duration::from_secs(30);
 
 /// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
 /// Claude-ID) je Session. Gruppenüberschriften fehlen absichtlich.
@@ -100,6 +104,13 @@ pub struct App {
     recent: Vec<PathBuf>,
     store: Store,
     last_scan: Instant,
+    /// Claude-IDs laufender Claude-Prozesse laut `~/.claude/sessions` (eigene eingeschlossen).
+    claimed: HashSet<String>,
+    claimed_watch: Option<Receiver<HashSet<String>>>,
+    /// Zuletzt in claude-tui beendete Sessions mit Zeitpunkt (siehe [ENDED_GRACE]).
+    ended: Vec<(String, Instant)>,
+    /// Start von claude-tui; ältere Schreibzugriffe zählen nicht als fremde Aktivität.
+    started: SystemTime,
     /// Ganzer Bildschirm; die Fensterfläche ergibt sich daraus und aus `list_hidden`.
     screen: Rect,
     /// Sessionliste ausgeblendet: die Fenster bekommen die volle Breite. Nur mit mindestens einem
@@ -138,6 +149,10 @@ impl App {
             recent: recent::load(),
             store,
             last_scan: Instant::now(),
+            claimed: HashSet::new(),
+            claimed_watch: external::spawn_watcher(),
+            ended: Vec::new(),
+            started: SystemTime::now(),
             screen,
             list_hidden: false,
             stacked: false,
@@ -158,10 +173,18 @@ impl App {
     fn restore(&mut self) {
         let saved = state::load();
         self.stacked = saved.stacked;
+        let elsewhere = external::claimed_now(&saved.windows);
         for claude_id in saved.windows {
             let Some(stored) = self.store.get(&claude_id) else {
                 continue;
             };
+            if elsewhere.contains(&claude_id) {
+                self.notice = Some(format!(
+                    "\"{}\" runs elsewhere – not reopened",
+                    stored.title
+                ));
+                continue;
+            }
             match self.spawn(&stored.cwd, Launch::Resume(claude_id)) {
                 Ok(id) => self.place(id, self.windows.len()),
                 Err(e) => self.notice = Some(format!("{e:#}")),
@@ -244,6 +267,13 @@ impl App {
         }
         self.expire_notice();
         self.poll_update();
+        if let Some(claimed) = self
+            .claimed_watch
+            .as_ref()
+            .and_then(|rx| rx.try_iter().last())
+        {
+            self.claimed = claimed;
+        }
         if self.last_scan.elapsed() >= STORE_INTERVAL {
             self.store.refresh();
             self.last_scan = Instant::now();
@@ -283,7 +313,21 @@ impl App {
                 cwd: s.cwd.clone(),
             })
             .collect();
-        self.groups = list::build(self.store.sessions(), &running);
+        self.ended.retain(|(_, at)| at.elapsed() < ENDED_GRACE);
+        let stored = self.store.sessions();
+        let own: HashSet<&str> = running
+            .iter()
+            .map(|r| r.claude_id.as_str())
+            .chain(self.ended.iter().map(|(id, _)| id.as_str()))
+            .collect();
+        let elsewhere = external::running_elsewhere(
+            stored.iter().map(|s| (s.id.as_str(), s.modified)),
+            &self.claimed,
+            &own,
+            self.started,
+            SystemTime::now(),
+        );
+        self.groups = list::build(stored, &running, &elsewhere);
         if self.selected_entry().is_none() {
             self.cursor = list::flatten(&self.groups)
                 .next()
@@ -528,15 +572,14 @@ impl App {
                     None if self.windows.len() == 0 => self.place(id, 0),
                     None => self.open_pick(Purpose::Show(id)),
                 },
-                None if self.windows.len() == 0 => self.resume_into(&entry.claude_id, 0)?,
-                None => self.open_pick(Purpose::Resume(entry.claude_id)),
+                None => self.open_stored(&entry, None)?,
             },
             KeyCode::Char(d @ '1'..='4') => {
                 let slot = d as usize - '1' as usize;
                 if slot <= self.windows.len() && slot < MAX_WINDOWS {
                     match entry.running {
                         Some(id) => self.place(id, slot),
-                        None => self.resume_into(&entry.claude_id, slot)?,
+                        None => self.open_stored(&entry, Some(slot))?,
                     }
                 }
             }
@@ -558,6 +601,31 @@ impl App {
             .saturating_add_signed(delta)
             .min(ids.len().saturating_sub(1));
         self.cursor = ids.get(next).map(|id| id.to_string());
+    }
+
+    /// Öffnet eine gespeicherte Session in `slot` (`None`: Fensterauswahl, ohne offenes Fenster
+    /// Fenster 1). Läuft sie anderswo, kommt erst die Rückfrage.
+    fn open_stored(&mut self, entry: &Entry, slot: Option<usize>) -> Result<()> {
+        if entry.external {
+            self.menu = Some(Menu::confirm_open(
+                &entry.title,
+                entry.claude_id.clone(),
+                slot,
+            ));
+            return Ok(());
+        }
+        self.open_confirmed(entry.claude_id.clone(), slot)
+    }
+
+    fn open_confirmed(&mut self, claude_id: String, slot: Option<usize>) -> Result<()> {
+        match slot {
+            Some(slot) => self.resume_into(&claude_id, slot),
+            None if self.windows.len() == 0 => self.resume_into(&claude_id, 0),
+            None => {
+                self.open_pick(Purpose::Resume(claude_id));
+                Ok(())
+            }
+        }
     }
 
     /// Setzt eine gespeicherte Session in ihrem Verzeichnis fort und legt sie in `slot`.
@@ -604,7 +672,7 @@ impl App {
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
                 Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
-                Some(Purpose::Delete(_)) | None => {}
+                Some(Purpose::Delete(_) | Purpose::OpenElsewhere(..)) | None => {}
             },
             Action::CloseWindow => {
                 if let Some(slot) = self
@@ -630,6 +698,11 @@ impl App {
             Action::ConfirmDelete => {
                 if let Some(Purpose::Delete(claude_id)) = purpose {
                     self.delete_session(&claude_id)?;
+                }
+            }
+            Action::ConfirmOpen => {
+                if let Some(Purpose::OpenElsewhere(claude_id, slot)) = purpose {
+                    self.open_confirmed(claude_id, slot)?;
                 }
             }
             Action::Cancel => {}
@@ -715,7 +788,7 @@ impl App {
             Purpose::Resume(_) => self
                 .selected_entry()
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
-            Purpose::Delete(_) => return,
+            Purpose::Delete(_) | Purpose::OpenElsewhere(..) => return,
         };
         self.menu = Some(Menu::pick_window(
             purpose,
@@ -811,6 +884,9 @@ impl App {
 
     /// Beendet den Prozess (Drop) und schließt sein Fenster; die Claude-Session bleibt gespeichert.
     fn remove_process(&mut self, id: SessionId) {
+        if let Some(session) = self.session(id) {
+            self.ended.push((session.claude_id.clone(), Instant::now()));
+        }
         self.windows.remove_session(id);
         self.sessions.retain(|s| s.id != id);
         self.after_layout_change();

@@ -242,9 +242,17 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
 fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
     let session = entry.running.and_then(|id| app.session(id));
-    let (symbol, color) = theme::status_symbol(session.map(|s| s.status), clock());
+    let (symbol, color) = if entry.external {
+        theme::ELSEWHERE
+    } else {
+        theme::status_symbol(session.map(|s| s.status), clock())
+    };
     let slot = entry.running.and_then(|id| app.windows.window_of(id));
-    let window = slot.map_or_else(|| " ".repeat(4), |s| format!(" [{}]", s + 1));
+    let window = match slot {
+        Some(s) => format!(" [{}]", s + 1),
+        None if entry.external => theme::ELSEWHERE_LABEL.to_string(),
+        None => " ".repeat(4),
+    };
     let since = match session {
         Some(s) => Some(s.last_output().elapsed()),
         None => entry
@@ -268,7 +276,10 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     let line = Line::from(vec![
         Span::styled(format!("{symbol} "), Style::default().fg(color)),
         Span::styled(format!("{title}{padding}"), name_style),
-        Span::styled(window, Style::default().fg(theme::ACCENT)),
+        Span::styled(
+            window,
+            Style::default().fg(if entry.external { color } else { theme::ACCENT }),
+        ),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
     ]);
     let item = ListItem::new(line);

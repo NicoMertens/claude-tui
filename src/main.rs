@@ -1,6 +1,7 @@
 mod app;
 mod claude_store;
 mod dirpick;
+mod external;
 mod http;
 mod install;
 mod keys;
