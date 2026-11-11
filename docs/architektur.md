@@ -26,8 +26,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 |---|---|
 | `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt) |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
-| `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen) und wo der Fokus ist — ohne PTY testbar |
-| `layout.rs` | Fensterrechtecke für 1–4 Fenster (2 wahlweise übereinander) und Nachbarsuche für `Ctrl+Pfeil` |
+| `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
+| `layout.rs` | Fensterrechtecke für 1–4 Fenster (2 wahlweise übereinander), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil` |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
@@ -57,6 +57,9 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
    `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte).
 4. Nach jeder Layout-Änderung und bei Resize bekommt jede sichtbare Session die Innenmaße ihres
    Fensters. Sessions im Hintergrund behalten ihre letzte Größe; sie wird erst beim Anzeigen angepasst.
+   `App::window_rects` liefert nur sichtbare Fenster als (Fensterindex, Session, Rechteck) — beim
+   Zoom allein das gezoomte über die ganze Fensterfläche. Zeichnen, Maus und Resize gehen alle
+   darüber; nur die Nachbarsuche für `Ctrl+Pfeil` nimmt das ungezoomte Layout.
 
 ## Statuserkennung
 

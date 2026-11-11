@@ -342,10 +342,7 @@ fn draw_overlay(f: &mut Frame, app: &App) {
     let [sidebar, windows] = split(screen, app.list_hidden);
     // Fokus auf der Liste: mittig über der Sessionliste und auf sie begrenzt (kein Ausweichen).
     let (target, fallback) = match app.windows.focus() {
-        Focus::Window(slot) => (
-            app.window_rects().get(slot).copied().unwrap_or(windows),
-            windows,
-        ),
+        Focus::Window(slot) => (app.window_rect(slot).unwrap_or(windows), windows),
         Focus::List => (sidebar, sidebar),
     };
     let target = target.intersection(screen);
@@ -431,7 +428,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
         f.render_widget(text.block(rounded(theme::UNFOCUS)), area);
         return;
     }
-    for (slot, (&id, rect)) in app.windows.slots().iter().zip(rects).enumerate() {
+    for (slot, id, rect) in rects {
         // Die Fensterrechtecke stammen aus der zuletzt gemeldeten Größe; ist das Terminal
         // inzwischen kleiner, nur den sichtbaren Teil zeichnen.
         let rect = rect.intersection(f.area());
@@ -455,6 +452,9 @@ fn draw_windows(f: &mut Frame, app: &App) {
             Style::default().fg(label_color),
         );
         let mut spans = vec![title, separator, status];
+        if app.windows.zoomed() == Some(slot) {
+            spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
+        }
         let scrolled = session.scroll_offset();
         if scrolled > 0 {
             spans.push(Span::styled(
