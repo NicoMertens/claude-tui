@@ -36,7 +36,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("-h" | "--help") => {
-            println!("Aufruf: claude-tui [BEFEHL]\n\nBEFEHL startet Claude Code (Standard: claude); claude-tui hängt --session-id bzw. --resume an.");
+            println!("Usage: claude-tui [COMMAND]\n\nCOMMAND starts Claude Code (default: claude); claude-tui appends --session-id or --resume.");
             return Ok(());
         }
         _ => {}

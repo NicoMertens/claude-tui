@@ -57,7 +57,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let panel_width = area.width.saturating_sub(2) as usize;
     let panel = match (&app.dir_picker, &app.menu) {
         (Some(picker), _) => (
-            "Verzeichnis".to_string(),
+            "Directory".to_string(),
             dir_picker_lines(picker, panel_width),
         ),
         (None, Some(menu)) => (menu.title.clone(), menu_lines(menu, panel_width)),
@@ -66,7 +66,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             String::new(),
             vec![Line::from(vec![
                 Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
-                Span::styled(" Menü", Style::default().fg(theme::MUTED)),
+                Span::styled(" Menu", Style::default().fg(theme::MUTED)),
             ])],
         ),
     };
@@ -172,7 +172,7 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
         Span::styled("█", Style::default().fg(theme::ACCENT)),
     ])];
     if !picker.recent.is_empty() {
-        lines.push(section_title("zuletzt"));
+        lines.push(section_title("recent"));
         for (i, dir) in picker.recent.iter().enumerate() {
             let text = format!(" {}", tail(&dir.display().to_string(), width - 1));
             lines.push(selectable(text, picker.selected == Some(i), width));
@@ -183,7 +183,7 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
             format!(" {error}"),
             Style::default().fg(theme::WAITING),
         )),
-        None => muted(" Tab ergänzen · Enter · Esc"),
+        None => muted(" Tab complete · Enter · Esc"),
     });
     lines
 }
@@ -273,7 +273,7 @@ fn head(text: &str, width: usize) -> String {
 fn short_age(since: Duration) -> String {
     let secs = since.as_secs();
     match secs {
-        0..=59 => "jetzt".to_string(),
+        0..=59 => "now".to_string(),
         60..=3599 => format!("{}m", secs / 60),
         3600..=86_399 => format!("{}h", secs / 3600),
         _ => format!("{}d", secs / 86_400),
@@ -287,7 +287,7 @@ fn menu_lines(menu: &Menu, width: usize) -> Vec<Line<'static>> {
         let text = format!(" {:<3}{}", item.hotkey.label(), item.label);
         lines.push(selectable(text, i == menu.selected, width));
     }
-    lines.push(muted(" Esc schließen"));
+    lines.push(muted(" Esc close"));
     lines
 }
 
@@ -295,10 +295,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
     let rects = app.window_rects();
     if rects.is_empty() {
         let [_, area] = split(f.area());
-        let hint = format!(
-            " Kein Fenster offen – {} n startet eine Session",
-            keys::PREFIX_HINT
-        );
+        let hint = format!(" No window open – {} n starts a session", keys::PREFIX_HINT);
         let text = Paragraph::new(Span::styled(hint, Style::default().fg(theme::MUTED)));
         f.render_widget(text.block(rounded(theme::UNFOCUS)), area);
         return;
@@ -324,7 +321,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let scrolled = session.scroll_offset();
         if scrolled > 0 {
             spans.push(Span::styled(
-                format!("· ↑ {scrolled} Zeilen "),
+                format!("· ↑ {scrolled} lines "),
                 Style::default().fg(theme::MENU),
             ));
         }

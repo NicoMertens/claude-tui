@@ -99,16 +99,16 @@ impl Menu {
         };
         let in_window = matches!(ctx.focus, Focus::Window(_));
 
-        add(Hotkey::Char('n'), "Neue Session", Action::NewSession);
+        add(Hotkey::Char('n'), "New session", Action::NewSession);
         if in_window || ctx.selected_has_window {
-            add(Hotkey::Char('c'), "Fenster schließen", Action::CloseWindow);
+            add(Hotkey::Char('c'), "Close window", Action::CloseWindow);
         }
         if in_window || ctx.has_selection {
-            add(Hotkey::Char('x'), "Session löschen", Action::DeleteSession);
+            add(Hotkey::Char('x'), "Delete session", Action::DeleteSession);
         }
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
-                let label = format!("Fokus Fenster {}", i + 1);
+                let label = format!("Focus window {}", i + 1);
                 add(
                     Hotkey::Char(digit(i + 1)),
                     &label,
@@ -119,16 +119,16 @@ impl Menu {
         if in_window {
             add(
                 Hotkey::Char('0'),
-                "Fokus Sessionliste",
+                "Focus session list",
                 Action::Focus(Focus::List),
             );
-            add(Hotkey::Prefix, "Ctrl+A an Claude", Action::SendPrefix);
+            add(Hotkey::Prefix, "Send Ctrl+A to Claude", Action::SendPrefix);
         }
-        add(Hotkey::Char('q'), "claude-tui beenden", Action::Quit);
+        add(Hotkey::Char('q'), "Quit claude-tui", Action::Quit);
 
         let title = match ctx.focus {
-            Focus::Window(i) => format!("Fenster {}", i + 1),
-            Focus::List => "Sessionliste".to_string(),
+            Focus::Window(i) => format!("Window {}", i + 1),
+            Focus::List => "Session list".to_string(),
         };
         Self {
             title,
@@ -145,14 +145,14 @@ impl Menu {
             .enumerate()
             .map(|(i, name)| Item {
                 hotkey: Hotkey::Char(digit(i + 1)),
-                label: format!("{name} ersetzen"),
+                label: format!("Replace {name}"),
                 action: Action::Place(i),
             })
             .collect();
         if windows.len() < MAX_WINDOWS {
             items.push(Item {
                 hotkey: Hotkey::Char(digit(windows.len() + 1)),
-                label: "neues Fenster".to_string(),
+                label: "New window".to_string(),
                 action: Action::Place(windows.len()),
             });
         }
@@ -172,10 +172,10 @@ impl Menu {
             action,
         };
         Self {
-            title: format!("{title} löschen?"),
+            title: format!("Delete {title}?"),
             items: vec![
-                item('j', "Ja, endgültig löschen", Action::ConfirmDelete),
-                item('n', "Nein", Action::Cancel),
+                item('y', "Yes, delete permanently", Action::ConfirmDelete),
+                item('n', "No", Action::Cancel),
             ],
             selected: 0,
             purpose: Some(Purpose::Delete(claude_id)),
@@ -289,7 +289,7 @@ mod tests {
             &names(4),
         );
         assert_eq!(menu.items.len(), 4);
-        assert!(menu.items.iter().all(|i| i.label.ends_with("ersetzen")));
+        assert!(menu.items.iter().all(|i| i.label.starts_with("Replace")));
     }
 
     #[test]

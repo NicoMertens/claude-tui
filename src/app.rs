@@ -71,7 +71,7 @@ impl App {
             notice: None,
             should_quit: false,
             command,
-            start_dir: std::env::current_dir().context("aktuelles Verzeichnis nicht lesbar")?,
+            start_dir: std::env::current_dir().context("current directory not readable")?,
             recent: recent::load(),
             store,
             last_scan: Instant::now(),
@@ -151,7 +151,7 @@ impl App {
             .collect();
         for id in exited {
             if self.windows.window_of(id).is_some() {
-                self.notice = Some(format!("„{}“ wurde beendet", self.title_of(id)));
+                self.notice = Some(format!("\"{}\" has exited", self.title_of(id)));
             }
             self.remove_process(id);
         }
@@ -331,7 +331,7 @@ impl App {
         let stored = self
             .store
             .get(claude_id)
-            .context("Session nicht mehr gespeichert")?;
+            .context("session is no longer stored")?;
         let id = self.spawn(&stored.cwd, Launch::Resume(claude_id.to_string()))?;
         self.place(id, slot);
         Ok(())
@@ -458,11 +458,11 @@ impl App {
 
     fn open_pick(&mut self, purpose: Purpose) {
         let title = match &purpose {
-            Purpose::NewSession(_) => "Neue Session in".to_string(),
-            &Purpose::Show(id) => format!("{} zeigen in", self.title_of(id)),
+            Purpose::NewSession(_) => "New session in".to_string(),
+            &Purpose::Show(id) => format!("Show {} in", self.title_of(id)),
             Purpose::Resume(_) => self
                 .selected_entry()
-                .map_or_else(String::new, |e| format!("{} öffnen in", e.title)),
+                .map_or_else(String::new, |e| format!("Open {} in", e.title)),
             Purpose::Delete(_) => return,
         };
         self.menu = Some(Menu::pick_window(purpose, title, &self.window_names()));

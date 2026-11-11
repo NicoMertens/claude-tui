@@ -41,10 +41,10 @@ pub fn status_symbol(status: Option<Status>, elapsed: Duration) -> (&'static str
 /// Statustext in der Fensterleiste: rot = arbeitet, gelb = Rückfrage, grau = bereit.
 pub fn status_label(status: Status) -> (&'static str, Color) {
     match status {
-        Status::Working => ("arbeitet", BUSY),
-        Status::Waiting => ("wartet auf dich", WAITING),
-        Status::Idle => ("bereit", MUTED),
-        Status::Exited => ("beendet", MUTED),
+        Status::Working => ("working", BUSY),
+        Status::Waiting => ("waiting for you", WAITING),
+        Status::Idle => ("ready", MUTED),
+        Status::Exited => ("exited", MUTED),
     }
 }
 

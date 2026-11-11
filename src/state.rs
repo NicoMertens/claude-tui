@@ -27,13 +27,11 @@ pub fn load() -> State {
 }
 
 pub fn save(state: &State) -> Result<()> {
-    let dir = paths::config_dir().context("kein Konfigurationsordner (APPDATA/HOME) gefunden")?;
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("{} konnte nicht angelegt werden", dir.display()))?;
+    let dir = paths::config_dir().context("no config directory (APPDATA/HOME) found")?;
+    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let file = dir.join(FILE_NAME);
     let text = serde_json::to_string_pretty(state)?;
-    fs::write(&file, text)
-        .with_context(|| format!("{} konnte nicht geschrieben werden", file.display()))
+    fs::write(&file, text).with_context(|| format!("cannot write {}", file.display()))
 }
 
 #[cfg(test)]

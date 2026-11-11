@@ -28,7 +28,7 @@ pub struct Group {
     pub entries: Vec<Entry>,
 }
 
-pub const NEW_SESSION_TITLE: &str = "neue Session";
+pub const NEW_SESSION_TITLE: &str = "new session";
 
 /// Baut die Gruppen. Reihenfolge: Gruppen nach jüngster Aktivität (laufend zählt als jetzt),
 /// darin laufende Sessions zuerst, dann nach letzter Aktivität.

@@ -103,7 +103,7 @@ impl DirPicker {
         match resolve(&self.input) {
             Some(path) if path.is_dir() => Outcome::Chosen(path),
             _ => {
-                self.error = Some("Verzeichnis nicht gefunden");
+                self.error = Some("directory not found");
                 Outcome::Stay
             }
         }
@@ -117,7 +117,7 @@ impl DirPicker {
         }
         let matches = completions(&self.input);
         match matches.as_slice() {
-            [] => self.error = Some("kein passender Ordner"),
+            [] => self.error = Some("no matching folder"),
             [only] => self.input = only.clone(),
             _ => {
                 let common = common_prefix(&matches);

@@ -24,7 +24,7 @@ Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/
 gruppiert nach Arbeitsverzeichnis — Gruppen mit der jüngsten Aktivität oben, darin laufende Sessions
 zuerst. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
-Aktivität (`jetzt`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
+Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
 Rechts bis zu **4 Fenster**, nach Position nummeriert:
@@ -41,8 +41,8 @@ Rechts bis zu **4 Fenster**, nach Position nummeriert:
 Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **Fokus** (ein Fenster
 oder die Sessionliste) hat einen hellorangen Rahmen, alle anderen einen dunkelorangen.
 
-Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **arbeitet** (rot), **wartet auf
-dich** (gelb), **bereit** (grau) — z. B. `1 · claude-tui-rust · ✻ arbeitet` — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
+Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
+you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
 
 ## Tasten
 
@@ -71,7 +71,7 @@ einen Zeilenumbruch ein.
 ### Menü (`Ctrl+A`)
 
 Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
-wird; ist es zu, zeigt die Box nur `Ctrl+A Menü`. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+wird; ist es zu, zeigt die Box nur `Ctrl+A Menu`. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |
@@ -83,7 +83,7 @@ vom Fokus ab:
 | `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
-`c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („… löschen?“, `j`/Enter bestätigt,
+`c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
 (`~/.claude/projects/<Ordner>/<id>.jsonl` samt gleichnamigem Unterordner) — die Session ist danach
 auch für `claude --resume` weg.
@@ -103,14 +103,14 @@ Die zuletzt genutzten Verzeichnisse (höchstens 10) stehen in `%APPDATA%\claude-
 bzw. `~/.config/claude-tui/recent-dirs.txt`. Die erste Session beim Programmstart läuft ohne Auswahl
 im aktuellen Verzeichnis.
 
-**Fensterauswahl:** listet die belegten Fenster („claude 1 ersetzen“) und, solange weniger als 4 offen
-sind, „neues Fenster“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen,
+**Fensterauswahl:** listet die belegten Fenster („Replace claude 1“) und, solange weniger als 4 offen
+sind, „New window“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen,
 entfällt die Auswahl und Fenster 1 wird genommen.
 
 ## Maus
 
 Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen);
-die Fensterleiste zeigt dann `↑ N Zeilen`. Jede Eingabe in die Session springt zurück ans Ende.
+die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
 
 claude-tui fängt dafür die Maus ab. Text markieren und kopieren geht in Windows Terminal deshalb mit
@@ -120,9 +120,9 @@ claude-tui fängt dafür die Maus ab. Text markieren und kopieren geht in Window
 
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
-| ✻ (animiert) | rot | arbeitet | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
-| ▲ | gelb | wartet auf dich | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
-| ● | grau | bereit | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
+| ✻ (animiert) | rot | working | Die Session hat in den letzten 1,5 s etwas ausgegeben (Claudes Spinner). |
+| ▲ | gelb | waiting for you | Keine Ausgabe, und auf dem Bildschirm steht eine Rückfrage („Do you want to …“). |
+| ● | grau | ready | Keine Ausgabe, keine Rückfrage — Claude wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 
 Die Formen unterscheiden sich auch ohne Farbe.

@@ -55,7 +55,7 @@ impl Session {
     ) -> Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
-            .context("PTY konnte nicht geöffnet werden")?;
+            .context("cannot open PTY")?;
 
         let mut cmd = shell_command(command);
         cmd.cwd(cwd);
@@ -63,7 +63,7 @@ impl Session {
         let child = pair
             .slave
             .spawn_command(cmd)
-            .with_context(|| format!("'{command}' konnte nicht gestartet werden"))?;
+            .with_context(|| format!("cannot start '{command}'"))?;
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;

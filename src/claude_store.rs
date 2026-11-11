@@ -140,12 +140,12 @@ pub fn delete(jsonl: &Path) -> Result<()> {
                 attempt += 1;
                 thread::sleep(Duration::from_millis(100));
             }
-            Err(e) => return Err(e).with_context(|| format!("{} nicht löschbar", jsonl.display())),
+            Err(e) => return Err(e).with_context(|| format!("cannot delete {}", jsonl.display())),
         }
     }
     let dir = jsonl.with_extension("");
     if dir.is_dir() {
-        fs::remove_dir_all(&dir).with_context(|| format!("{} nicht löschbar", dir.display()))?;
+        fs::remove_dir_all(&dir).with_context(|| format!("cannot delete {}", dir.display()))?;
     }
     Ok(())
 }

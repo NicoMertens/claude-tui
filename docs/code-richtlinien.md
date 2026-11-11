@@ -44,5 +44,6 @@ Unit-Tests als `#[cfg(test)] mod tests` im selben Modul. `cargo test` muss grün
 
 ## Sprache
 
-Kommentare, Doku und Oberflächentexte auf Deutsch. Kommentiert wird nur, was am Code nicht ablesbar
+Kommentare und Doku auf Deutsch, **Oberflächentexte der App auf Englisch** (Menü, Zustände,
+Hinweise, Fehlermeldungen, `--help`). Kommentiert wird nur, was am Code nicht ablesbar
 ist: eine fachliche Regel, eine bewusste Abweichung, ein Workaround um fremdes Verhalten.

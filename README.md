@@ -1,19 +1,19 @@
 # claude-tui
 
 Ein Terminal-Arbeitsplatz für mehrere Claude-Code-Sessions, geschrieben in Rust. Links eine
-Seitenleiste mit allen Sessions und ihrem Zustand (arbeitet, wartet auf dich, bereit, beendet),
+Seitenleiste mit allen Sessions und ihrem Zustand (working, waiting for you, ready),
 rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 [herdr](https://github.com/ogulcancelik/herdr); Code ist nicht übernommen.
 
 ```
 ╭ ✻ claude-tui ───────╮╭ 1 · claude 1 ──────╮╭ 2 · claude 3 ──────╮
 │▌claude 1 [1]        ││                    ││                    │
-│  ● arbeitet         ││                    │╰────────────────────╯
+│  ● working          ││                    │╰────────────────────╯
 │ claude 2            ││                    │╭ 3 · claude 4 ──────╮
-│  ● wartet auf dich  ││                    ││                    │
+│  ● waiting for you  ││                    ││                    │
 │ claude 3 [2]        ││                    ││                    │
-│  ● bereit           ││                    ││                    │
-│ Ctrl+A Menü         ││                    ││                    │
+│  ● ready            ││                    ││                    │
+│ Ctrl+A Menu         ││                    ││                    │
 ╰─────────────────────╯╰────────────────────╯╰────────────────────╯
 ```
 
