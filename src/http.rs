@@ -12,7 +12,7 @@
 
 use std::{io::ErrorKind, path::PathBuf, process::Command};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 
 const USER_AGENT: &str = concat!("claude-tui/", env!("CARGO_PKG_VERSION"));
 /// Obergrenze je Abruf in Sekunden.
@@ -79,6 +79,7 @@ fn curl(url: &str, kind: Kind) -> Result<Vec<u8>, CurlError> {
 fn fallback(url: &str, kind: Kind) -> Result<Vec<u8>> {
     use std::time::Duration;
 
+    use anyhow::Context;
     use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
     let tls = TlsConfig::builder()
