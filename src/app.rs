@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Margin, Rect};
 
 use crate::{
-    claude_store::Store,
+    claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
     keys,
     layout::{self, Direction},
@@ -344,7 +344,7 @@ impl App {
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
                 Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
-                None => {}
+                Some(Purpose::Delete(_)) | None => {}
             },
             Action::CloseWindow => {
                 if let Some(slot) = self
@@ -355,11 +355,24 @@ impl App {
                     self.after_layout_change();
                 }
             }
-            Action::KillSession => {
-                if let Some(id) = self.context_session() {
-                    self.remove_process(id);
+            Action::DeleteSession => {
+                let target = match self.windows.focused_session() {
+                    Some(id) => self.session(id).map(|s| s.claude_id.clone()),
+                    None => self.selected_entry().map(|e| e.claude_id.clone()),
+                };
+                if let Some(claude_id) = target {
+                    let title = list::flatten(&self.groups)
+                        .find(|e| e.claude_id == claude_id)
+                        .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone());
+                    self.menu = Some(Menu::confirm_delete(&title, claude_id));
                 }
             }
+            Action::ConfirmDelete => {
+                if let Some(Purpose::Delete(claude_id)) = purpose {
+                    self.delete_session(&claude_id)?;
+                }
+            }
+            Action::Cancel => {}
             Action::Focus(focus) => self.set_focus(focus),
             Action::SendPrefix => {
                 if let Some(id) = self.windows.focused_session() {
@@ -396,8 +409,25 @@ impl App {
             focus: self.windows.focus(),
             windows: &windows,
             selected_has_window: selected.is_some_and(|id| self.windows.window_of(id).is_some()),
-            selected_running: selected.is_some(),
+            has_selection: self.selected_entry().is_some(),
         }));
+    }
+
+    /// Schließt Fenster und Prozess (falls laufend) und löscht das Protokoll endgültig.
+    fn delete_session(&mut self, claude_id: &str) -> Result<()> {
+        let running = self
+            .sessions
+            .iter()
+            .find(|s| s.claude_id == claude_id)
+            .map(|s| s.id);
+        if let Some(id) = running {
+            self.remove_process(id);
+        }
+        let path = self.store.path_of(claude_id);
+        let result = path.map_or(Ok(()), |p| claude_store::delete(&p));
+        self.store.refresh();
+        self.rebuild_list();
+        result
     }
 
     fn open_pick(&mut self, purpose: Purpose) {
@@ -407,6 +437,7 @@ impl App {
             Purpose::Resume(_) => self
                 .selected_entry()
                 .map_or_else(String::new, |e| format!("{} öffnen in", e.title)),
+            Purpose::Delete(_) => return,
         };
         self.menu = Some(Menu::pick_window(purpose, title, &self.window_names()));
     }

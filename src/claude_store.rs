@@ -9,9 +9,11 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    time::SystemTime,
+    thread,
+    time::{Duration, SystemTime},
 };
 
+use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::paths;
@@ -115,7 +117,40 @@ impl Store {
     pub fn get(&self, id: &str) -> Option<StoredSession> {
         self.files.values().find(|f| f.id == id).and_then(stored)
     }
+
+    /// Protokolldatei einer Session.
+    pub fn path_of(&self, id: &str) -> Option<PathBuf> {
+        self.files
+            .iter()
+            .find(|(_, f)| f.id == id)
+            .map(|(path, _)| path.clone())
+    }
 }
+
+/// Löscht eine Session endgültig: die Protokolldatei `<id>.jsonl` und den gleichnamigen Ordner
+/// daneben (Subagent-Protokolle u. Ä.). Unter Windows kann die Datei kurz nach dem Beenden des
+/// Prozesses noch gesperrt sein, daher einige Versuche.
+pub fn delete(jsonl: &Path) -> Result<()> {
+    let mut attempt = 0;
+    loop {
+        match fs::remove_file(jsonl) {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) if attempt < DELETE_ATTEMPTS => {
+                attempt += 1;
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e).with_context(|| format!("{} nicht löschbar", jsonl.display())),
+        }
+    }
+    let dir = jsonl.with_extension("");
+    if dir.is_dir() {
+        fs::remove_dir_all(&dir).with_context(|| format!("{} nicht löschbar", dir.display()))?;
+    }
+    Ok(())
+}
+
+const DELETE_ATTEMPTS: u32 = 10;
 
 fn stored(file: &FileState) -> Option<StoredSession> {
     Some(StoredSession {
@@ -264,6 +299,14 @@ mod tests {
         let session = store.get("abc").expect("Session");
         assert_eq!(session.cwd, PathBuf::from("/demo"));
         assert_eq!(session.title, "zeile eins");
+
+        let subdir = project.join("abc");
+        fs::create_dir_all(subdir.join("subagents")).expect("Unterordner");
+        let path = store.path_of("abc").expect("Pfad");
+        delete(&path).expect("löschen");
+        assert!(!file.exists() && !subdir.exists());
+        store.refresh();
+        assert!(store.get("abc").is_none());
         let _ = fs::remove_dir_all(root);
     }
 }

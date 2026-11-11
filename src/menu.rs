@@ -13,7 +13,11 @@ use crate::{
 pub enum Action {
     NewSession,
     CloseWindow,
-    KillSession,
+    /// Fragt nach, ob die Session endgültig gelöscht werden soll.
+    DeleteSession,
+    /// Bestätigung: Session löschen (Ziel steht in [Purpose::Delete]).
+    ConfirmDelete,
+    Cancel,
     Focus(Focus),
     SendPrefix,
     Quit,
@@ -52,6 +56,8 @@ pub enum Purpose {
     Show(SessionId),
     /// Gespeicherte Claude-Session fortsetzen (`--resume`).
     Resume(String),
+    /// Claude-Session, deren Löschen bestätigt werden soll.
+    Delete(String),
 }
 
 #[derive(Debug)]
@@ -77,8 +83,8 @@ pub struct Context<'a> {
     pub windows: &'a [String],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
-    /// Die in der Liste ausgewählte Session läuft (nur dann lässt sie sich beenden).
-    pub selected_running: bool,
+    /// In der Liste ist eine Session ausgewählt.
+    pub has_selection: bool,
 }
 
 impl Menu {
@@ -97,8 +103,8 @@ impl Menu {
         if in_window || ctx.selected_has_window {
             add(Hotkey::Char('c'), "Fenster schließen", Action::CloseWindow);
         }
-        if in_window || ctx.selected_running {
-            add(Hotkey::Char('x'), "Session beenden", Action::KillSession);
+        if in_window || ctx.has_selection {
+            add(Hotkey::Char('x'), "Session löschen", Action::DeleteSession);
         }
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
@@ -155,6 +161,24 @@ impl Menu {
             items,
             selected: 0,
             purpose: Some(purpose),
+        }
+    }
+
+    /// Sicherheitsabfrage vor dem endgültigen Löschen; Enter bestätigt.
+    pub fn confirm_delete(title: &str, claude_id: String) -> Self {
+        let item = |c, label: &str, action| Item {
+            hotkey: Hotkey::Char(c),
+            label: label.to_string(),
+            action,
+        };
+        Self {
+            title: format!("{title} löschen?"),
+            items: vec![
+                item('j', "Ja, endgültig löschen", Action::ConfirmDelete),
+                item('n', "Nein", Action::Cancel),
+            ],
+            selected: 0,
+            purpose: Some(Purpose::Delete(claude_id)),
         }
     }
 
@@ -215,7 +239,7 @@ mod tests {
             focus: Focus::Window(0),
             windows: &windows,
             selected_has_window: true,
-            selected_running: true,
+            has_selection: true,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -231,7 +255,7 @@ mod tests {
             focus: Focus::List,
             windows: &windows,
             selected_has_window: false,
-            selected_running: true,
+            has_selection: true,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
         assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));
@@ -266,5 +290,20 @@ mod tests {
         );
         assert_eq!(menu.items.len(), 4);
         assert!(menu.items.iter().all(|i| i.label.ends_with("ersetzen")));
+    }
+
+    #[test]
+    fn delete_needs_confirmation_and_enter_confirms() {
+        let mut menu = Menu::confirm_delete("Alte Analyse", "abc".into());
+        assert_eq!(menu.purpose, Some(Purpose::Delete("abc".into())));
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('n'))),
+            Outcome::Run(Action::Cancel)
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Enter)),
+            Outcome::Run(Action::ConfirmDelete)
+        );
+        assert_eq!(menu.on_key(&key(KeyCode::Esc)), Outcome::Close);
     }
 }
