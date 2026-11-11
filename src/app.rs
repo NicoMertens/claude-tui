@@ -598,13 +598,6 @@ impl App {
                 self.stacked = !self.stacked;
                 self.after_layout_change();
             }
-            Action::SendPrefix => {
-                if let Some(id) = self.windows.focused_session() {
-                    if let Some(session) = self.session_mut(id) {
-                        session.write(keys::PREFIX_BYTES)?;
-                    }
-                }
-            }
             Action::Quit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {

@@ -3,8 +3,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::layout::Direction;
 
 pub const PREFIX_HINT: &str = "Ctrl+A";
-/// Was die Session bekommt, wenn der Präfix zweimal gedrückt wird.
-pub const PREFIX_BYTES: &[u8] = &[0x01];
 
 pub fn is_prefix(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('a') && key.modifiers == KeyModifiers::CONTROL

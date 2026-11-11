@@ -109,7 +109,7 @@ fokussierten Fenster bzw. über der Sessionliste. Ist das fokussierte Fenster zu
 weicht es auf die ganze Fensterfläche aus; über der Sessionliste wird es auf deren Breite begrenzt.
 Genauso erscheinen Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Der untere Rahmen der
 Sessionliste erinnert mit `Ctrl+A Menu` daran, wie sich das Menü öffnet. Punkte per Taste oder mit
-`↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+`↑`/`↓` und `Enter` wählen, `Esc` oder erneut `Ctrl+A` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |
@@ -118,7 +118,6 @@ vom Fokus ab:
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
-| `Ctrl+A` | – | sendet ein echtes Ctrl+A an Claude |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |

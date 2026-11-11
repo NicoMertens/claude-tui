@@ -19,7 +19,6 @@ pub enum Action {
     ConfirmDelete,
     Cancel,
     Focus(Focus),
-    SendPrefix,
     /// Sessionliste ein- bzw. ausblenden.
     ToggleList,
     /// Zwei Fenster übereinander bzw. nebeneinander anordnen.
@@ -31,24 +30,9 @@ pub enum Action {
     Place(usize),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Hotkey {
-    Char(char),
-    Prefix,
-}
-
-impl Hotkey {
-    pub fn label(self) -> String {
-        match self {
-            Hotkey::Char(c) => c.to_string(),
-            Hotkey::Prefix => "^A".to_string(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Item {
-    pub hotkey: Hotkey,
+    pub hotkey: char,
     pub label: String,
     pub action: Action,
 }
@@ -111,36 +95,27 @@ impl Menu {
         };
         let in_window = matches!(ctx.focus, Focus::Window(_));
 
-        add(Hotkey::Char('n'), "New session", Action::NewSession);
+        add('n', "New session", Action::NewSession);
         if in_window || ctx.selected_has_window {
-            add(Hotkey::Char('c'), "Close window", Action::CloseWindow);
+            add('c', "Close window", Action::CloseWindow);
         }
         if in_window || ctx.has_selection {
-            add(Hotkey::Char('x'), "Delete session", Action::DeleteSession);
+            add('x', "Delete session", Action::DeleteSession);
         }
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
                 let label = format!("Focus window {}", i + 1);
-                add(
-                    Hotkey::Char(digit(i + 1)),
-                    &label,
-                    Action::Focus(Focus::Window(i)),
-                );
+                add(digit(i + 1), &label, Action::Focus(Focus::Window(i)));
             }
         }
         if in_window {
-            add(
-                Hotkey::Char('0'),
-                "Focus session list",
-                Action::Focus(Focus::List),
-            );
-            add(Hotkey::Prefix, "Send Ctrl+A to Claude", Action::SendPrefix);
+            add('0', "Focus session list", Action::Focus(Focus::List));
         }
         // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
         if ctx.list_hidden {
-            add(Hotkey::Char('s'), "Show session list", Action::ToggleList);
+            add('s', "Show session list", Action::ToggleList);
         } else if !ctx.windows.is_empty() {
-            add(Hotkey::Char('s'), "Hide session list", Action::ToggleList);
+            add('s', "Hide session list", Action::ToggleList);
         }
         // Die Anordnung ist nur bei genau zwei Fenstern wählbar.
         if ctx.windows.len() == 2 {
@@ -149,13 +124,13 @@ impl Menu {
             } else {
                 "Stack windows"
             };
-            add(Hotkey::Char('l'), label, Action::ToggleStacked);
+            add('l', label, Action::ToggleStacked);
         }
         if let Some(version) = ctx.update {
             let label = format!("Update to v{version}");
-            add(Hotkey::Char('u'), &label, Action::Update);
+            add('u', &label, Action::Update);
         }
-        add(Hotkey::Char('q'), "Quit claude-tui", Action::Quit);
+        add('q', "Quit claude-tui", Action::Quit);
 
         let title = match ctx.focus {
             Focus::Window(i) => format!("Menue {}", i + 1),
@@ -173,14 +148,14 @@ impl Menu {
     pub fn pick_window(purpose: Purpose, title: String, open: usize) -> Self {
         let mut items: Vec<Item> = (0..open)
             .map(|i| Item {
-                hotkey: Hotkey::Char(digit(i + 1)),
+                hotkey: digit(i + 1),
                 label: format!("Replace Window {}", i + 1),
                 action: Action::Place(i),
             })
             .collect();
         if open < MAX_WINDOWS {
             items.push(Item {
-                hotkey: Hotkey::Char(digit(open + 1)),
+                hotkey: digit(open + 1),
                 label: "New window".to_string(),
                 action: Action::Place(open),
             });
@@ -196,7 +171,7 @@ impl Menu {
     /// Sicherheitsabfrage vor dem endgültigen Löschen; Enter bestätigt.
     pub fn confirm_delete(title: &str, claude_id: String) -> Self {
         let item = |c, label: &str, action| Item {
-            hotkey: Hotkey::Char(c),
+            hotkey: c,
             label: label.to_string(),
             action,
         };
@@ -227,19 +202,14 @@ impl Menu {
                 .items
                 .get(self.selected)
                 .map_or(Outcome::Close, |item| Outcome::Run(item.action)),
-            _ => {
-                let hotkey = if keys::is_prefix(key) {
-                    Some(Hotkey::Prefix)
-                } else if let KeyCode::Char(c) = key.code {
-                    Some(Hotkey::Char(c))
-                } else {
-                    None
-                };
-                self.items
-                    .iter()
-                    .find(|item| Some(item.hotkey) == hotkey)
-                    .map_or(Outcome::Stay, |item| Outcome::Run(item.action))
-            }
+            // Ctrl+A noch einmal schließt das Menü wieder.
+            _ if keys::is_prefix(key) => Outcome::Close,
+            KeyCode::Char(c) => self
+                .items
+                .iter()
+                .find(|item| item.hotkey == c)
+                .map_or(Outcome::Stay, |item| Outcome::Run(item.action)),
+            _ => Outcome::Stay,
         }
     }
 }
@@ -308,7 +278,6 @@ mod tests {
             stacked: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
-        assert!(menu.items.iter().all(|i| i.action != Action::SendPrefix));
     }
 
     fn toggle_label(windows: usize, list_hidden: bool) -> Option<String> {
@@ -325,7 +294,7 @@ mod tests {
         menu.items
             .iter()
             .find(|i| i.action == Action::ToggleList)
-            .map(|i| format!("{} {}", i.hotkey.label(), i.label))
+            .map(|i| format!("{} {}", i.hotkey, i.label))
     }
 
     #[test]
@@ -355,7 +324,7 @@ mod tests {
         menu.items
             .iter()
             .find(|i| i.action == Action::ToggleStacked)
-            .map(|i| format!("{} {}", i.hotkey.label(), i.label))
+            .map(|i| format!("{} {}", i.hotkey, i.label))
     }
 
     #[test]
@@ -383,6 +352,13 @@ mod tests {
             Outcome::Run(Action::Place(2))
         );
         assert_eq!(menu.on_key(&key(KeyCode::Esc)), Outcome::Close);
+    }
+
+    #[test]
+    fn prefix_again_closes_menu() {
+        let mut menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 1);
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(menu.on_key(&ctrl_a), Outcome::Close);
     }
 
     #[test]

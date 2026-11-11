@@ -313,7 +313,7 @@ fn short_age(since: Duration) -> String {
 fn menu_lines(menu: &Menu, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for (i, item) in menu.items.iter().enumerate() {
-        let text = format!(" {:<3}{}", item.hotkey.label(), item.label);
+        let text = format!(" {:<3}{}", item.hotkey, item.label);
         lines.push(selectable(text, i == menu.selected, width));
     }
     lines.push(muted(MENU_FOOTER));
