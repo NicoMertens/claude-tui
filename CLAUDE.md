@@ -8,5 +8,7 @@ Rust-TUI, die mehrere Claude-Code-Sessions in PTYs mit Status-Seitenleiste verwa
   `.github/workflows/release.yml` das Release `v<Version aus source/Cargo.toml>`.
 - Cargo-Befehle immer in `source/` ausführen. CI verlangt `cargo fmt --check` und
   `cargo clippy --all-targets -- -D warnings` sauber.
+- **Code-Richtlinien:** [docs/code-richtlinien.md](docs/code-richtlinien.md) — vor jeder Code-Änderung
+  beachten.
 - `docs/` beschreibt das Projekt für Nutzer und Mitwirkende (liegt mit auf GitHub). Hintergrundwissen
   und Entscheidungen gehören ins Brain: `S:\.brain\wiki\private\architektur\claude-tui.md`.

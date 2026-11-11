@@ -20,7 +20,7 @@ rechts die aktive Session in einem echten PTY. Die Idee stammt von
 | Ordner | Inhalt |
 |---|---|
 | `source/` | Rust-Quellcode (Cargo-Projekt) |
-| `docs/` | Dokumentation: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Build & Release](docs/release.md) |
+| `docs/` | Dokumentation: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Build & Release](docs/release.md), [Code-Richtlinien](docs/code-richtlinien.md) |
 | `build/` | Build-Skripte für lokale Builds |
 | `output/` | Lokal gebaute App (`build/build.ps1` / `build/build.sh`), nicht im Git |
 

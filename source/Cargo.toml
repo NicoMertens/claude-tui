@@ -13,6 +13,9 @@ ratatui = "0.29"
 tui-term = "0.2"
 vt100 = "0.15"
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_wird_etx() {
+    fn ctrl_c_sends_etx() {
         assert_eq!(
             to_bytes(&key(KeyCode::Char('c'), KeyModifiers::CONTROL), false),
             Some(vec![3])
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn altgr_at_bleibt_zeichen() {
+    fn altgr_char_is_sent_verbatim() {
         let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
         assert_eq!(
             to_bytes(&key(KeyCode::Char('@'), altgr), false),
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn pfeiltasten_im_application_mode() {
+    fn arrows_respect_application_cursor_mode() {
         assert_eq!(
             to_bytes(&key(KeyCode::Up, KeyModifiers::NONE), true),
             Some(b"\x1bOA".to_vec())
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_pfeil_mit_modifier() {
+    fn ctrl_arrow_uses_modifier_parameter() {
         assert_eq!(
             to_bytes(&key(KeyCode::Right, KeyModifiers::CONTROL), false),
             Some(b"\x1b[1;5C".to_vec())
