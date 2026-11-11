@@ -215,10 +215,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
 fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
     let session = entry.running.and_then(|id| app.session(id));
-    let clock = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let (symbol, color) = theme::status_symbol(session.map(|s| s.status), clock);
+    let (symbol, color) = theme::status_symbol(session.map(|s| s.status), clock());
     let slot = entry.running.and_then(|id| app.windows.window_of(id));
     let window = slot.map_or_else(|| " ".repeat(4), |s| format!(" [{}]", s + 1));
     let since = match session {
@@ -254,6 +251,13 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     } else {
         item
     }
+}
+
+/// Uhr für den Spinner; alle Spinner laufen damit im Gleichtakt.
+fn clock() -> Duration {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
 }
 
 /// Kürzt hinten mit „…“ (für Titel).
@@ -310,8 +314,12 @@ fn draw_windows(f: &mut Frame, app: &App) {
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         );
         let (label, label_color) = theme::status_label(session.status);
+        let (symbol, _) = theme::status_symbol(Some(session.status), clock());
         let separator = Span::styled("· ", Style::default().fg(color));
-        let status = Span::styled(format!("{label} "), Style::default().fg(label_color));
+        let status = Span::styled(
+            format!("{symbol} {label} "),
+            Style::default().fg(label_color),
+        );
         let block = rounded(color).title(Line::from(vec![title, separator, status]));
         let mut cursor = Cursor::default();
         if !focused {
