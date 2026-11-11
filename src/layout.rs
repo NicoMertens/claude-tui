@@ -36,6 +36,23 @@ pub fn windows(area: Rect, count: usize, stacked: bool) -> Vec<Rect> {
     }
 }
 
+/// Sichtbare Fenster als (Fensterindex, Rechteck). Gezoomt bekommt nur `zoomed` die ganze
+/// Fläche, die übrigen Fenster fehlen.
+pub fn visible(
+    area: Rect,
+    count: usize,
+    stacked: bool,
+    zoomed: Option<usize>,
+) -> Vec<(usize, Rect)> {
+    match zoomed {
+        Some(slot) if slot < count => vec![(slot, area)],
+        _ => windows(area, count, stacked)
+            .into_iter()
+            .enumerate()
+            .collect(),
+    }
+}
+
 fn halves_horizontal(area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(area)
 }
@@ -93,6 +110,18 @@ mod tests {
                 assert_eq!(total, AREA.area(), "{count} Fenster");
             }
         }
+    }
+
+    #[test]
+    fn zoomed_window_alone_gets_whole_area() {
+        assert_eq!(visible(AREA, 3, false, Some(1)), [(1, AREA)]);
+        let normal: Vec<(usize, Rect)> = windows(AREA, 3, false).into_iter().enumerate().collect();
+        assert_eq!(visible(AREA, 3, false, None), normal);
+        assert_eq!(
+            visible(AREA, 2, false, Some(5)).len(),
+            2,
+            "ungültiger Index"
+        );
     }
 
     #[test]

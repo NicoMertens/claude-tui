@@ -120,6 +120,7 @@ vom Fokus ab:
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
+| `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
@@ -128,6 +129,13 @@ Fenster 1). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. D
 von selbst wieder, sobald sie den Fokus bekommt (`Ctrl+←`, `0`) oder das letzte Fenster schließt.
 Hinweise, die sonst unten in der Liste stehen, zeigt dann der untere Rahmen des Fensters mit Fokus.
 Der Zustand bleibt über einen Neustart erhalten (`state.json`).
+
+`z` zoomt wie in tmux: Das Fenster mit Fokus bekommt die ganze Fensterfläche, die übrigen Fenster
+werden nicht gezeichnet, ihre Sessions laufen weiter. Die Fensterleiste zeigt dann `· zoomed`, der
+Menüpunkt heißt „Unzoom“. Die Sessionliste bleibt, wie sie ist (`s` wirkt unabhängig). Der Zoom endet
+von selbst, sobald sich das Layout ändert: Fokus auf ein anderes Fenster oder die Liste (`Ctrl+Pfeil`
+— der Nachbar wird im normalen Layout gesucht —, `0`–`4`, Mausklick), Fenster öffnen, schließen
+oder ersetzen, `l`. Er wird nicht in `state.json` gespeichert.
 
 `c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**

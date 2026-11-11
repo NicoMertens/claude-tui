@@ -16,6 +16,9 @@ pub enum Focus {
 pub struct Windows {
     slots: Vec<SessionId>,
     focus: Focus,
+    /// Das Fenster mit Fokus füllt die ganze Fensterfläche (wie tmux-Zoom). Endet mit jeder
+    /// Änderung von Fokus oder Fensterbelegung.
+    zoomed: bool,
 }
 
 impl Default for Windows {
@@ -23,6 +26,7 @@ impl Default for Windows {
         Self {
             slots: Vec::new(),
             focus: Focus::List,
+            zoomed: false,
         }
     }
 }
@@ -51,8 +55,26 @@ impl Windows {
     pub fn set_focus(&mut self, focus: Focus) {
         match focus {
             Focus::Window(i) if i >= self.slots.len() => {}
-            _ => self.focus = focus,
+            _ if focus == self.focus => {}
+            _ => {
+                self.focus = focus;
+                self.zoomed = false;
+            }
         }
+    }
+
+    /// Gezoomtes Fenster, falls eines gezoomt ist.
+    pub fn zoomed(&self) -> Option<usize> {
+        match self.focus {
+            Focus::Window(i) if self.zoomed => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Zoomt das Fenster mit Fokus bzw. hebt den Zoom auf. Zoomen geht nur mit Fokus auf einem
+    /// Fenster und mindestens zwei offenen Fenstern.
+    pub fn set_zoomed(&mut self, zoomed: bool) {
+        self.zoomed = zoomed && matches!(self.focus, Focus::Window(_)) && self.slots.len() >= 2;
     }
 
     pub fn window_of(&self, id: SessionId) -> Option<usize> {
@@ -79,6 +101,7 @@ impl Windows {
             None if slot < len => self.slots[slot] = id,
             None => self.slots.push(id),
         }
+        self.zoomed = false;
         if let Some(i) = self.window_of(id) {
             self.focus = Focus::Window(i);
         }
@@ -92,6 +115,7 @@ impl Windows {
             return;
         }
         self.slots.remove(slot);
+        self.zoomed = false;
         if let Focus::Window(f) = self.focus {
             self.focus = if self.slots.is_empty() {
                 Focus::List
@@ -175,6 +199,49 @@ mod tests {
         assert_eq!(w.focus(), Focus::Window(0));
         w.close(0);
         assert_eq!(w.focus(), Focus::List);
+    }
+
+    #[test]
+    fn zoom_needs_window_focus_and_two_windows() {
+        let mut w = with(&[1]);
+        w.set_zoomed(true);
+        assert_eq!(w.zoomed(), None, "ein Fenster");
+        let mut w = with(&[1, 2]);
+        w.set_focus(Focus::List);
+        w.set_zoomed(true);
+        assert_eq!(w.zoomed(), None, "Fokus auf der Liste");
+        w.set_focus(Focus::Window(0));
+        w.set_zoomed(true);
+        assert_eq!(w.zoomed(), Some(0));
+        w.set_zoomed(false);
+        assert_eq!(w.zoomed(), None);
+    }
+
+    #[test]
+    fn zoom_ends_with_focus_change_but_not_on_same_focus() {
+        let mut w = with(&[1, 2]);
+        w.set_zoomed(true);
+        w.set_focus(Focus::Window(1));
+        assert_eq!(w.zoomed(), Some(1));
+        w.set_focus(Focus::Window(0));
+        assert_eq!(w.zoomed(), None);
+        w.set_zoomed(true);
+        w.set_focus(Focus::List);
+        assert_eq!(w.zoomed(), None);
+    }
+
+    #[test]
+    fn zoom_ends_when_windows_change() {
+        let mut w = with(&[1, 2, 3]);
+        w.set_zoomed(true);
+        assert!(w.place(4, 0));
+        assert_eq!(w.zoomed(), None, "ersetzt");
+        w.set_zoomed(true);
+        w.close(0);
+        assert_eq!(w.zoomed(), None, "geschlossen");
+        w.set_zoomed(true);
+        assert!(w.place(5, 2));
+        assert_eq!(w.zoomed(), None, "neues Fenster");
     }
 
     #[test]

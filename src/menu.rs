@@ -23,6 +23,8 @@ pub enum Action {
     ToggleList,
     /// Zwei Fenster übereinander bzw. nebeneinander anordnen.
     ToggleStacked,
+    /// Fenster mit Fokus auf die ganze Fensterfläche zoomen bzw. den Zoom aufheben.
+    ToggleZoom,
     /// Neuere Version von GitHub installieren.
     Update,
     Quit,
@@ -81,6 +83,8 @@ pub struct Context<'a> {
     pub list_hidden: bool,
     /// Zwei Fenster stehen übereinander.
     pub stacked: bool,
+    /// Das Fenster mit Fokus ist gezoomt.
+    pub zoomed: bool,
 }
 
 impl Menu {
@@ -125,6 +129,12 @@ impl Menu {
                 "Stack windows"
             };
             add('l', label, Action::ToggleStacked);
+        }
+        // Zoomen lohnt erst ab zwei Fenstern; aufheben muss immer gehen.
+        if ctx.zoomed {
+            add('z', "Unzoom", Action::ToggleZoom);
+        } else if in_window && ctx.windows.len() >= 2 {
+            add('z', "Zoom window", Action::ToggleZoom);
         }
         if let Some(version) = ctx.update {
             let label = format!("Update to v{version}");
@@ -242,6 +252,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            zoomed: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -261,6 +272,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            zoomed: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -276,6 +288,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked: false,
+            zoomed: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
     }
@@ -290,6 +303,7 @@ mod tests {
             update: None,
             list_hidden,
             stacked: false,
+            zoomed: false,
         });
         menu.items
             .iter()
@@ -320,6 +334,7 @@ mod tests {
             update: None,
             list_hidden: false,
             stacked,
+            zoomed: false,
         });
         menu.items
             .iter()
@@ -336,6 +351,34 @@ mod tests {
         );
         assert_eq!(layout_label(1, false), None);
         assert_eq!(layout_label(3, false), None);
+    }
+
+    fn zoom_label(focus: Focus, windows: usize, zoomed: bool) -> Option<String> {
+        let windows = names(windows);
+        let menu = Menu::commands(&Context {
+            focus,
+            windows: &windows,
+            selected_has_window: true,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed,
+        });
+        menu.items
+            .iter()
+            .find(|i| i.action == Action::ToggleZoom)
+            .map(|i| format!("{} {}", i.hotkey, i.label))
+    }
+
+    #[test]
+    fn zoom_only_in_window_with_two_windows_but_unzoom_always() {
+        let w0 = Focus::Window(0);
+        assert_eq!(zoom_label(w0, 2, false).as_deref(), Some("z Zoom window"));
+        assert_eq!(zoom_label(w0, 1, false), None);
+        assert_eq!(zoom_label(Focus::List, 3, false), None);
+        assert_eq!(zoom_label(w0, 4, true).as_deref(), Some("z Unzoom"));
+        assert_eq!(zoom_label(w0, 1, true).as_deref(), Some("z Unzoom"));
     }
 
     #[test]

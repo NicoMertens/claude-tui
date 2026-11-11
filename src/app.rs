@@ -193,13 +193,29 @@ impl App {
         self.selected_entry().and_then(|e| e.running)
     }
 
-    /// Rechtecke der Fenster in Nummernreihenfolge.
-    pub fn window_rects(&self) -> Vec<Rect> {
-        layout::windows(
+    /// Sichtbare Fenster als (Fensterindex, Session, Rechteck) in Nummernreihenfolge; gezoomt nur
+    /// das gezoomte Fenster über die ganze Fensterfläche.
+    pub fn window_rects(&self) -> Vec<(usize, SessionId, Rect)> {
+        layout::visible(
             ui::windows_area(self.screen, self.list_hidden),
             self.windows.len(),
             self.stacked,
+            self.windows.zoomed(),
         )
+        .into_iter()
+        .filter_map(|(slot, rect)| {
+            let id = *self.windows.slots().get(slot)?;
+            Some((slot, id, rect))
+        })
+        .collect()
+    }
+
+    /// Rechteck von Fenster `slot`, falls es sichtbar ist.
+    pub fn window_rect(&self, slot: usize) -> Option<Rect> {
+        self.window_rects()
+            .into_iter()
+            .find(|&(s, _, _)| s == slot)
+            .map(|(_, _, rect)| rect)
     }
 
     pub fn tick(&mut self) {
@@ -397,7 +413,7 @@ impl App {
                 let inner = self
                     .windows
                     .window_of(session)
-                    .and_then(|slot| self.window_rects().get(slot).copied())
+                    .and_then(|slot| self.window_rect(slot))
                     .map(|r| r.inner(Margin::new(1, 1)));
                 if let (Some(inner), Some(selection)) = (inner, self.selection.as_mut()) {
                     selection.head = cell_in(inner, position);
@@ -446,10 +462,8 @@ impl App {
     fn window_at(&self, position: Position) -> Option<(usize, SessionId, Cell)> {
         self.window_rects()
             .into_iter()
-            .zip(self.windows.slots().iter().copied())
-            .enumerate()
-            .find(|(_, (rect, _))| rect.contains(position))
-            .map(|(slot, (rect, id))| (slot, id, cell_in(rect.inner(Margin::new(1, 1)), position)))
+            .find(|(_, _, rect)| rect.contains(position))
+            .map(|(slot, id, rect)| (slot, id, cell_in(rect.inner(Margin::new(1, 1)), position)))
     }
 
     fn copy_selection(&mut self) {
@@ -595,8 +609,14 @@ impl App {
             Action::Focus(focus) => self.set_focus(focus),
             Action::ToggleList => self.set_list_hidden(!self.list_hidden),
             Action::ToggleStacked => {
+                self.windows.set_zoomed(false);
                 self.stacked = !self.stacked;
                 self.after_layout_change();
+            }
+            Action::ToggleZoom => {
+                let zoom = self.windows.zoomed().is_none();
+                self.windows.set_zoomed(zoom);
+                self.resize_windows();
             }
             Action::Quit => self.should_quit = true,
             Action::Update => {
@@ -640,6 +660,7 @@ impl App {
                 .map(|u| u.version.as_str()),
             list_hidden: self.list_hidden,
             stacked: self.stacked,
+            zoomed: self.windows.zoomed().is_some(),
         }));
     }
 
@@ -687,17 +708,34 @@ impl App {
                     self.set_focus(Focus::Window(slot));
                 }
             }
-            Focus::Window(slot) => match layout::neighbor(&self.window_rects(), slot, direction) {
-                Some(next) => self.set_focus(Focus::Window(next)),
-                None if direction == Direction::Left => self.set_focus(Focus::List),
-                None => {}
-            },
+            Focus::Window(slot) => {
+                // Gezoomt: erst aufheben, dann den Nachbarn im normalen Layout suchen.
+                if self.windows.zoomed().is_some() {
+                    self.windows.set_zoomed(false);
+                    self.resize_windows();
+                }
+                let rects = layout::windows(
+                    ui::windows_area(self.screen, self.list_hidden),
+                    self.windows.len(),
+                    self.stacked,
+                );
+                match layout::neighbor(&rects, slot, direction) {
+                    Some(next) => self.set_focus(Focus::Window(next)),
+                    None if direction == Direction::Left => self.set_focus(Focus::List),
+                    None => {}
+                }
+            }
         }
     }
 
     /// Setzt den Fokus; bei einem Fenster folgt die Listenauswahl dessen Session.
     fn set_focus(&mut self, focus: Focus) {
+        let zoomed = self.windows.zoomed().is_some();
         self.windows.set_focus(focus);
+        // Ein Fokuswechsel hebt den Zoom auf; die übrigen Fenster brauchen wieder ihre Größe.
+        if zoomed && self.windows.zoomed().is_none() {
+            self.resize_windows();
+        }
         self.keep_list_reachable();
         self.sync_cursor();
         self.save_state();
@@ -777,12 +815,10 @@ impl App {
         let _ = state::save(&state);
     }
 
-    /// Jede sichtbare Session bekommt die Innenmaße ihres Fensters; Hintergrund-Sessions behalten
-    /// ihre letzte Größe.
+    /// Jede sichtbare Session bekommt die Innenmaße ihres Fensters; Hintergrund-Sessions und
+    /// beim Zoom verdeckte Fenster behalten ihre letzte Größe.
     fn resize_windows(&mut self) {
-        let rects = self.window_rects();
-        let slots = self.windows.slots().to_vec();
-        for (id, rect) in slots.into_iter().zip(rects) {
+        for (_, id, rect) in self.window_rects() {
             let inner = rect.inner(Margin::new(1, 1));
             if let Some(session) = self.session_mut(id) {
                 session.resize(inner.height.max(1), inner.width.max(1));
