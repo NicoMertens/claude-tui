@@ -11,6 +11,8 @@ use std::{
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use crate::windows::SessionId;
+
 /// Ausgabe innerhalb dieses Fensters gilt als „arbeitet“ — Claude Code animiert seinen Spinner,
 /// solange es rechnet, und schreibt nichts, wenn es auf Eingabe wartet.
 const WORKING_WINDOW: Duration = Duration::from_millis(1500);
@@ -25,8 +27,10 @@ pub enum Status {
 }
 
 pub struct Session {
+    pub id: SessionId,
     pub name: String,
     pub status: Status,
+    size: (u16, u16),
     parser: Arc<Mutex<vt100::Parser>>,
     last_output: Arc<Mutex<Instant>>,
     reader_done: Arc<AtomicBool>,
@@ -36,7 +40,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn spawn(name: String, command: &str, rows: u16, cols: u16) -> Result<Self> {
+    pub fn spawn(id: SessionId, name: String, command: &str, rows: u16, cols: u16) -> Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
             .context("PTY konnte nicht geöffnet werden")?;
@@ -79,8 +83,10 @@ impl Session {
         }
 
         Ok(Self {
+            id,
             name,
             status: Status::Working,
+            size: (rows, cols),
             parser,
             last_output,
             reader_done,
@@ -133,7 +139,13 @@ impl Session {
         }
     }
 
+    /// Passt PTY und Bildschirm an; ohne Größenänderung passiert nichts (kein unnötiges Neuzeichnen
+    /// in der Session).
     pub fn resize(&mut self, rows: u16, cols: u16) {
+        if self.size == (rows, cols) {
+            return;
+        }
+        self.size = (rows, cols);
         let _ = self.master.resize(pty_size(rows, cols));
         lock(&self.parser).set_size(rows, cols);
     }

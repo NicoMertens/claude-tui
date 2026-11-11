@@ -1,8 +1,11 @@
 mod app;
 mod keys;
+mod layout;
+mod menu;
 mod session;
 mod theme;
 mod ui;
+mod windows;
 
 use std::{io, time::Duration};
 
@@ -49,7 +52,7 @@ fn main() -> Result<()> {
 
 fn run(terminal: &mut Term, command: String) -> Result<()> {
     let size = terminal.size()?;
-    let mut app = app::App::new(command, ui::pane_size(size.width, size.height))?;
+    let mut app = app::App::new(command, ui::windows_area(size.width, size.height))?;
 
     while !app.should_quit {
         app.tick();
@@ -58,7 +61,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
                 Event::Paste(text) => app.on_paste(&text)?,
-                Event::Resize(w, h) => app.resize(ui::pane_size(w, h)),
+                Event::Resize(w, h) => app.resize(ui::windows_area(w, h)),
                 _ => {}
             }
         }

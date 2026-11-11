@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::layout::Direction;
+
 pub const PREFIX_HINT: &str = "Ctrl+A";
 /// Was die Session bekommt, wenn der Präfix zweimal gedrückt wird.
 pub const PREFIX_BYTES: &[u8] = &[0x01];
@@ -93,9 +95,32 @@ fn function_key(n: u8) -> Option<Vec<u8>> {
     Some(seq.to_vec())
 }
 
+/// Alt+Pfeil wechselt den Fokus und erreicht die Session nie. Nur reines Alt — Ctrl+Alt ist unter
+/// Windows AltGr.
+pub fn focus_direction(key: &KeyEvent) -> Option<Direction> {
+    if key.modifiers != KeyModifiers::ALT {
+        return None;
+    }
+    match key.code {
+        KeyCode::Left => Some(Direction::Left),
+        KeyCode::Right => Some(Direction::Right),
+        KeyCode::Up => Some(Direction::Up),
+        KeyCode::Down => Some(Direction::Down),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alt_arrow_is_focus_change_but_ctrl_arrow_is_not() {
+        let alt_left = KeyEvent::new(KeyCode::Left, KeyModifiers::ALT);
+        let ctrl_left = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
+        assert_eq!(focus_direction(&alt_left), Some(Direction::Left));
+        assert_eq!(focus_direction(&ctrl_left), None);
+    }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)
