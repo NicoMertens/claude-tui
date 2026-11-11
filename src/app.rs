@@ -4,8 +4,8 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Margin, Rect};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use ratatui::layout::{Margin, Position, Rect};
 
 use crate::{
     claude_store::{self, Store},
@@ -248,6 +248,32 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Mausrad über einem Fenster scrollt dessen Verlauf; alles andere an der Maus wird ignoriert.
+    pub fn on_mouse(&mut self, mouse: MouseEvent) {
+        let up = match mouse.kind {
+            MouseEventKind::ScrollUp => true,
+            MouseEventKind::ScrollDown => false,
+            _ => return,
+        };
+        let position = Position::new(mouse.column, mouse.row);
+        let hit = self
+            .window_rects()
+            .into_iter()
+            .zip(self.windows.slots().to_vec())
+            .find(|(rect, _)| rect.contains(position));
+        let Some((rect, id)) = hit else {
+            return;
+        };
+        let inner = rect.inner(Margin::new(1, 1));
+        let col = mouse.column.saturating_sub(inner.x);
+        let row = mouse.row.saturating_sub(inner.y);
+        if let Some(session) = self.session_mut(id) {
+            if let Err(e) = session.wheel(up, col, row) {
+                self.notice = Some(format!("{e:#}"));
+            }
+        }
     }
 
     pub fn resize(&mut self, area: Rect) {

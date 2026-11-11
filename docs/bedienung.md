@@ -107,6 +107,15 @@ im aktuellen Verzeichnis.
 sind, „neues Fenster“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen,
 entfällt die Auswahl und Fenster 1 wird genommen.
 
+## Maus
+
+Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen);
+die Fensterleiste zeigt dann `↑ N Zeilen`. Jede Eingabe in die Session springt zurück ans Ende.
+Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
+
+claude-tui fängt dafür die Maus ab. Text markieren und kopieren geht in Windows Terminal deshalb mit
+**Shift + Ziehen**.
+
 ## Zustände in der Seitenleiste
 
 | Symbol | Farbe | Zustand | Bedeutung |

@@ -18,6 +18,8 @@ use crate::windows::SessionId;
 /// solange es rechnet, und schreibt nichts, wenn es auf Eingabe wartet.
 const WORKING_WINDOW: Duration = Duration::from_millis(1500);
 const SCROLLBACK: usize = 10_000;
+/// Zeilen je Mausrad-Raste.
+const WHEEL_LINES: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -138,7 +140,55 @@ impl Session {
         };
     }
 
+    /// Mausrad: scrollt den Verlauf (positiv = nach oben). Hat das Programm in der Session selbst
+    /// die Maus eingeschaltet, bekommt es stattdessen das Rad-Ereignis. `col`/`row` sind 0-basiert
+    /// relativ zum Fensterinhalt.
+    pub fn wheel(&mut self, up: bool, col: u16, row: u16) -> Result<()> {
+        let (mode, encoding) = {
+            let parser = self.screen();
+            let screen = parser.screen();
+            (
+                screen.mouse_protocol_mode(),
+                screen.mouse_protocol_encoding(),
+            )
+        };
+        if mode == vt100::MouseProtocolMode::None {
+            let mut parser = lock(&self.parser);
+            let offset = parser.screen().scrollback();
+            let next = if up {
+                offset + WHEEL_LINES
+            } else {
+                offset.saturating_sub(WHEEL_LINES)
+            };
+            parser.set_scrollback(next);
+            return Ok(());
+        }
+        let button = if up { 64 } else { 65 };
+        let (x, y) = (col + 1, row + 1);
+        let bytes = match encoding {
+            vt100::MouseProtocolEncoding::Sgr => format!("\x1b[<{button};{x};{y}M").into_bytes(),
+            // Klassische Kodierung: Werte + 32 als einzelne Bytes (nur bis Spalte/Zeile 223).
+            _ => {
+                let byte = |v: u16| u8::try_from(v + 32).unwrap_or(u8::MAX);
+                vec![0x1b, b'[', b'M', byte(button), byte(x), byte(y)]
+            }
+        };
+        self.write(&bytes)
+    }
+
+    /// Wie weit der Verlauf hochgescrollt ist (0 = aktuelle Ansicht).
+    pub fn scroll_offset(&self) -> usize {
+        self.screen().screen().scrollback()
+    }
+
+    /// Zurück zur aktuellen Ansicht, z. B. sobald getippt wird.
+    pub fn scroll_to_bottom(&mut self) {
+        lock(&self.parser).set_scrollback(0);
+    }
+
+    /// Schickt Eingabe an die Session; wie in einem Terminal springt die Ansicht dabei ans Ende.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
+        self.scroll_to_bottom();
         self.writer.write_all(bytes)?;
         self.writer.flush()?;
         Ok(())

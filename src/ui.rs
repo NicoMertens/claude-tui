@@ -320,9 +320,17 @@ fn draw_windows(f: &mut Frame, app: &App) {
             format!("{symbol} {label} "),
             Style::default().fg(label_color),
         );
-        let block = rounded(color).title(Line::from(vec![title, separator, status]));
+        let mut spans = vec![title, separator, status];
+        let scrolled = session.scroll_offset();
+        if scrolled > 0 {
+            spans.push(Span::styled(
+                format!("· ↑ {scrolled} Zeilen "),
+                Style::default().fg(theme::MENU),
+            ));
+        }
+        let block = rounded(color).title(Line::from(spans));
         let mut cursor = Cursor::default();
-        if !focused {
+        if !focused || scrolled > 0 {
             cursor.hide();
         }
         let parser = session.screen();

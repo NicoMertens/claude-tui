@@ -17,7 +17,10 @@ use std::{io, time::Duration};
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind},
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -45,10 +48,14 @@ fn main() -> Result<()> {
     execute!(stdout, EnterAlternateScreen)?;
     // Nicht jedes Windows-Terminal kennt Bracketed Paste; dann kommt Einfügen als Tastendrücke an.
     let _ = execute!(stdout, EnableBracketedPaste);
+    // Ohne Mausabfrage macht das Terminal aus dem Mausrad ↑/↓ — Claude blättert dann durch die
+    // letzten Prompts statt durch den Verlauf.
+    execute!(stdout, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
     let result = run(&mut terminal, command);
 
+    let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -67,6 +74,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
                 Event::Paste(text) => app.on_paste(&text)?,
+                Event::Mouse(mouse) => app.on_mouse(mouse),
                 Event::Resize(w, h) => app.resize(ui::windows_area(w, h)),
                 _ => {}
             }
