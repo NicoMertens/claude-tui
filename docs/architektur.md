@@ -134,6 +134,8 @@ gestartet, schreiben zwei Prozesse in dasselbe Protokoll. `external.rs` erkennt 
    (fester Pfad wie bei `curl`), Linux über `/proc/<PID>`, sonst `ps -A -o pid=`. Keine neue
    Abhängigkeit (`sysinfo` o. Ä. hätte die Binary deutlich vergrößert; Windows-API direkt ginge nur
    mit `unsafe`).
+   Hintergrund-Sessions (`"kind":"bg"`) haben zusätzlich eine `jobId`; `external::Claimed` hält
+   sie je Session-ID fest.
 2. **Rückfall** für Versionen ohne diese Datei: Protokoll seit dem Start von claude-tui und in den
    letzten 10 s geändert (`RECENT_WRITE`).
 
@@ -145,6 +147,12 @@ per Kanal ab und verrechnet es beim Neuaufbau der Liste (`list::Entry::external`
 solchen Session (`Enter`, `1`–`4`) geht erst über `Menu::confirm_open` (Vorauswahl „No“); beim
 Wiederherstellen aus `state.json` prüft `external::claimed_now` einmal synchron (die Prozessliste nur,
 wenn eine der Sessions in einer Datei steht) und überspringt solche Sessions.
+
+Ausnahme Hintergrund-Sessions: `claude --resume` lehnt sie ab, solange sie laufen. Mit bekannter
+`jobId` startet `App::spawn` deshalb `claude attach <jobId>` (`Launch::Attach`, ohne `--settings`,
+denn der Hintergrundprozess läuft mit seinen eigenen Einstellungen; Hook-Status gibt es dafür nicht,
+es gilt die Heuristik). Das ist keine zweite Instanz — die Rückfrage entfällt, und beim
+Wiederherstellen wird verbunden statt übersprungen.
 
 Grenzen: Eine PID, die nach einem Absturz an einen anderen Prozess vergeben wurde, hält eine
 liegengebliebene Datei am Leben (nur eine überflüssige Rückfrage). Wechselt eine Session in

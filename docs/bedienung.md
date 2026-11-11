@@ -110,6 +110,11 @@ Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `◇ �
 danach die Fensterauswahl), `n`, `Esc` und `Enter` brechen ab — die Vorauswahl ist „No“, denn zwei
 Prozesse schreiben sonst in dasselbe Protokoll.
 
+Läuft sie als **Hintergrund-Session** von Claude Code (`claude --bg`), entfällt die Rückfrage:
+claude-tui verbindet sich mit `claude attach <Job-ID>` mit dem laufenden Prozess, statt einen
+zweiten zu starten (`--resume` lehnt laufende Hintergrund-Sessions ab). Schließt man das Fenster,
+trennt sich nur claude-tui; die Hintergrund-Session läuft weiter.
+
 ### Menü (`Ctrl+A`)
 
 Das Menü erscheint als Box mit blauem Rand mittig über dem Bereich mit dem Fokus: über dem
@@ -208,7 +213,7 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe. |
 | ● | grau | ready | Claude ist fertig und wartet auf den nächsten Prompt. |
 | ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
-| ◇ … `ext` | graublau | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach. |
+| ◇ … `ext` | graublau | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach (Hintergrund-Sessions: `claude attach`, ohne Rückfrage). |
 
 Die Formen unterscheiden sich auch ohne Farbe.
 
@@ -220,7 +225,11 @@ Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, si
 Claude-Code-Versionen ohne diese Datei daran, dass das Protokoll in den letzten 10 s geschrieben
 wurde, ohne dass die Session in claude-tui läuft (dann nur, solange sie arbeitet). Die Kennzeichnung
 folgt mit einigen Sekunden Verzögerung. Beim Start setzt claude-tui eine Session aus `state.json`, die
-gerade anderswo läuft, nicht fort, sondern meldet „… runs elsewhere – not reopened“.
+gerade anderswo läuft, nicht fort, sondern meldet „… runs elsewhere – not reopened“ — eine
+Hintergrund-Session öffnet es dagegen mit `claude attach`.
+
+Endet ein Prozess in einem Fenster, nennt der Hinweis „… has exited: …“ die letzte Zeile, die er auf
+den Bildschirm geschrieben hat (meist die Fehlermeldung).
 
 **Hinweis auf wartende Sessions:** Wechselt eine Session, die nicht im Fenster mit Fokus liegt
 (auch eine Hintergrund-Session ohne Fenster), auf **waiting for you**, läutet claude-tui einmal die
