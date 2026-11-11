@@ -137,6 +137,11 @@ impl Session {
         *lock(&self.last_output)
     }
 
+    /// Letzte nicht leere Zeile auf dem Bildschirm — nach dem Ende meist die Fehlermeldung.
+    pub fn last_line(&self) -> Option<String> {
+        last_line(&self.screen().screen().contents())
+    }
+
     pub fn application_cursor(&self) -> bool {
         self.screen().screen().application_cursor()
     }
@@ -276,6 +281,14 @@ fn resolve(
     }
 }
 
+fn last_line(screen: &str) -> Option<String> {
+    screen
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
 /// Heuristik für eine offene Rückfrage (Berechtigungsdialog) von Claude Code.
 fn waits_for_decision(screen: &str) -> bool {
     const MARKERS: [&str; 3] = ["Do you want to", "❯ 1. Yes", "Would you like to"];
@@ -392,6 +405,29 @@ mod tests {
         assert_eq!(
             resolve(report(Status::Working, 10), at(11), true, || false),
             Status::Working
+        );
+    }
+
+    #[test]
+    fn last_line_skips_trailing_blank_lines() {
+        assert_eq!(
+            last_line(
+                "x
+  Error: busy  
+
+   
+"
+            )
+            .as_deref(),
+            Some("Error: busy")
+        );
+        assert_eq!(
+            last_line(
+                "
+ 
+"
+            ),
+            None
         );
     }
 

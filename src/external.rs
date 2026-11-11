@@ -6,11 +6,14 @@
 //! Rückfall für Versionen ohne diese Datei: ein Protokoll, das gerade geschrieben wurde, ohne dass
 //! claude-tui die Session selbst ausführt.
 //!
+//! Hintergrund-Sessions (`claude --bg`, `"kind":"bg"`) tragen zusätzlich eine `jobId`: Solange sie
+//! laufen, lehnt `claude --resume` sie ab; geöffnet werden sie mit `claude attach <jobId>`.
+//!
 //! Das Lesen der Dateien und die Prozessabfrage (`tasklist` braucht unter Windows fast eine
 //! Sekunde) laufen in einem Hintergrund-Thread, nicht im Zeichentakt.
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -37,7 +40,13 @@ pub const RECENT_WRITE: Duration = Duration::from_secs(10);
 struct Claim {
     pid: u32,
     session_id: String,
+    /// Nur bei Hintergrund-Sessions.
+    #[serde(default)]
+    job_id: Option<String>,
 }
+
+/// Session-IDs laufender Claude-Prozesse, je mit der Job-ID, falls es eine Hintergrund-Session ist.
+pub type Claimed = HashMap<String, Option<String>>;
 
 fn parse_claim(text: &str) -> Option<Claim> {
     serde_json::from_str(text).ok()
@@ -56,36 +65,36 @@ fn read_claims(dir: &Path) -> Vec<Claim> {
         .collect()
 }
 
-/// Session-IDs der Prozesse, die noch laufen. `alive == None` (Prozessliste nicht abfragbar):
+/// Sessions der Prozesse, die noch laufen. `alive == None` (Prozessliste nicht abfragbar):
 /// jede Datei zählt — lieber einmal zu oft nachfragen als zweimal öffnen.
-fn claimed_ids(claims: &[Claim], alive: Option<&HashSet<u32>>) -> HashSet<String> {
+fn claimed_ids(claims: &[Claim], alive: Option<&HashSet<u32>>) -> Claimed {
     claims
         .iter()
         .filter(|c| alive.is_none_or(|a| a.contains(&c.pid)))
-        .map(|c| c.session_id.clone())
+        .map(|c| (c.session_id.clone(), c.job_id.clone()))
         .collect()
 }
 
 /// Einmalige, blockierende Abfrage für `ids` (beim Wiederherstellen des Fensterlayouts). Die
 /// Prozessliste wird nur abgefragt, wenn eine der Sessions überhaupt in einer Datei steht.
-pub fn claimed_now(ids: &[String]) -> HashSet<String> {
+pub fn claimed_now(ids: &[String]) -> Claimed {
     let Some(dir) = paths::claude_sessions_dir() else {
-        return HashSet::new();
+        return Claimed::new();
     };
     let claims: Vec<Claim> = read_claims(&dir)
         .into_iter()
         .filter(|c| ids.contains(&c.session_id))
         .collect();
     if claims.is_empty() {
-        return HashSet::new();
+        return Claimed::new();
     }
     let pids = claims.iter().map(|c| c.pid).collect();
     claimed_ids(&claims, alive_pids(&pids).as_ref())
 }
 
-/// Startet den Hintergrund-Thread; er liefert alle `SCAN_INTERVAL` die Session-IDs laufender
+/// Startet den Hintergrund-Thread; er liefert alle `SCAN_INTERVAL` die Sessions laufender
 /// Claude-Prozesse und endet, sobald der Empfänger fallen gelassen wird.
-pub fn spawn_watcher() -> Option<Receiver<HashSet<String>>> {
+pub fn spawn_watcher() -> Option<Receiver<Claimed>> {
     let dir = paths::claude_sessions_dir()?;
     let (tx, rx) = mpsc::channel();
     let spawned = thread::Builder::new()
@@ -94,7 +103,7 @@ pub fn spawn_watcher() -> Option<Receiver<HashSet<String>>> {
     spawned.ok().map(|_| rx)
 }
 
-fn watch(dir: &Path, tx: &mpsc::Sender<HashSet<String>>) {
+fn watch(dir: &Path, tx: &mpsc::Sender<Claimed>) {
     let mut last_pids = BTreeSet::new();
     let mut alive: Option<HashSet<u32>> = None;
     let mut checked: Option<Instant> = None;
@@ -171,7 +180,7 @@ fn parse_pid_lines(text: &str) -> HashSet<u32> {
 /// ihre Datei bzw. letzte Schreibzugriffe stammen von claude-tui selbst.
 pub fn running_elsewhere<'a>(
     stored: impl IntoIterator<Item = (&'a str, SystemTime)>,
-    claimed: &HashSet<String>,
+    claimed: &Claimed,
     own: &HashSet<&str>,
     since: SystemTime,
     now: SystemTime,
@@ -182,7 +191,7 @@ pub fn running_elsewhere<'a>(
         .filter(|&(id, modified)| {
             let recent = modified >= since
                 && now.duration_since(modified).unwrap_or_default() <= RECENT_WRITE;
-            claimed.contains(id) || recent
+            claimed.contains_key(id) || recent
         })
         .map(|(id, _)| id.to_string())
         .collect()
@@ -196,6 +205,7 @@ mod tests {
         Claim {
             pid,
             session_id: id.to_string(),
+            job_id: None,
         }
     }
 
@@ -207,12 +217,21 @@ mod tests {
     }
 
     #[test]
+    fn background_claim_carries_job_id() {
+        let text = r#"{"pid":8072,"sessionId":"befc32e4-a6ea","kind":"bg","jobId":"befc32e4"}"#;
+        let claim = parse_claim(text).expect("Claim");
+        assert_eq!(claim.job_id.as_deref(), Some("befc32e4"));
+        let claimed = claimed_ids(&[claim], None);
+        assert_eq!(claimed["befc32e4-a6ea"].as_deref(), Some("befc32e4"));
+    }
+
+    #[test]
     fn only_live_processes_count() {
         let claims = [claim(1, "a"), claim(2, "b")];
         let alive = HashSet::from([2]);
         assert_eq!(
             claimed_ids(&claims, Some(&alive)),
-            HashSet::from(["b".to_string()])
+            Claimed::from([("b".to_string(), None)])
         );
         assert_eq!(claimed_ids(&claims, None).len(), 2, "unbekannt = alle");
     }
@@ -244,7 +263,10 @@ mod tests {
             ("own", now),
             ("own-claimed", now),
         ];
-        let claimed = HashSet::from(["claimed".to_string(), "own-claimed".to_string()]);
+        let claimed = Claimed::from([
+            ("claimed".to_string(), None),
+            ("own-claimed".to_string(), None),
+        ]);
         let own = HashSet::from(["own", "own-claimed"]);
         let found = running_elsewhere(stored, &claimed, &own, start, now);
         let mut found: Vec<_> = found.into_iter().collect();
@@ -258,7 +280,7 @@ mod tests {
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         let now = start + Duration::from_secs(2);
         let stored = [("restored", start - Duration::from_secs(1))];
-        let found = running_elsewhere(stored, &HashSet::new(), &HashSet::new(), start, now);
+        let found = running_elsewhere(stored, &Claimed::new(), &HashSet::new(), start, now);
         assert!(found.is_empty());
     }
 }

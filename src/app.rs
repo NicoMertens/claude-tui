@@ -63,6 +63,9 @@ enum Launch {
     New,
     /// Gespeicherte Session fortsetzen (`--resume`).
     Resume(String),
+    /// Laufende Hintergrund-Session (Claude-ID, Job-ID) öffnen (`claude attach`); `--resume`
+    /// lehnt sie ab, solange sie läuft.
+    Attach(String, String),
 }
 
 pub struct App {
@@ -107,9 +110,9 @@ pub struct App {
     recent: Vec<PathBuf>,
     store: Store,
     last_scan: Instant,
-    /// Claude-IDs laufender Claude-Prozesse laut `~/.claude/sessions` (eigene eingeschlossen).
-    claimed: HashSet<String>,
-    claimed_watch: Option<Receiver<HashSet<String>>>,
+    /// Laufende Claude-Prozesse laut `~/.claude/sessions` (eigene eingeschlossen).
+    claimed: external::Claimed,
+    claimed_watch: Option<Receiver<external::Claimed>>,
     /// Zuletzt in claude-tui beendete Sessions mit Zeitpunkt (siehe [ENDED_GRACE]).
     ended: Vec<(String, Instant)>,
     /// Start von claude-tui; ältere Schreibzugriffe zählen nicht als fremde Aktivität.
@@ -154,7 +157,7 @@ impl App {
             recent: recent::load(),
             store,
             last_scan: Instant::now(),
-            claimed: HashSet::new(),
+            claimed: external::Claimed::new(),
             claimed_watch: external::spawn_watcher(),
             ended: Vec::new(),
             started: SystemTime::now(),
@@ -183,14 +186,18 @@ impl App {
             let Some(stored) = self.store.get(&claude_id) else {
                 continue;
             };
-            if elsewhere.contains(&claude_id) {
-                self.notice = Some(format!(
-                    "\"{}\" runs elsewhere – not reopened",
-                    stored.title
-                ));
-                continue;
-            }
-            match self.spawn(&stored.cwd, Launch::Resume(claude_id)) {
+            let launch = match elsewhere.get(&claude_id) {
+                None => Launch::Resume(claude_id),
+                Some(Some(job)) => Launch::Attach(claude_id, job.clone()),
+                Some(None) => {
+                    self.notice = Some(format!(
+                        "\"{}\" runs elsewhere – not reopened",
+                        stored.title
+                    ));
+                    continue;
+                }
+            };
+            match self.spawn(&stored.cwd, launch) {
                 Ok(id) => self.place(id, self.windows.len()),
                 Err(e) => self.notice = Some(format!("{e:#}")),
             }
@@ -273,7 +280,12 @@ impl App {
             .collect();
         for id in exited {
             if self.windows.window_of(id).is_some() {
-                self.notice = Some(format!("\"{}\" has exited", self.title_of(id)));
+                let title = self.title_of(id);
+                let last = self.session(id).and_then(Session::last_line);
+                self.notice = Some(match last {
+                    Some(line) => format!("\"{title}\" has exited: {line}"),
+                    None => format!("\"{title}\" has exited"),
+                });
             }
             self.remove_process(id);
         }
@@ -616,9 +628,10 @@ impl App {
     }
 
     /// Öffnet eine gespeicherte Session in `slot` (`None`: Fensterauswahl, ohne offenes Fenster
-    /// Fenster 1). Läuft sie anderswo, kommt erst die Rückfrage.
+    /// Fenster 1). Läuft sie anderswo, kommt erst die Rückfrage — außer bei einer
+    /// Hintergrund-Session: `claude attach` startet keine zweite Instanz.
     fn open_stored(&mut self, entry: &Entry, slot: Option<usize>) -> Result<()> {
-        if entry.external {
+        if entry.external && self.job_of(&entry.claude_id).is_none() {
             self.menu = Some(Menu::confirm_open(
                 &entry.title,
                 entry.claude_id.clone(),
@@ -627,6 +640,14 @@ impl App {
             return Ok(());
         }
         self.open_confirmed(entry.claude_id.clone(), slot)
+    }
+
+    /// Job-ID, falls `claude_id` gerade als Hintergrund-Session außerhalb von claude-tui läuft.
+    fn job_of(&self, claude_id: &str) -> Option<&str> {
+        if self.sessions.iter().any(|s| s.claude_id == claude_id) {
+            return None;
+        }
+        self.claimed.get(claude_id)?.as_deref()
     }
 
     fn open_confirmed(&mut self, claude_id: String, slot: Option<usize>) -> Result<()> {
@@ -640,13 +661,19 @@ impl App {
         }
     }
 
-    /// Setzt eine gespeicherte Session in ihrem Verzeichnis fort und legt sie in `slot`.
+    /// Setzt eine gespeicherte Session in ihrem Verzeichnis fort (bzw. verbindet sich mit ihr, wenn
+    /// sie als Hintergrund-Session läuft) und legt sie in `slot`.
     fn resume_into(&mut self, claude_id: &str, slot: usize) -> Result<()> {
         let stored = self
             .store
             .get(claude_id)
             .context("session is no longer stored")?;
-        let id = self.spawn(&stored.cwd, Launch::Resume(claude_id.to_string()))?;
+        let cwd = stored.cwd.clone();
+        let launch = match self.job_of(claude_id) {
+            Some(job) => Launch::Attach(claude_id.to_string(), job.to_string()),
+            None => Launch::Resume(claude_id.to_string()),
+        };
+        let id = self.spawn(&cwd, launch)?;
         self.place(id, slot);
         Ok(())
     }
@@ -964,20 +991,33 @@ impl App {
     }
 
     fn spawn(&mut self, dir: &Path, launch: Launch) -> Result<SessionId> {
-        let (claude_id, flag) = match launch {
-            Launch::New => (uuid::Uuid::new_v4().to_string(), "--session-id"),
-            Launch::Resume(claude_id) => (claude_id, "--resume"),
+        let (claude_id, args, attach) = match launch {
+            Launch::New => {
+                let claude_id = uuid::Uuid::new_v4().to_string();
+                let args = format!("--session-id {claude_id}");
+                (claude_id, args, false)
+            }
+            Launch::Resume(claude_id) => {
+                let args = format!("--resume {claude_id}");
+                (claude_id, args, false)
+            }
+            Launch::Attach(claude_id, job) => (claude_id, format!("attach {job}"), true),
         };
-        let command = format!("{} {flag} {claude_id}", self.command);
-        // Ohne Hook-Einstellungen bleibt es bei der Heuristik; die Session startet trotzdem.
-        let extra: Vec<String> = hooks::write_settings()
-            .map(|file| {
-                vec![
-                    "--settings".to_string(),
-                    file.to_string_lossy().into_owned(),
-                ]
-            })
-            .unwrap_or_default();
+        let command = format!("{} {args}", self.command);
+        // Ohne Hook-Einstellungen bleibt es bei der Heuristik; die Session startet trotzdem. Eine
+        // Hintergrund-Session läuft mit ihren eigenen Einstellungen weiter, `attach` nimmt keine.
+        let extra: Vec<String> = if attach {
+            Vec::new()
+        } else {
+            hooks::write_settings()
+                .map(|file| {
+                    vec![
+                        "--settings".to_string(),
+                        file.to_string_lossy().into_owned(),
+                    ]
+                })
+                .unwrap_or_default()
+        };
         // Meldung eines früheren Laufs derselben Claude-Session gilt nicht mehr.
         hooks::clear(&claude_id);
         self.next_id += 1;
