@@ -8,7 +8,8 @@ claude-tui "claude -c"  # beliebiger Befehl, z. B. mit Fortsetzen der letzten Un
 claude-tui --version
 ```
 
-Sessions starten im aktuellen Arbeitsverzeichnis. Unter Windows läuft der Befehl über `cmd.exe /C`,
+Die erste Session startet im aktuellen Arbeitsverzeichnis, jede weitere im Verzeichnis aus der
+Verzeichnisauswahl. Unter Windows läuft der Befehl über `cmd.exe /C`,
 unter Linux/macOS über `sh -c`, damit PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
 
 ## Aufbau
@@ -62,7 +63,7 @@ vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |
 |---|---|---|
-| `n` | neue Session, danach Fensterauswahl | neue Session in diesem Fenster |
+| `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session beenden | Session dieses Fensters beenden |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
@@ -70,6 +71,21 @@ vom Fokus ab:
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
 `c` lässt die Session im Hintergrund weiterlaufen, `x` beendet sie und entfernt sie aus der Liste.
+
+**Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui unten in der Sessionliste, in
+welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.
+
+| Taste | Wirkung |
+|---|---|
+| Tippen / Einfügen | Pfad im Eingabefeld bearbeiten (vorbelegt mit dem zuletzt genutzten Verzeichnis) |
+| `Tab` | Ordnernamen ergänzen; bei mehreren Treffern erst den gemeinsamen Anfang, dann reihum |
+| `↑` / `↓` | zuletzt genutztes Verzeichnis ins Eingabefeld übernehmen |
+| `Enter` | Verzeichnis übernehmen (muss existieren) |
+| `Esc` | abbrechen |
+
+Die zuletzt genutzten Verzeichnisse (höchstens 10) stehen in `%APPDATA%\claude-tui\recent-dirs.txt`
+bzw. `~/.config/claude-tui/recent-dirs.txt`. Die erste Session beim Programmstart läuft ohne Auswahl
+im aktuellen Verzeichnis.
 
 **Fensterauswahl:** listet die belegten Fenster („claude 1 ersetzen“) und, solange weniger als 4 offen
 sind, „neues Fenster“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen,

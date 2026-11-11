@@ -18,6 +18,8 @@
 | `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen) und wo der Fokus ist — ohne PTY testbar |
 | `layout.rs` | Fensterrechtecke für 1–4 Fenster und Nachbarsuche für `Alt+Pfeil` |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter |
+| `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
+| `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
 | `session.rs` | eine Session: PTY starten, Lese-Thread, Statuserkennung, Schreiben, Resize |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Alt+Pfeil` als Fokuswechsel |
 | `ui.rs` | Zeichnen: Sessionliste mit Menü unten, Fenster mit Nummer und Fokusrahmen |
