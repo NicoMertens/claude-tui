@@ -1,5 +1,7 @@
 //! Das Ctrl+A-Menü unten in der Sessionliste und die Fensterauswahl.
 
+use std::path::PathBuf;
+
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
@@ -42,9 +44,10 @@ pub struct Item {
 }
 
 /// Wofür die Fensterauswahl geöffnet wurde.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Purpose {
-    NewSession,
+    /// Neue Session im gewählten Verzeichnis.
+    NewSession(PathBuf),
     Show(SessionId),
 }
 
@@ -232,7 +235,11 @@ mod tests {
 
     #[test]
     fn hotkey_and_arrows_select_items() {
-        let mut menu = Menu::pick_window(Purpose::NewSession, "Neu".into(), &names(2));
+        let mut menu = Menu::pick_window(
+            Purpose::NewSession(PathBuf::from(".")),
+            "Neu".into(),
+            &names(2),
+        );
         assert_eq!(menu.items.len(), 3);
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('3'))),
@@ -248,7 +255,11 @@ mod tests {
 
     #[test]
     fn pick_window_without_new_window_when_full() {
-        let menu = Menu::pick_window(Purpose::NewSession, "Neu".into(), &names(4));
+        let menu = Menu::pick_window(
+            Purpose::NewSession(PathBuf::from(".")),
+            "Neu".into(),
+            &names(4),
+        );
         assert_eq!(menu.items.len(), 4);
         assert!(menu.items.iter().all(|i| i.label.ends_with("ersetzen")));
     }

@@ -1,11 +1,15 @@
-use anyhow::Result;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context as _, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Margin, Rect};
 
 use crate::{
+    dirpick::{DirPicker, Outcome as DirOutcome, Target},
     keys,
     layout::{self, Direction},
     menu::{Action, Context, Menu, Outcome, Purpose},
+    recent,
     session::{Session, Status},
     windows::{Focus, SessionId, Windows},
 };
@@ -16,8 +20,14 @@ pub struct App {
     /// Ausgewählte Zeile der Sessionliste.
     pub cursor: usize,
     pub menu: Option<Menu>,
+    /// Verzeichnisauswahl vor dem Start einer neuen Session.
+    pub dir_picker: Option<DirPicker>,
     pub should_quit: bool,
     command: String,
+    /// Verzeichnis, aus dem claude-tui gestartet wurde.
+    start_dir: PathBuf,
+    /// Zuletzt genutzte Startverzeichnisse, neueste zuerst.
+    recent: Vec<PathBuf>,
     /// Fläche rechts neben der Sessionliste, auf die die Fenster verteilt werden.
     area: Rect,
     next_id: SessionId,
@@ -30,12 +40,17 @@ impl App {
             windows: Windows::default(),
             cursor: 0,
             menu: None,
+            dir_picker: None,
             should_quit: false,
             command,
+            start_dir: std::env::current_dir().context("aktuelles Verzeichnis nicht lesbar")?,
+            recent: recent::load(),
             area,
             next_id: 0,
         };
-        let id = app.spawn()?;
+        // Die erste Session startet ohne Auswahl im Startverzeichnis.
+        let start_dir = app.start_dir.clone();
+        let id = app.spawn(&start_dir)?;
         app.place(id, 0);
         Ok(app)
     }
@@ -79,7 +94,20 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(direction) = keys::focus_direction(&key) {
             self.menu = None;
+            self.dir_picker = None;
             self.move_focus(direction);
+            return Ok(());
+        }
+        if let Some(picker) = self.dir_picker.as_mut() {
+            match picker.on_key(&key) {
+                DirOutcome::Stay => {}
+                DirOutcome::Cancel => self.dir_picker = None,
+                DirOutcome::Chosen(dir) => {
+                    let target = picker.target;
+                    self.dir_picker = None;
+                    self.on_dir_chosen(dir, target)?;
+                }
+            }
             return Ok(());
         }
         if let Some(menu) = self.menu.as_mut() {
@@ -111,6 +139,10 @@ impl App {
     }
 
     pub fn on_paste(&mut self, text: &str) -> Result<()> {
+        if let Some(picker) = self.dir_picker.as_mut() {
+            picker.paste(text);
+            return Ok(());
+        }
         if let Some(id) = self.windows.focused_session() {
             if let Some(session) = self.session_mut(id) {
                 session.paste(text)?;
@@ -144,26 +176,39 @@ impl App {
         }
     }
 
+    /// Verzeichnis gewählt: direkt ins Zielfenster, sonst (bei offenen Fenstern) Fensterauswahl.
+    fn on_dir_chosen(&mut self, dir: PathBuf, target: Target) -> Result<()> {
+        match target {
+            Target::Window(slot) => {
+                let id = self.spawn(&dir)?;
+                self.place(id, slot);
+            }
+            Target::PickWindow if self.windows.len() == 0 => {
+                let id = self.spawn(&dir)?;
+                self.place(id, 0);
+            }
+            Target::PickWindow => self.open_pick(Purpose::NewSession(dir)),
+        }
+        Ok(())
+    }
+
     fn is_exited(&self, id: SessionId) -> bool {
         self.session(id).is_some_and(|s| s.status == Status::Exited)
     }
 
     fn run(&mut self, action: Action, purpose: Option<Purpose>) -> Result<()> {
         match action {
-            Action::NewSession => match self.windows.focus() {
-                Focus::Window(slot) => {
-                    let id = self.spawn()?;
-                    self.place(id, slot);
-                }
-                Focus::List if self.windows.len() == 0 => {
-                    let id = self.spawn()?;
-                    self.place(id, 0);
-                }
-                Focus::List => self.open_pick(Purpose::NewSession),
-            },
+            Action::NewSession => {
+                let target = match self.windows.focus() {
+                    Focus::Window(slot) => Target::Window(slot),
+                    Focus::List => Target::PickWindow,
+                };
+                let default = self.recent.first().unwrap_or(&self.start_dir);
+                self.dir_picker = Some(DirPicker::new(target, self.recent.clone(), default));
+            }
             Action::Place(slot) => match purpose {
-                Some(Purpose::NewSession) => {
-                    let id = self.spawn()?;
+                Some(Purpose::NewSession(dir)) => {
+                    let id = self.spawn(&dir)?;
                     self.place(id, slot);
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
@@ -228,9 +273,9 @@ impl App {
     }
 
     fn open_pick(&mut self, purpose: Purpose) {
-        let title = match purpose {
-            Purpose::NewSession => "Neue Session in".to_string(),
-            Purpose::Show(id) => self
+        let title = match &purpose {
+            Purpose::NewSession(_) => "Neue Session in".to_string(),
+            &Purpose::Show(id) => self
                 .session(id)
                 .map_or_else(String::new, |s| format!("{} zeigen in", s.name)),
         };
@@ -302,7 +347,7 @@ impl App {
         }
     }
 
-    fn spawn(&mut self) -> Result<SessionId> {
+    fn spawn(&mut self, dir: &Path) -> Result<SessionId> {
         self.next_id += 1;
         let id = self.next_id;
         let inner = self.area.inner(Margin::new(1, 1));
@@ -310,10 +355,14 @@ impl App {
             id,
             format!("claude {id}"),
             &self.command,
+            dir,
             inner.height.max(1),
             inner.width.max(1),
         )?;
         self.sessions.push(session);
+        recent::remember(&mut self.recent, dir);
+        // Die Liste ist Komfort: lässt sie sich nicht speichern, läuft die Session trotzdem.
+        let _ = recent::save(&self.recent);
         Ok(id)
     }
 }

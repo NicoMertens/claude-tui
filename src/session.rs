@@ -1,5 +1,6 @@
 use std::{
     io::{Read, Write},
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard,
@@ -40,15 +41,20 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn spawn(id: SessionId, name: String, command: &str, rows: u16, cols: u16) -> Result<Self> {
+    pub fn spawn(
+        id: SessionId,
+        name: String,
+        command: &str,
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
             .context("PTY konnte nicht geöffnet werden")?;
 
         let mut cmd = shell_command(command);
-        if let Ok(cwd) = std::env::current_dir() {
-            cmd.cwd(cwd);
-        }
+        cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         let child = pair
             .slave

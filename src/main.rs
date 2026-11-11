@@ -1,7 +1,9 @@
 mod app;
+mod dirpick;
 mod keys;
 mod layout;
 mod menu;
+mod recent;
 mod session;
 mod theme;
 mod ui;

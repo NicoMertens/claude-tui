@@ -12,7 +12,7 @@ pub const BG: Color = Color::Rgb(0x1A, 0x19, 0x18);
 pub const TEXT: Color = Color::Rgb(0xEC, 0xE9, 0xE4);
 pub const MUTED: Color = Color::Rgb(0x8C, 0x88, 0x82);
 
-const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
+pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 const IDLE: Color = Color::Rgb(0x8F, 0xBF, 0x7F);
 
 pub fn status(status: Status) -> (&'static str, Color) {
