@@ -31,6 +31,9 @@ impl<'a> TermView<'a> {
 
 impl Widget for TermView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Nach einem Verkleinern kann die Fläche kurz größer sein als der Puffer (Layout noch auf
+        // alter Größe) — nie außerhalb schreiben, sonst bricht ratatui ab.
+        let area = area.intersection(*buf.area());
         let (rows, cols) = self.screen.size();
         let rows = rows.get().min(area.height);
         let cols = cols.get().min(area.width);
@@ -122,5 +125,16 @@ mod tests {
         let buf = render(b"\x1b[31mA\x1b[38;2;1;2;3mB");
         assert_eq!(buf[(0, 0)].fg, Color::Indexed(1));
         assert_eq!(buf[(1, 0)].fg, Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn area_larger_than_buffer_does_not_panic() {
+        // Wie nach einem Verkleinern: Layout noch 30×80, Puffer schon 27 Zeilen.
+        let size = |n| NonZeroU16::new(n).expect("> 0");
+        let mut parser = vt100::Parser::new(size(30), size(80), 0);
+        parser.process(b"\x1b[30;1Hletzte Zeile");
+        let mut buf = Buffer::empty(Rect::new(0, 0, 102, 27));
+        TermView::new(parser.screen()).render(Rect::new(20, 2, 80, 30), &mut buf);
+        assert_eq!(buf[(20, 2)].symbol(), " ");
     }
 }

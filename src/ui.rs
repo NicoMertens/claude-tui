@@ -306,9 +306,15 @@ fn draw_windows(f: &mut Frame, app: &App) {
         return;
     }
     for (slot, (&id, rect)) in app.windows.slots().iter().zip(rects).enumerate() {
+        // Die Fensterrechtecke stammen aus der zuletzt gemeldeten Größe; ist das Terminal
+        // inzwischen kleiner, nur den sichtbaren Teil zeichnen.
+        let rect = rect.intersection(f.area());
         let Some(session) = app.session(id) else {
             continue;
         };
+        if rect.is_empty() {
+            continue;
+        }
         let focused = app.windows.focus() == Focus::Window(slot);
         let color = frame_color(focused);
         let title = Span::styled(
