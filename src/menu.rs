@@ -1,4 +1,4 @@
-//! Das Ctrl+A-Menü unten in der Sessionliste und die Fensterauswahl.
+//! Das Ctrl+A-Menü (Overlay über dem fokussierten Fenster) und die Fensterauswahl.
 
 use std::path::PathBuf;
 
