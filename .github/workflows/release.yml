@@ -22,10 +22,10 @@ jobs:
       - id: read
         name: Version lesen und prüfen
         run: |
-          version=$(grep -m1 '^version' source/Cargo.toml | cut -d'"' -f2)
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           tag="v$version"
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "::error::$tag ist bereits veröffentlicht – Version in source/Cargo.toml erhöhen."
+            echo "::error::$tag ist bereits veröffentlicht – Version in Cargo.toml erhöhen."
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -44,7 +44,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: source
         shell: bash
     steps:
       - uses: actions/checkout@v4
@@ -53,14 +52,13 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: source
           key: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Binary umbenennen
         run: |
-          mkdir -p ../dist
+          mkdir -p dist
           cp "target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}" \
-             "../dist/claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+             "dist/claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
       - uses: actions/upload-artifact@v4
         with:
           name: claude-tui-${{ matrix.target }}

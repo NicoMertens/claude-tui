@@ -9,7 +9,7 @@
 | `vt100` | Terminal-Emulation: wertet die Ausgabe der Session zu einem Bildschirm aus |
 | `tui-term` | zeichnet einen `vt100`-Bildschirm als ratatui-Widget |
 
-## Module (`source/src/`)
+## Module (`src/`)
 
 | Datei | Aufgabe |
 |---|---|

@@ -1,4 +1,4 @@
-/source/target/
+/target/
 /dist/
 
 # Lokale Builds; Releases baut GitHub Actions.
