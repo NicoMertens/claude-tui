@@ -9,7 +9,7 @@ use tui_term::widget::{Cursor, PseudoTerminal};
 
 use crate::{app::App, dirpick::DirPicker, keys, menu::Menu, theme, windows::Focus};
 
-const SIDEBAR_WIDTH: u16 = 28;
+const SIDEBAR_WIDTH: u16 = 34;
 
 fn split(area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(10)]).areas(area)
