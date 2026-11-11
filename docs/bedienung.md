@@ -71,7 +71,7 @@ einen Zeilenumbruch ein.
 ### Menü (`Ctrl+A`)
 
 Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
-wird. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+wird; ist es zu, zeigt die Box nur `Ctrl+A Menü`. Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |

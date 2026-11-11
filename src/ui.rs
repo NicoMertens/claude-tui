@@ -56,21 +56,26 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Menü bzw. Verzeichnisauswahl: eigene Box unter der Sessionliste.
     let panel_width = area.width.saturating_sub(2) as usize;
     let panel = match (&app.dir_picker, &app.menu) {
-        (Some(picker), _) => Some((
+        (Some(picker), _) => (
             "Verzeichnis".to_string(),
             dir_picker_lines(picker, panel_width),
-        )),
-        (None, Some(menu)) => Some((menu.title.clone(), menu_lines(menu, panel_width))),
-        (None, None) => None,
+        ),
+        (None, Some(menu)) => (menu.title.clone(), menu_lines(menu, panel_width)),
+        // Menü zu: die Box bleibt und zeigt nur, wie es sich öffnet.
+        (None, None) => (
+            String::new(),
+            vec![Line::from(vec![
+                Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
+                Span::styled(" Menü", Style::default().fg(theme::MUTED)),
+            ])],
+        ),
     };
-    let panel_height = panel.as_ref().map_or(0, |(_, lines)| {
-        (lines.len() as u16 + 2).min(area.height.saturating_sub(MIN_LIST_HEIGHT))
-    });
+    let (panel_title, panel_lines) = panel;
+    let panel_height =
+        (panel_lines.len() as u16 + 2).min(area.height.saturating_sub(MIN_LIST_HEIGHT));
     let [list_box, panel_box] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(panel_height)]).areas(area);
-    if let Some((title, lines)) = panel {
-        draw_panel(f, &title, lines, panel_box);
-    }
+    draw_panel(f, &panel_title, panel_lines, panel_box);
 
     let focused = app.windows.focus() == Focus::List;
     let title = Span::styled(
@@ -84,20 +89,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(block, list_box);
 
     let width = inner.width as usize;
-    let mut bottom_lines = if panel_height == 0 {
-        vec![Line::from(vec![
-            Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
-            Span::styled(" Menü", Style::default().fg(theme::MUTED)),
-        ])]
-    } else {
-        Vec::new()
-    };
+    let mut bottom_lines = Vec::new();
     if let Some(notice) = &app.notice {
-        let line = Line::from(Span::styled(
+        bottom_lines.push(Line::from(Span::styled(
             head(notice, width),
             Style::default().fg(theme::WAITING),
-        ));
-        bottom_lines.insert(0, line);
+        )));
     }
     // Passt der untere Teil nicht ganz hinein, bleiben seine unteren Zeilen sichtbar.
     let skip = bottom_lines.len().saturating_sub(inner.height as usize);
@@ -115,12 +112,15 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 /// Box mit blauem Rand für Menü, Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Passt der
 /// Inhalt nicht ganz hinein, bleiben die unteren Zeilen sichtbar.
 fn draw_panel(f: &mut Frame, title: &str, mut lines: Vec<Line<'static>>, area: Rect) {
-    let block = rounded(theme::MENU).title(Line::from(Span::styled(
-        format!(" {title} "),
-        Style::default()
-            .fg(theme::MENU)
-            .add_modifier(Modifier::BOLD),
-    )));
+    let mut block = rounded(theme::MENU);
+    if !title.is_empty() {
+        block = block.title(Line::from(Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(theme::MENU)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
     let inner = block.inner(area);
     let skip = lines.len().saturating_sub(inner.height as usize);
     lines.drain(..skip);
