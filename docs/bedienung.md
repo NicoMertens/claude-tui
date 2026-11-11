@@ -102,7 +102,7 @@ einen Zeilenumbruch ein.
 
 Das Menü erscheint in einer eigenen Box mit blauem Rand unter der Sessionliste, die dafür kürzer
 wird; ist es zu, zeigt die Box `Ctrl+A Menu` und im Rahmen, was gerade den Fokus hat
-(`Window 2 · <Titel>` bzw. `Session list`). Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
+(`Menue 2 – <Titel>` bzw. `Session list`). Dort erscheinen auch Fensterauswahl, Löschabfrage und Verzeichnisauswahl. Punkte per Taste oder mit `↑`/`↓` und `Enter` wählen, `Esc` schließt. Welche Punkte erscheinen, hängt
 vom Fokus ab:
 
 | Taste | Fokus auf der Liste | Fokus auf einem Fenster |

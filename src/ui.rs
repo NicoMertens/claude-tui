@@ -90,7 +90,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                         .map(|id| app.title_of(id))
                         .unwrap_or_default();
                     head(
-                        &format!("Window {} · {title}", slot + 1),
+                        &format!("Menue {} – {title}", slot + 1),
                         panel_width.saturating_sub(4),
                     )
                 }
