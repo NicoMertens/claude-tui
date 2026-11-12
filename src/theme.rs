@@ -8,8 +8,8 @@ use crate::session::Status;
 pub const ACCENT: Color = Color::Rgb(0xD9, 0x77, 0x57);
 /// Rahmen und Titel des Bereichs mit Fokus — dasselbe Blau wie die Menübox.
 pub const FOCUS: Color = Color::Rgb(0x00, 0x9F, 0xDA);
-/// Rahmen und Titel aller anderen Bereiche.
-pub const UNFOCUS: Color = Color::Rgb(0x8C, 0x4A, 0x32);
+/// Rahmen und Titel aller anderen Bereiche (grau).
+pub const UNFOCUS: Color = Color::Rgb(0x6B, 0x68, 0x64);
 pub const BG: Color = Color::Rgb(0x1A, 0x19, 0x18);
 /// Rand, Titel und Auswahl des Menüs (eigene Box unter der Sessionliste).
 pub const MENU: Color = Color::Rgb(0x00, 0x9F, 0xDA);
