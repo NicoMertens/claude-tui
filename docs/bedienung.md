@@ -20,6 +20,27 @@ war (`state.json` im Konfigurationsordner). Beim nächsten Start werden genau di
 `--resume` fortgesetzt und in ihre Fenster gelegt. Gibt es nichts wiederherzustellen, startet eine
 neue Session im aktuellen Verzeichnis.
 
+Die Fenster erscheinen sofort, die Claude-Prozesse starten aber **nacheinander**: zuerst das Fenster
+mit Fokus, dann die übrigen in Fensterreihenfolge — jeweils sobald die vorige Session etwas anzeigt,
+spätestens nach 3 s. Mehrere Claude-Prozesse, die gleichzeitig ihr Protokoll und ihre MCP-Server
+laden, bremsen sich sonst gegenseitig aus. Ein wartendes Fenster zeigt „queued – starts after the
+previous window“; wer hineintippt, startet es sofort. Bis eine Session die erste Ausgabe zeigt,
+steht im Fenster „starting claude … Ns“ und in der Leiste der Zustand `starting`.
+
+**Sessionliste beim Start:** Den Lesestand der Protokolle merkt sich claude-tui in
+`sessions-cache.json` im Konfigurationsordner. Beim Start erscheint die Liste damit sofort; was seit
+dem letzten Lauf dazukam, liest ein Hintergrund-Thread nach. Ohne Cache (erster Start) steht dort
+kurz „loading sessions …“.
+
+**Zeitmessung:** Mit `CLAUDE_TUI_TRACE=1` schreibt claude-tui Zeitstempel nach `trace.log` im
+Konfigurationsordner: Start (Cache, Einlesen, Wiederherstellen, erstes Bild), je Session
+Prozessstart, erste Ausgabe und erste Hook-Meldung sowie jeden Hook-Aufruf (die Hooks erben die
+Variable). Damit lässt sich klären, ob Wartezeit in claude-tui, in Claude Code oder beim
+Virenscanner liegt — ein großer Abstand zwischen „process started“ und „first output“ ist Claude
+Code selbst, ein großer Abstand vor dem ersten `hook`-Eintrag meist der Virenscanner, der die
+unsignierte `claude-tui.exe` prüft. Dagegen hilft eine Ausnahme für deren Ordner
+(`%LOCALAPPDATA%\Programs\claude-tui`), soweit die eigene IT das zulässt.
+
 ## Installieren, aktualisieren, entfernen
 
 ```
@@ -36,7 +57,7 @@ claude-tui uninstall   # Programm und PATH-Eintrag entfernen (Einstellungen blei
 **Update-Prüfung:** Beim Start fragt claude-tui höchstens einmal am Tag im Hintergrund die GitHub-API
 nach dem neuesten Release (Zeitpunkt in `update-check.json` im Konfigurationsordner). Ist es neuer,
 zeigt der untere Rahmen der Sessionliste `vX.Y.Z available (u)`, und im Ctrl+A-Menü erscheint **`u` Update to vX.Y.Z**.
-Das Update lädt das Archiv für die eigene Plattform, vergleicht es mit `sha256.sum` und ersetzt die
+Das Update lädt die Binary für die eigene Plattform, vergleicht sie mit `sha256.sum` und ersetzt die
 laufende Datei; wirksam ab dem nächsten Start (die Fenster kommen über `state.json` zurück).
 Installiert wird nie ungefragt. `CLAUDE_TUI_NO_UPDATE_CHECK=1` schaltet die Prüfung ab.
 

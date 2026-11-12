@@ -11,10 +11,11 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize, SlavePty};
 
 use crate::{
     hooks::{self, Report},
+    trace,
     windows::SessionId,
 };
 
@@ -29,6 +30,8 @@ const HOOK_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
+    /// Prozess noch nicht gestartet (wartet in der Startreihe) oder noch ohne Ausgabe.
+    Starting,
     Working,
     Waiting,
     Idle,
@@ -52,11 +55,22 @@ pub struct Session {
     hook_checked: Option<Instant>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    /// Befehl und PTY-Gegenstelle, solange der Prozess noch nicht gestartet ist.
+    pending: Option<(CommandBuilder, Box<dyn SlavePty + Send>, String)>,
+    child: Option<Box<dyn Child + Send + Sync>>,
+    /// Prozessstart; `None`, solange er in der Startreihe wartet.
+    started: Option<Instant>,
+    /// Erste sichtbare Ausgabe; bis dahin zeigt das Fenster „starting claude …“.
+    first_content: Option<Instant>,
+    /// Erste Hook-Meldung schon im Trace vermerkt.
+    hook_traced: bool,
 }
 
 impl Session {
-    /// `extra_args` werden einzeln an `command` gehängt und dabei für die Shell gequotet.
+    /// `extra_args` werden einzeln an `command` gehängt und dabei für die Shell gequotet. Mit
+    /// `start_now = false` wird nur das PTY geöffnet; der Prozess startet erst mit [`Self::start`]
+    /// (gestaffeltes Wiederherstellen) oder mit der ersten Eingabe.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         id: SessionId,
         claude_id: String,
@@ -65,6 +79,7 @@ impl Session {
         cwd: &Path,
         rows: u16,
         cols: u16,
+        start_now: bool,
     ) -> Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
@@ -74,11 +89,6 @@ impl Session {
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env(hooks::SESSION_ENV, &claude_id);
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .with_context(|| format!("cannot start '{command}'"))?;
-        drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
@@ -110,11 +120,11 @@ impl Session {
             });
         }
 
-        Ok(Self {
+        let mut session = Self {
             id,
             claude_id,
             cwd: cwd.to_path_buf(),
-            status: Status::Working,
+            status: Status::Starting,
             size: (rows, cols),
             parser,
             last_output,
@@ -124,8 +134,46 @@ impl Session {
             hook_checked: None,
             master: pair.master,
             writer,
-            child,
-        })
+            pending: Some((cmd, pair.slave, command.to_string())),
+            child: None,
+            started: None,
+            first_content: None,
+            hook_traced: false,
+        };
+        if start_now {
+            session.start()?;
+        }
+        Ok(session)
+    }
+
+    /// Startet den Prozess, falls er noch in der Startreihe wartet.
+    pub fn start(&mut self) -> Result<()> {
+        let Some((cmd, slave, program)) = self.pending.take() else {
+            return Ok(());
+        };
+        let child = slave
+            .spawn_command(cmd)
+            .with_context(|| format!("cannot start '{program}'"))?;
+        drop(slave);
+        self.child = Some(child);
+        self.started = Some(Instant::now());
+        trace::mark(format_args!("session {}: process started", self.claude_id));
+        Ok(())
+    }
+
+    /// Prozess wartet noch in der Startreihe.
+    pub fn is_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Seit wann der Prozess läuft, solange er noch nichts angezeigt hat; sonst `None`.
+    pub fn starting_since(&self) -> Option<Instant> {
+        self.started.filter(|_| self.first_content.is_none())
+    }
+
+    /// Der Prozess hat schon etwas angezeigt (oder ist beendet).
+    pub fn has_content(&self) -> bool {
+        self.first_content.is_some() || self.status == Status::Exited
     }
 
     pub fn screen(&self) -> MutexGuard<'_, vt100::Parser> {
@@ -150,16 +198,41 @@ impl Session {
         if self.status == Status::Exited {
             return;
         }
+        let Some(child) = self.child.as_mut() else {
+            self.status = Status::Starting;
+            return;
+        };
         // Unter ConPTY endet der Lesekanal nicht zuverlässig mit dem Prozess, daher zusätzlich try_wait.
         let exited =
-            self.reader_done.load(Ordering::SeqCst) || matches!(self.child.try_wait(), Ok(Some(_)));
+            self.reader_done.load(Ordering::SeqCst) || matches!(child.try_wait(), Ok(Some(_)));
         if exited {
+            trace::mark(format_args!("session {}: exited", self.claude_id));
             self.status = Status::Exited;
             return;
         }
         if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
             self.hook = hooks::read(&self.claude_id);
             self.hook_checked = Some(Instant::now());
+            if self.hook.is_some() && !self.hook_traced {
+                self.hook_traced = true;
+                trace::mark(format_args!(
+                    "session {}: first hook report after {}",
+                    self.claude_id,
+                    since(self.started)
+                ));
+            }
+        }
+        if self.first_content.is_none() {
+            if self.screen().screen().contents().trim().is_empty() {
+                self.status = Status::Starting;
+                return;
+            }
+            self.first_content = Some(Instant::now());
+            trace::mark(format_args!(
+                "session {}: first output after {}",
+                self.claude_id,
+                since(self.started)
+            ));
         }
         let recently_active = lock(&self.last_output).elapsed() < WORKING_WINDOW;
         let on_screen = || waits_for_decision(&self.screen().screen().contents());
@@ -213,7 +286,9 @@ impl Session {
     }
 
     /// Schickt Eingabe an die Session; wie in einem Terminal springt die Ansicht dabei ans Ende.
+    /// Wartet sie noch in der Startreihe, startet sie jetzt.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
+        self.start()?;
         self.scroll_to_bottom();
         self.last_input = SystemTime::now();
         self.writer.write_all(bytes)?;
@@ -244,9 +319,19 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+        }
         hooks::clear(&self.claude_id);
     }
+}
+
+/// „1234 ms“ seit `start` für den Trace.
+fn since(start: Option<Instant>) -> String {
+    start.map_or_else(
+        || "?".to_string(),
+        |s| format!("{} ms", s.elapsed().as_millis()),
+    )
 }
 
 /// Zustand aus der letzten Hook-Meldung, sonst aus der Heuristik (Ausgabe-Aktivität,

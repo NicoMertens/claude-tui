@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::mpsc::Receiver,
     time::{Duration, Instant, SystemTime},
@@ -21,7 +21,7 @@ use crate::{
     selection::{self, Cell, Selection},
     session::{Session, Status},
     state::{self, State},
-    ui,
+    trace, ui,
     update::{self, Available},
     waiting,
     windows::{Focus, SessionId, Windows, MAX_WINDOWS},
@@ -29,6 +29,11 @@ use crate::{
 
 /// So oft wird `~/.claude/projects` nach neuen Sessions und Titeln durchsucht.
 const STORE_INTERVAL: Duration = Duration::from_secs(2);
+/// Höchstens so oft wird der Lesestand der Protokolle gespeichert (außerdem beim Beenden).
+const CACHE_INTERVAL: Duration = Duration::from_secs(60);
+/// Beim Wiederherstellen startet die nächste Session, sobald die vorige etwas anzeigt, spätestens
+/// nach dieser Zeit — mehrere Claude-Prozesse gleichzeitig bremsen sich gegenseitig aus.
+const STAGGER_MAX: Duration = Duration::from_secs(3);
 /// Zweiter Klick auf dieselbe Zelle innerhalb dieser Zeit = Doppelklick (Wort markieren).
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// So lange bleiben befristete Hinweise (z. B. „copied N characters“) stehen.
@@ -111,7 +116,17 @@ pub struct App {
     /// Zuletzt genutzte Startverzeichnisse, neueste zuerst.
     recent: Vec<PathBuf>,
     store: Store,
+    /// Hintergrund-Thread, der die Protokolle beim Start einliest; bis dahin gilt der Cache.
+    store_load: Option<Receiver<Store>>,
+    /// Fensterlayout, das erst nach dem Einlesen wiederhergestellt werden kann (Sessions fehlen
+    /// im Cache).
+    pending_restore: Option<State>,
     last_scan: Instant,
+    last_cache_save: Instant,
+    /// Wiederhergestellte Sessions, deren Prozess noch nicht läuft, in Startreihenfolge.
+    start_queue: VecDeque<SessionId>,
+    /// Zuletzt gestartete Session aus der Reihe und Startzeit (siehe [STAGGER_MAX]).
+    starting: Option<(SessionId, Instant)>,
     /// Laufende Claude-Prozesse laut `~/.claude/sessions` (eigene eingeschlossen).
     claimed: external::Claimed,
     claimed_watch: Option<Receiver<external::Claimed>>,
@@ -131,8 +146,10 @@ pub struct App {
 
 impl App {
     pub fn new(command: String, screen: Rect) -> Result<Self> {
-        let mut store = Store::new();
-        store.refresh();
+        trace::mark("app: start");
+        let store = Store::from_cache();
+        trace::mark("app: cache loaded");
+        let store_load = spawn_store_load();
         hooks::purge_stale();
         let mut app = Self {
             sessions: Vec::new(),
@@ -159,7 +176,12 @@ impl App {
             start_dir: std::env::current_dir().context("current directory not readable")?,
             recent: recent::load(),
             store,
+            store_load,
+            pending_restore: None,
             last_scan: Instant::now(),
+            last_cache_save: Instant::now(),
+            start_queue: VecDeque::new(),
+            starting: None,
             claimed: external::Claimed::new(),
             claimed_watch: external::spawn_watcher(),
             ended: Vec::new(),
@@ -169,20 +191,36 @@ impl App {
             stacked: false,
             next_id: 0,
         };
-        app.restore();
-        if app.windows.len() == 0 {
-            // Nichts wiederherzustellen: erste Session ohne Auswahl im Startverzeichnis.
-            let start_dir = app.start_dir.clone();
-            let id = app.spawn(&start_dir, Launch::New)?;
-            app.place(id, 0);
+        let saved = state::load();
+        // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
+        let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
+        if known || app.store_load.is_none() {
+            app.restore(saved)?;
+        } else {
+            trace::mark("app: restore waits for sessions");
+            app.pending_restore = Some(saved);
         }
         app.rebuild_list();
+        trace::mark("app: ready");
         Ok(app)
     }
 
     /// Stellt das Fensterlayout des letzten Laufs wieder her; jede Session darin wird fortgesetzt.
-    fn restore(&mut self) {
-        let saved = state::load();
+    /// Gibt es nichts wiederherzustellen, startet eine Session im Startverzeichnis.
+    fn restore(&mut self, saved: State) -> Result<()> {
+        self.restore_layout(saved);
+        if self.windows.len() == 0 {
+            let start_dir = self.start_dir.clone();
+            let id = self.spawn(&start_dir, Launch::New)?;
+            self.place(id, 0);
+        }
+        Ok(())
+    }
+
+    /// Fenster anlegen; die Prozesse starten gestaffelt (siehe [`Self::advance_starts`]), das
+    /// Fenster mit Fokus zuerst.
+    fn restore_layout(&mut self, saved: State) {
+        trace::mark(format_args!("app: restore {} windows", saved.windows.len()));
         self.stacked = saved.stacked;
         let elsewhere = external::claimed_now(&saved.windows);
         for claude_id in saved.windows {
@@ -200,7 +238,7 @@ impl App {
                     continue;
                 }
             };
-            match self.spawn(&stored.cwd, launch) {
+            match self.spawn_with(&stored.cwd, launch, false) {
                 Ok(id) => self.place(id, self.windows.len()),
                 Err(e) => self.notice = Some(format!("{e:#}")),
             }
@@ -212,6 +250,67 @@ impl App {
         };
         self.set_focus(focus);
         self.set_list_hidden(saved.list_hidden);
+        let mut order: Vec<SessionId> = self.windows.slots().to_vec();
+        if let Some(first) = self.windows.focused_session() {
+            order.retain(|&id| id != first);
+            order.insert(0, first);
+        }
+        self.start_queue = order.into();
+        self.advance_starts();
+    }
+
+    /// Startet die nächste wartende Session, sobald die vorige etwas anzeigt oder [STAGGER_MAX]
+    /// verstrichen ist. Sessions, die per Eingabe schon gestartet wurden, werden übersprungen.
+    fn advance_starts(&mut self) {
+        if let Some((id, at)) = self.starting {
+            let ready = self.session(id).is_none_or(Session::has_content);
+            if !ready && at.elapsed() < STAGGER_MAX {
+                return;
+            }
+            self.starting = None;
+        }
+        while let Some(id) = self.start_queue.pop_front() {
+            let Some(session) = self.session_mut(id) else {
+                continue;
+            };
+            if !session.is_pending() {
+                continue;
+            }
+            match session.start() {
+                Ok(()) => {
+                    self.starting = Some((id, Instant::now()));
+                    return;
+                }
+                Err(e) => self.notice = Some(format!("{e:#}")),
+            }
+        }
+    }
+
+    /// Lesestand der Protokolle sichern (beim Beenden).
+    pub fn save_cache(&mut self) {
+        self.store.save_cache();
+    }
+
+    /// Ergebnis des Einlesens beim Start übernehmen und ein aufgeschobenes Layout wiederherstellen.
+    fn poll_store_load(&mut self) -> Result<()> {
+        let Some(store) = self.store_load.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+            return Ok(());
+        };
+        trace::mark("app: sessions loaded");
+        self.store_load = None;
+        self.store = store;
+        self.store.save_cache();
+        self.last_scan = Instant::now();
+        self.last_cache_save = Instant::now();
+        if let Some(saved) = self.pending_restore.take() {
+            self.restore(saved)?;
+        }
+        Ok(())
+    }
+
+    /// Die Protokolle werden beim Start noch eingelesen.
+    pub fn loading(&self) -> bool {
+        self.store_load.is_some()
     }
 
     pub fn session(&self, id: SessionId) -> Option<&Session> {
@@ -294,6 +393,10 @@ impl App {
         }
         self.expire_notice();
         self.poll_update();
+        if let Err(e) = self.poll_store_load() {
+            self.notice = Some(format!("{e:#}"));
+        }
+        self.advance_starts();
         if let Some(claimed) = self
             .claimed_watch
             .as_ref()
@@ -301,9 +404,14 @@ impl App {
         {
             self.claimed = claimed;
         }
-        if self.last_scan.elapsed() >= STORE_INTERVAL {
+        // Während des Einlesens beim Start nicht doppelt lesen.
+        if self.store_load.is_none() && self.last_scan.elapsed() >= STORE_INTERVAL {
             self.store.refresh();
             self.last_scan = Instant::now();
+            if self.last_cache_save.elapsed() >= CACHE_INTERVAL {
+                self.store.save_cache();
+                self.last_cache_save = Instant::now();
+            }
         }
         self.rebuild_list();
     }
@@ -1090,6 +1198,11 @@ impl App {
     }
 
     fn spawn(&mut self, dir: &Path, launch: Launch) -> Result<SessionId> {
+        self.spawn_with(dir, launch, true)
+    }
+
+    /// `start_now = false`: nur Fenster und PTY anlegen, der Prozess startet später (Startreihe).
+    fn spawn_with(&mut self, dir: &Path, launch: Launch, start_now: bool) -> Result<SessionId> {
         let (claude_id, args, attach) = match launch {
             Launch::New => {
                 let claude_id = uuid::Uuid::new_v4().to_string();
@@ -1130,6 +1243,7 @@ impl App {
             dir,
             inner.height.max(1),
             inner.width.max(1),
+            start_now,
         )?;
         self.sessions.push(session);
         recent::remember(&mut self.recent, dir);
@@ -1138,6 +1252,21 @@ impl App {
         self.rebuild_list();
         Ok(id)
     }
+}
+
+/// Liest die Protokolle im Hintergrund ein (ab dem Stand des Caches), damit das erste Bild nicht
+/// darauf wartet.
+fn spawn_store_load() -> Option<Receiver<Store>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("session-store".into())
+        .spawn(move || {
+            let mut store = Store::from_cache();
+            store.refresh();
+            let _ = tx.send(store);
+        })
+        .ok()
+        .map(|_| rx)
 }
 
 /// Zelle im Fensterinhalt `inner` unter der Mausposition, an den Rand geklemmt.

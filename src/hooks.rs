@@ -97,6 +97,7 @@ pub fn run_cli(event: Option<&str>) {
     let (Some(key), Some(dir)) = (key, status_dir()) else {
         return;
     };
+    crate::trace::mark(format_args!("hook {event} for {key}"));
     match effect(event, &input) {
         Effect::Set(status) => {
             let _ = write_report(&dir, &key, status, SystemTime::now());
@@ -124,7 +125,7 @@ fn format_report(status: Status, at: SystemTime) -> Option<String> {
         Status::Working => "working",
         Status::Waiting => "waiting",
         Status::Idle => "idle",
-        Status::Exited => return None,
+        Status::Starting | Status::Exited => return None,
     };
     let millis = at
         .duration_since(UNIX_EPOCH)

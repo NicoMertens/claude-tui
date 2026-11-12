@@ -237,6 +237,9 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
             rows.push(Some(entry.claude_id.clone()));
         }
     }
+    if app.loading() && items.is_empty() {
+        items.push(ListItem::new(muted("loading sessions …")));
+    }
     let mut state = ListState::default().with_selected(selected_item);
     f.render_stateful_widget(List::new(items), area, &mut state);
 
@@ -501,6 +504,25 @@ fn draw_windows(f: &mut Frame, app: &App) {
         }
         let inner = block.inner(rect);
         f.render_widget(block, rect);
+        // Bis Claude etwas anzeigt, steht im Fenster, worauf es wartet — sonst wirkt es hängend.
+        let waiting_text = if session.is_pending() {
+            Some("queued – starts after the previous window".to_string())
+        } else {
+            session.starting_since().map(|since| {
+                let (spinner, _) = theme::status_symbol(Some(session.status), clock());
+                format!("{spinner} starting claude … {}s", since.elapsed().as_secs())
+            })
+        };
+        if let Some(text) = waiting_text {
+            let line = Line::from(Span::styled(text, Style::default().fg(theme::MUTED)));
+            let middle = Rect {
+                y: inner.y + inner.height / 2,
+                height: inner.height.min(1),
+                ..inner
+            };
+            f.render_widget(Paragraph::new(line).centered(), middle);
+            continue;
+        }
         let parser = session.screen();
         let selection = app
             .selection

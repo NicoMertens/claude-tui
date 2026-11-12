@@ -31,6 +31,7 @@ const SPINNER_FRAME: Duration = Duration::from_millis(120);
 /// Spinner an.
 pub fn status_symbol(status: Option<Status>, elapsed: Duration) -> (&'static str, Color) {
     match status {
+        Some(Status::Starting) => (spinner(elapsed), MUTED),
         Some(Status::Working) => (spinner(elapsed), BUSY),
         Some(Status::Waiting) => ("▲", WAITING),
         Some(Status::Idle) => ("●", MUTED),
@@ -41,6 +42,7 @@ pub fn status_symbol(status: Option<Status>, elapsed: Duration) -> (&'static str
 /// Statustext in der Fensterleiste: rot = arbeitet, gelb = Rückfrage, grau = bereit.
 pub fn status_label(status: Status) -> (&'static str, Color) {
     match status {
+        Status::Starting => ("starting", MUTED),
         Status::Working => ("working", BUSY),
         Status::Waiting => ("waiting for you", WAITING),
         Status::Idle => ("ready", MUTED),

@@ -16,6 +16,7 @@ mod session;
 mod state;
 mod term_view;
 mod theme;
+mod trace;
 mod ui;
 mod update;
 mod waiting;
@@ -49,7 +50,8 @@ Usage:
   claude-tui --version
 
 Set CLAUDE_TUI_NO_UPDATE_CHECK=1 to skip the daily update check on start.
-Set CLAUDE_TUI_NO_BELL=1 to keep the terminal bell silent when a session waits for you.";
+Set CLAUDE_TUI_NO_BELL=1 to keep the terminal bell silent when a session waits for you.
+Set CLAUDE_TUI_TRACE=1 to log start-up and session timings to trace.log in the config folder.";
 
 fn main() -> Result<()> {
     let arg = std::env::args().nth(1);
@@ -109,16 +111,27 @@ fn restore_terminal() {
 fn run(terminal: &mut Term, command: String) -> Result<()> {
     let size = terminal.size()?;
     let mut app = app::App::new(command, Rect::new(0, 0, size.width, size.height))?;
+    let mut first_frame = true;
 
     while !app.should_quit {
         app.tick();
         terminal.draw(|f| ui::draw(f, &app))?;
+        if std::mem::take(&mut first_frame) {
+            trace::mark("app: first frame drawn");
+        }
         if std::mem::take(&mut app.ring_bell) {
             // BEL bewegt den Cursor nicht; nach dem Zeichnen stört es das Bild nicht.
             let backend = terminal.backend_mut();
             let _ = backend.write_all(b"\x07").and_then(|()| backend.flush());
         }
-        if event::poll(Duration::from_millis(16))? {
+        // Alles abarbeiten, was schon ansteht (schnelles Tippen, Mausrad), statt nach jedem
+        // einzelnen Ereignis neu zu zeichnen; begrenzt, damit das Bild nicht einfriert.
+        let mut timeout = Duration::from_millis(16);
+        for _ in 0..MAX_EVENTS_PER_FRAME {
+            if !event::poll(timeout)? {
+                break;
+            }
+            timeout = Duration::ZERO;
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
                 Event::Paste(text) => app.on_paste(&text)?,
@@ -126,7 +139,14 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
                 Event::Resize(w, h) => app.resize(Rect::new(0, 0, w, h)),
                 _ => {}
             }
+            if app.should_quit {
+                break;
+            }
         }
     }
+    app.save_cache();
     Ok(())
 }
+
+/// Höchstens so viele Ereignisse je Bild.
+const MAX_EVENTS_PER_FRAME: usize = 64;

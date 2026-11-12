@@ -24,19 +24,20 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 | Datei | Aufgabe |
 |---|---|
-| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt) |
+| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild) |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
 | `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
 | `layout.rs` | Fensterrechtecke für 1–4 Fenster (2 wahlweise übereinander), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil` |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
-| `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session |
+| `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session; Lesestand als `sessions-cache.json`, beim Start im Hintergrund nachgelesen |
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik) |
 | `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander) als `state.json` für den Neustart |
 | `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
-| `session.rs` | eine Session: PTY starten, Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
+| `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
+| `trace.rs` | Zeitmessung bei `CLAUDE_TUI_TRACE=1`: Zeilen mit Unix-ms und PID nach `trace.log` (App und Hook-Prozesse) |
 | `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen, `claude-tui hook <Event>` (Event → Zustand → Statusdatei), Statusdateien lesen und aufräumen |
 | `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), nächste wartende Session reihum für Menüpunkt `w`, `CLAUDE_TUI_NO_BELL` |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel |
