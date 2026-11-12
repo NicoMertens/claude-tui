@@ -2,6 +2,7 @@ mod app;
 mod claude_store;
 mod dirpick;
 mod external;
+mod hook_server;
 mod hooks;
 mod http;
 mod install;

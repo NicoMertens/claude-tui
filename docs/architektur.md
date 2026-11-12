@@ -38,7 +38,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
 | `trace.rs` | Zeitmessung bei `CLAUDE_TUI_TRACE=1`: Zeilen mit Unix-ms und PID nach `trace.log` (App und Hook-Prozesse) |
-| `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen, `claude-tui hook <Event>` (Event → Zustand → Statusdatei), Statusdateien lesen und aufräumen |
+| `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen (HTTP-Hooks, sonst Befehls-Hooks), Event → Zustand → Statusdatei, Statusdateien lesen und aufräumen |
+| `hook_server.rs` | HTTP-Server auf `127.0.0.1` für die Hook-Meldungen (eine Anfrage je Event, Token im Pfad) |
 | `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), nächste wartende Session reihum für Menüpunkt `w`, `CLAUDE_TUI_NO_BELL` |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel |
 | `ui.rs` | Zeichnen: Sessionliste (Menühinweis im unteren Rahmen; ausblendbar, dann Fenster in voller Breite), Fenster mit Nummer, Zustand und Fokusrahmen, Menü als blaues Overlay mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
@@ -94,25 +95,41 @@ angefasst. Hook-Einträge mehrerer Ebenen werden zusammengeführt
 ([Hooks](https://code.claude.com/docs/en/hooks)), eigene Hooks des Nutzers laufen also weiter.
 
 Die Datei `hooks.json` im Konfigurationsordner wird bei jedem Start einer Session neu geschrieben.
-Jeder Eintrag nutzt die **Exec-Form** (`command` = Pfad der eigenen Binary aus
-`std::env::current_exe()`, `args` = `["hook", "<Event>"]`): Claude startet die Binary dann direkt
-ohne Shell, Pfade mit Leerzeichen brauchen kein Quoting (die Shell-Form liefe unter Windows über
-Git Bash oder PowerShell). Die Hooks laufen **asynchron** (`"async": true`) mit 30 s Timeout. Ein
-Aufruf selbst dauert Millisekunden, aber ein Virenscanner kann den Start der unsignierten Binary um
-10 s und mehr verzögern. Synchron blockierte das jeden Prompt und jedes Werkzeug und lief in den
-Timeout. Preis dafür: Die Aufrufe laufen parallel, eine verspätete Meldung kann eine neuere
-überschreiben. Die Seitenleiste zeigt dann bis zum nächsten Event einen veralteten Zustand.
 
-`claude-tui hook <Event>` liest das Hook-JSON von stdin und schreibt `<Zustand> <Unix-ms>` nach
-`<Konfigurationsordner>/status/<ID>` (erst temporäre Datei, dann umbenennen). Als `<ID>` dient
-`CLAUDE_TUI_SESSION`, sonst `session_id` aus dem JSON — die Umgebungsvariable bleibt auch nach
-`/clear` gleich, falls Claude intern eine neue Session-ID vergibt. Der Aufruf gibt nie etwas aus
-(bei `SessionStart`/`UserPromptSubmit` landete Ausgabe in Claudes Kontext) und endet immer mit
-Exit-Code 0.
+**HTTP-Hooks (Normalfall).** Beim Start öffnet claude-tui einen kleinen HTTP-Server auf
+`127.0.0.1:<freier Port>` (`hook_server.rs`). Jeder Eintrag ist ein Hook vom Typ `http`:
+Claude schickt das Event-JSON per `POST` an `http://127.0.0.1:<Port>/hook/<Token>`. Das Token ist
+je Lauf zufällig, damit andere Programme keine Zustände unterschieben. Die Session-ID kommt im
+Header `X-Claude-Tui-Session` aus `${CLAUDE_TUI_SESSION}` (per `allowedEnvVars` freigegeben). Der
+Server antwortet sofort mit leerem `200` — für Claude „Erfolg, keine Anweisungen“. HTTP-Hooks
+laufen synchron, aber eine Anfrage an localhost dauert Millisekunden. Läuft claude-tui nicht mehr,
+scheitert die Verbindung sofort, und Claude macht weiter. Damit ein Firmen-Proxy die Anfragen nicht
+abfängt, ergänzt claude-tui `NO_PROXY` der Claude-Prozesse um `127.0.0.1,localhost`.
+
+Der Grund: Befehls-Hooks starten je Event einen Prozess. Auf einem Rechner, dessen Virenscanner
+die unsignierte `claude-tui.exe` bei **jedem** Start prüft, kostete das 3–4 s pro Event — beim
+Absenden jeder Nachricht und vor und nach jedem Werkzeug. Selbst `async` half nicht, weil schon das
+Anlegen des Prozesses Claude aufhält.
+
+`SessionStart` ruft HTTP-Hooks nicht auf (geprüft mit Claude Code 2.1.322: ein Befehls-Hook für
+dasselbe Event lief, der HTTP-Hook nicht). Für dieses Event trägt claude-tui deshalb nichts ein;
+bis zur ersten Meldung entscheidet die Heuristik.
+
+**Befehls-Hooks (Rückfall),** wenn sich kein Port öffnen lässt: **Exec-Form** (`command` = Pfad der
+eigenen Binary aus `std::env::current_exe()`, `args` = `["hook", "<Event>"]`), Claude startet die
+Binary direkt ohne Shell. Sie laufen **asynchron** (`"async": true`) mit 30 s Timeout; eine
+verspätete Meldung kann dabei eine neuere überschreiben. `claude-tui hook <Event>` liest das
+Hook-JSON von stdin, gibt nie etwas aus (bei `SessionStart`/`UserPromptSubmit` landete Ausgabe in
+Claudes Kontext) und endet immer mit Exit-Code 0.
+
+Beide Wege schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>` (erst
+temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id` aus
+dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine neue
+Session-ID vergibt.
 
 | Event | Zustand |
 |---|---|
-| `SessionStart`, `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
+| `SessionStart` (nur Befehls-Hooks), `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact` | arbeitet |
 | `PermissionRequest` (sofort beim Freigabedialog), `Notification` mit `permission_prompt` / `elicitation_dialog` (erst nach ca. 6 s ohne Eingabe) | wartet auf dich |
 | `SessionEnd` | Statusdatei löschen |

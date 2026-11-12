@@ -89,6 +89,14 @@ impl Session {
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env(hooks::SESSION_ENV, &claude_id);
+        // Die HTTP-Hooks gehen an 127.0.0.1; ein Firmen-Proxy aus HTTP(S)_PROXY darf sie nicht
+        // abfangen.
+        let no_proxy = match std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")) {
+            Ok(list) if !list.trim().is_empty() => format!("{list},127.0.0.1,localhost"),
+            _ => "127.0.0.1,localhost".to_string(),
+        };
+        cmd.env("NO_PROXY", &no_proxy);
+        cmd.env("no_proxy", &no_proxy);
 
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;

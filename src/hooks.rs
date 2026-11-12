@@ -1,5 +1,6 @@
 //! Zustandsmeldung über Claude-Code-Hooks: claude-tui gibt jedem gestarteten Claude-Prozess per
-//! `--settings` Hooks mit, die `claude-tui hook <Event>` aufrufen. Der Aufruf schreibt den Zustand
+//! `--settings` Hooks mit. Normalerweise HTTP-Hooks an den eigenen Server (`hook_server.rs`), sonst
+//! als Rückfall Befehls-Hooks, die `claude-tui hook <Event>` aufrufen. Beide schreiben den Zustand
 //! in `status/<Claude-ID>` im Konfigurationsordner; die App liest ihn dort. Die
 //! `~/.claude/settings.json` des Nutzers bleibt unberührt.
 
@@ -7,22 +8,34 @@ use std::{
     fs,
     io::Read,
     path::PathBuf,
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::{paths, session::Status};
+use crate::{hook_server, paths, session::Status};
+
+/// URL des Hook-Servers dieses Laufs; `None`, wenn er nicht starten konnte.
+static SERVER_URL: OnceLock<Option<String>> = OnceLock::new();
+
+/// Startet den Hook-Server (einmal je Lauf, vor der ersten Session).
+pub fn start_server() {
+    SERVER_URL.get_or_init(hook_server::start);
+}
 
 /// Umgebungsvariable mit der Claude-ID, unter der claude-tui den Prozess führt. Sie bleibt auch
 /// nach `/clear` gleich, wenn Claude intern eine neue `session_id` vergibt.
 pub const SESSION_ENV: &str = "CLAUDE_TUI_SESSION";
 const STATUS_DIR: &str = "status";
 const SETTINGS_FILE: &str = "hooks.json";
-/// Obergrenze je Hook-Aufruf in Sekunden. Der Aufruf selbst dauert Millisekunden, aber ein
+/// Obergrenze je Befehls-Hook in Sekunden. Der Aufruf selbst dauert Millisekunden, aber ein
 /// Virenscanner kann den Start der unsignierten Binary um 10 s und mehr verzögern.
 const HOOK_TIMEOUT: u64 = 30;
+/// Obergrenze je HTTP-Hook in Sekunden. HTTP-Hooks laufen synchron; der Server antwortet in
+/// Millisekunden, läuft claude-tui nicht mehr, scheitert die Verbindung sofort.
+const HTTP_TIMEOUT: u64 = 5;
 /// Statusdateien, die so lange unverändert sind, stammen aus abgebrochenen Läufen.
 const STALE_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -94,15 +107,23 @@ pub fn run_cli(event: Option<&str>) {
             .and_then(Value::as_str)
             .map(str::to_string)
     });
-    let (Some(key), Some(dir)) = (key, status_dir()) else {
+    let Some(key) = key else {
         return;
     };
     crate::trace::mark(format_args!("hook {event} for {key}"));
-    match effect(event, &input) {
+    apply(event, &input, &key);
+}
+
+/// Wirkung eines Hook-Events auf die Statusdatei der Session `key`.
+pub fn apply(event: &str, input: &Value, key: &str) {
+    let Some(dir) = status_dir() else {
+        return;
+    };
+    match effect(event, input) {
         Effect::Set(status) => {
-            let _ = write_report(&dir, &key, status, SystemTime::now());
+            let _ = write_report(&dir, key, status, SystemTime::now());
         }
-        Effect::Remove => remove_in(&dir, &key),
+        Effect::Remove => remove_in(&dir, key),
         Effect::Keep => {}
     }
 }
@@ -203,21 +224,48 @@ pub fn purge_stale() {
     }
 }
 
-/// Inhalt der `--settings`-Datei: je Event ein Hook in Exec-Form (`command` + `args`). Claude
-/// startet die Binary dann direkt ohne Shell, Pfade mit Leerzeichen brauchen kein Quoting.
-/// `async`, weil ein langsamer Start sonst jeden Prompt und jedes Werkzeug blockiert; dafür kann
-/// eine verspätete Meldung kurz eine neuere überschreiben, bis das nächste Event kommt.
-fn settings(exe: &str) -> Value {
+/// Wohin die Hooks melden.
+enum Target<'a> {
+    /// HTTP-Hook an den eigenen Server.
+    Http(&'a str),
+    /// Befehls-Hook `claude-tui hook <Event>` (Rückfall ohne Server).
+    Command(&'a str),
+}
+
+/// Inhalt der `--settings`-Datei: je Event ein Hook.
+///
+/// HTTP: Claude schickt das Event-JSON per `POST`; die Session-ID kommt über den Header aus
+/// `CLAUDE_TUI_SESSION` (nur freigegebene Variablen werden eingesetzt).
+///
+/// Befehl: Exec-Form (`command` + `args`), Claude startet die Binary direkt ohne Shell. `async`,
+/// weil ein langsamer Start sonst jeden Prompt und jedes Werkzeug blockiert; dafür kann eine
+/// verspätete Meldung kurz eine neuere überschreiben, bis das nächste Event kommt.
+fn settings(target: &Target) -> Value {
     let hooks: serde_json::Map<String, Value> = EVENTS
         .iter()
+        // `SessionStart` ruft HTTP-Hooks nicht auf (getestet mit Claude Code 2.1.322: der
+        // Befehls-Hook lief, der HTTP-Hook nicht). Bis zur ersten Meldung entscheidet dann die
+        // Heuristik — ein Befehls-Hook als Ersatz brächte den langsamen Prozessstart zurück.
+        .filter(|&&event| !(matches!(target, Target::Http(_)) && event == "SessionStart"))
         .map(|event| {
-            let handler = json!({
-                "type": "command",
-                "command": exe,
-                "args": ["hook", event],
-                "async": true,
-                "timeout": HOOK_TIMEOUT,
-            });
+            let handler = match target {
+                Target::Http(url) => json!({
+                    "type": "http",
+                    "url": url,
+                    "headers": {
+                        hook_server::SESSION_HEADER: format!("${{{SESSION_ENV}}}"),
+                    },
+                    "allowedEnvVars": [SESSION_ENV],
+                    "timeout": HTTP_TIMEOUT,
+                }),
+                Target::Command(exe) => json!({
+                    "type": "command",
+                    "command": exe,
+                    "args": ["hook", event],
+                    "async": true,
+                    "timeout": HOOK_TIMEOUT,
+                }),
+            };
             (event.to_string(), json!([{ "hooks": [handler] }]))
         })
         .collect();
@@ -228,10 +276,15 @@ fn settings(exe: &str) -> Value {
 /// `--settings`.
 pub fn write_settings() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("own executable not found")?;
+    let exe = exe.to_string_lossy();
+    let target = match SERVER_URL.get().and_then(Option::as_deref) {
+        Some(url) => Target::Http(url),
+        None => Target::Command(&exe),
+    };
     let dir = paths::config_dir().context("no config directory (APPDATA/HOME) found")?;
     fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let file = dir.join(SETTINGS_FILE);
-    let text = serde_json::to_string_pretty(&settings(&exe.to_string_lossy()))?;
+    let text = serde_json::to_string_pretty(&settings(&target))?;
     fs::write(&file, text).with_context(|| format!("cannot write {}", file.display()))?;
     Ok(file)
 }
@@ -312,8 +365,25 @@ mod tests {
     }
 
     #[test]
+    fn http_settings_pass_session_header() {
+        let value = settings(&Target::Http("http://127.0.0.1:4711/hook/t"));
+        let stop = &value["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(stop["type"], "http");
+        assert_eq!(stop["url"], "http://127.0.0.1:4711/hook/t");
+        assert_eq!(
+            stop["headers"]["X-Claude-Tui-Session"],
+            "${CLAUDE_TUI_SESSION}"
+        );
+        assert_eq!(stop["allowedEnvVars"], json!(["CLAUDE_TUI_SESSION"]));
+        assert!(value["hooks"].get("SessionStart").is_none());
+        assert_eq!(value["hooks"].as_object().unwrap().len(), EVENTS.len() - 1);
+    }
+
+    #[test]
     fn settings_use_exec_form_for_every_event() {
-        let value = settings(r"C:\Program Files\claude-tui\claude-tui.exe");
+        let value = settings(&Target::Command(
+            r"C:\Program Files\claude-tui\claude-tui.exe",
+        ));
         let stop = &value["hooks"]["Stop"][0]["hooks"][0];
         assert_eq!(
             stop["command"],

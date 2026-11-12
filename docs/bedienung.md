@@ -34,12 +34,15 @@ kurz „loading sessions …“.
 
 **Zeitmessung:** Mit `CLAUDE_TUI_TRACE=1` schreibt claude-tui Zeitstempel nach `trace.log` im
 Konfigurationsordner: Start (Cache, Einlesen, Wiederherstellen, erstes Bild), je Session
-Prozessstart, erste Ausgabe und erste Hook-Meldung sowie jeden Hook-Aufruf (die Hooks erben die
-Variable). Damit lässt sich klären, ob Wartezeit in claude-tui, in Claude Code oder beim
-Virenscanner liegt — ein großer Abstand zwischen „process started“ und „first output“ ist Claude
-Code selbst, ein großer Abstand vor dem ersten `hook`-Eintrag meist der Virenscanner, der die
-unsignierte `claude-tui.exe` prüft. Dagegen hilft eine Ausnahme für deren Ordner
-(`%LOCALAPPDATA%\Programs\claude-tui`), soweit die eigene IT das zulässt.
+Prozessstart, erste Ausgabe und erste Hook-Meldung sowie jeden Hook-Aufruf. Damit lässt sich
+klären, ob Wartezeit in claude-tui oder in Claude Code liegt — ein großer Abstand zwischen „process
+started“ und „first output“ ist Claude Code selbst.
+
+**Virenscanner:** Die Hooks melden per HTTP an claude-tui, Claude startet dafür keine Prozesse.
+Prüft ein Virenscanner die unsignierte `claude-tui.exe` bei jedem Start, trifft das daher nur noch
+den Start von claude-tui selbst. Messen lässt sich das mit
+`Measure-Command { '{}' | claude-tui hook Test }` (normal unter 100 ms). Dauert es Sekunden, hilft
+eine Ausnahme für `%LOCALAPPDATA%\Programs\claude-tui`, soweit die eigene IT das zulässt.
 
 ## Installieren, aktualisieren, entfernen
 
@@ -275,7 +278,7 @@ passiert nur beim Wechsel, nicht dauerhaft. Hin kommt man mit `w` im Ctrl+A-Men�
 oder zu sehen ist, stellt das Terminal ein (Windows Terminal: `bellStyle`).
 
 Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede Session mit
-`--settings` und eigenen Hook-Einträgen, die `claude-tui hook <Event>` aufrufen (Prompt abgeschickt
+`--settings` und eigenen Hook-Einträgen, die per HTTP an claude-tui melden (Prompt abgeschickt
 oder Tool genutzt = working, Freigabedialog = waiting for you, Antwort fertig = ready). Liegt für
 eine Session (noch) keine Meldung vor — etwa bei einem eigenen Befehl ohne Hook-Unterstützung —,
 greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working, Rückfrage-Text auf dem
