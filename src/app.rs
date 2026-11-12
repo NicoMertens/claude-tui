@@ -16,7 +16,7 @@ use crate::{
     external, hooks, keys,
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
-    menu::{Action, Context, Menu, Outcome, Purpose},
+    menu::{self, Action, Context, Menu, Outcome, Purpose},
     recent,
     selection::{self, Cell, Selection},
     session::{Session, Status},
@@ -76,6 +76,8 @@ pub struct App {
     pub groups: Vec<Group>,
     /// Claude-ID der in der Liste ausgewählten Session.
     pub cursor: Option<String>,
+    /// In der Liste markierte Sessions (Leertaste); `x` löscht sie gemeinsam.
+    pub marked: HashSet<String>,
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
@@ -137,6 +139,7 @@ impl App {
             windows: Windows::default(),
             groups: Vec::new(),
             cursor: None,
+            marked: HashSet::new(),
             menu: None,
             dir_picker: None,
             notice: None,
@@ -355,6 +358,10 @@ impl App {
             .map(|e| e.claude_id.clone())
             .collect();
         self.groups = list::build(stored, &running, &elsewhere);
+        let listed: HashSet<&str> = list::flatten(&self.groups)
+            .map(|e| e.claude_id.as_str())
+            .collect();
+        self.marked.retain(|id| listed.contains(id.as_str()));
         if self.selected_entry().is_none() {
             let still: HashSet<&str> = list::flatten(&self.groups)
                 .map(|e| e.claude_id.as_str())
@@ -605,6 +612,14 @@ impl App {
         match key.code {
             KeyCode::Up => self.move_cursor(-1),
             KeyCode::Down => self.move_cursor(1),
+            // Markieren und weiter zur nächsten Session, damit sich Folgen schnell markieren lassen.
+            KeyCode::Char(' ') => {
+                if !self.marked.remove(&entry.claude_id) {
+                    self.marked.insert(entry.claude_id.clone());
+                }
+                self.move_cursor(1);
+            }
+            KeyCode::Esc => self.marked.clear(),
             KeyCode::Enter => match entry.running {
                 Some(id) => match self.windows.window_of(id) {
                     Some(slot) => self.set_focus(Focus::Window(slot)),
@@ -726,7 +741,8 @@ impl App {
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
                 Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
-                Some(Purpose::Delete(_) | Purpose::OpenElsewhere(..)) | None => {}
+                Some(Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..))
+                | None => {}
             },
             Action::CloseWindow => {
                 if let Some(slot) = self
@@ -737,6 +753,19 @@ impl App {
                     self.after_layout_change();
                 }
             }
+            Action::DeleteSession
+                if self.windows.focus() == Focus::List && !self.marked.is_empty() =>
+            {
+                // In Listenreihenfolge, damit die Abfrage stabil ist.
+                let ids: Vec<String> = list::flatten(&self.groups)
+                    .filter(|e| self.marked.contains(&e.claude_id))
+                    .map(|e| e.claude_id.clone())
+                    .collect();
+                let question = format!("Delete {}?", menu::sessions(ids.len()));
+                self.menu = Some(Menu::confirm_delete_many(question, ids));
+            }
+            Action::DeleteOlder => self.menu = Some(Menu::pick_age()),
+            Action::DeleteOlderThan(days) => self.ask_delete_older(days),
             Action::DeleteSession => {
                 let target = match self.windows.focused_session() {
                     Some(id) => self.session(id).map(|s| s.claude_id.clone()),
@@ -749,11 +778,11 @@ impl App {
                     self.menu = Some(Menu::confirm_delete(&title, claude_id));
                 }
             }
-            Action::ConfirmDelete => {
-                if let Some(Purpose::Delete(claude_id)) = purpose {
-                    self.delete_session(&claude_id)?;
-                }
-            }
+            Action::ConfirmDelete => match purpose {
+                Some(Purpose::Delete(claude_id)) => self.delete_session(&claude_id)?,
+                Some(Purpose::DeleteMany(ids)) => self.delete_sessions(&ids)?,
+                _ => {}
+            },
             Action::ConfirmOpen => {
                 if let Some(Purpose::OpenElsewhere(claude_id, slot)) = purpose {
                     self.open_confirmed(claude_id, slot)?;
@@ -817,6 +846,7 @@ impl App {
             stacked: self.stacked,
             zoomed: self.windows.zoomed().is_some(),
             waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
+            marked: self.marked.len(),
         }));
     }
 
@@ -842,6 +872,38 @@ impl App {
 
     /// Schließt Fenster und Prozess (falls laufend) und löscht das Protokoll endgültig.
     fn delete_session(&mut self, claude_id: &str) -> Result<()> {
+        let result = self.remove_stored(claude_id);
+        self.store.refresh();
+        self.rebuild_list();
+        result
+    }
+
+    /// Wie [`Self::delete_session`] für mehrere Sessions; Fehler halten die übrigen nicht auf.
+    fn delete_sessions(&mut self, claude_ids: &[String]) -> Result<()> {
+        let mut failed = Vec::new();
+        for claude_id in claude_ids {
+            if let Err(e) = self.remove_stored(claude_id) {
+                failed.push(e);
+            }
+            self.marked.remove(claude_id);
+        }
+        self.store.refresh();
+        self.rebuild_list();
+        let deleted = claude_ids.len() - failed.len();
+        match failed.into_iter().next() {
+            None => {
+                self.flash_notice(format!("deleted {}", menu::sessions(deleted)));
+                Ok(())
+            }
+            Some(first) => Err(first.context(format!(
+                "deleted {}, {} failed",
+                menu::sessions(deleted),
+                claude_ids.len() - deleted
+            ))),
+        }
+    }
+
+    fn remove_stored(&mut self, claude_id: &str) -> Result<()> {
         let running = self
             .sessions
             .iter()
@@ -851,10 +913,32 @@ impl App {
             self.remove_process(id);
         }
         let path = self.store.path_of(claude_id);
-        let result = path.map_or(Ok(()), |p| claude_store::delete(&p));
-        self.store.refresh();
-        self.rebuild_list();
-        result
+        path.map_or(Ok(()), |p| claude_store::delete(&p))
+    }
+
+    /// Fragt nach, ob alle gespeicherten Sessions gelöscht werden sollen, deren letzte Aktivität
+    /// mehr als `days` Tage zurückliegt — über alle Verzeichnisse. Laufende (in claude-tui oder
+    /// anderswo) bleiben immer stehen.
+    fn ask_delete_older(&mut self, days: u64) {
+        let cutoff = SystemTime::now() - Duration::from_secs(days * 24 * 60 * 60);
+        let (busy, ids): (Vec<&Entry>, Vec<&Entry>) = list::flatten(&self.groups)
+            .filter(|e| e.modified.is_some_and(|m| m < cutoff))
+            .partition(|e| e.running.is_some() || e.external);
+        let age = menu::age_label(days);
+        let skipped = match busy.len() {
+            0 => String::new(),
+            n => format!(" ({n} running skipped)"),
+        };
+        if ids.is_empty() {
+            self.notice = Some(format!("no stored sessions older than {age}{skipped}"));
+            return;
+        }
+        let question = format!(
+            "Delete {} older than {age}?{skipped}",
+            menu::sessions(ids.len())
+        );
+        let ids = ids.into_iter().map(|e| e.claude_id.clone()).collect();
+        self.menu = Some(Menu::confirm_delete_many(question, ids));
     }
 
     fn open_pick(&mut self, purpose: Purpose) {
@@ -864,7 +948,7 @@ impl App {
             Purpose::Resume(_) => self
                 .selected_entry()
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
-            Purpose::Delete(_) | Purpose::OpenElsewhere(..) => return,
+            Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..) => return,
         };
         self.menu = Some(Menu::pick_window(
             purpose,

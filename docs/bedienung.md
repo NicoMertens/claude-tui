@@ -129,7 +129,8 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | gewählte Session endgültig löschen | Session dieses Fensters endgültig löschen |
+| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen |
+| `o` | gespeicherte Sessions älter als 1 Tag / 1 Woche / 1 Monat löschen | wie in der Liste |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
@@ -160,6 +161,20 @@ Fenster, bekommt es den Fokus; sonst geht es weiter wie mit `Enter` in der Liste
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
 (`~/.claude/projects/<Ordner>/<id>.jsonl` samt gleichnamigem Unterordner) — die Session ist danach
 auch für `claude --resume` weg.
+
+**Mehrere Sessions löschen:**
+
+- **Markieren:** In der Sessionliste markiert bzw. entmarkiert `Leertaste` die gewählte Session (✓ vor
+  dem Titel) und springt zur nächsten; `Esc` hebt alle Markierungen auf. Der untere Rahmen zeigt
+  `· N marked`. Solange Sessions markiert sind, heißt `x` bei Fokus auf der Liste „Delete N
+  marked“ und löscht alle markierten — laufende samt Fenster und Prozess, wie beim Einzellöschen.
+- **Nach Alter:** `o` („Delete sessions older than …“) bietet `d` 1 Tag, `w` 1 Woche, `m` 1 Monat.
+  Maßgeblich ist die letzte Aktivität laut Protokoll (die Zeit in der Liste), über alle
+  Verzeichnisse. Sessions, die in claude-tui oder anderswo laufen, bleiben immer stehen; die
+  Rückfrage nennt, wie viele übersprungen werden.
+
+Beide fragen vorher nach („Delete N sessions …?“). Anders als beim Einzellöschen wählt `Enter` hier
+„No“ — bestätigt wird mit `y`.
 
 **Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui im Overlay, in
 welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.

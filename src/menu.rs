@@ -15,8 +15,13 @@ pub enum Action {
     CloseWindow,
     /// Fragt nach, ob die Session endgültig gelöscht werden soll.
     DeleteSession,
-    /// Bestätigung: Session löschen (Ziel steht in [Purpose::Delete]).
+    /// Bestätigung: Session(s) löschen (Ziel steht in [Purpose::Delete] bzw.
+    /// [Purpose::DeleteMany]).
     ConfirmDelete,
+    /// Auswahl, ab welchem Alter gespeicherte Sessions gelöscht werden.
+    DeleteOlder,
+    /// Gespeicherte Sessions löschen, deren letzte Aktivität so viele Tage zurückliegt.
+    DeleteOlderThan(u64),
     /// Bestätigung: anderswo laufende Session trotzdem öffnen (Ziel in [Purpose::OpenElsewhere]).
     ConfirmOpen,
     Cancel,
@@ -54,6 +59,8 @@ pub enum Purpose {
     Resume(String),
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
+    /// Mehrere Claude-Sessions (markiert oder nach Alter), deren Löschen bestätigt werden soll.
+    DeleteMany(Vec<String>),
     /// Claude-Session, die außerhalb von claude-tui läuft und trotzdem geöffnet werden soll; mit
     /// Zielfenster (`None` = danach Fensterauswahl).
     OpenElsewhere(String, Option<usize>),
@@ -94,6 +101,8 @@ pub struct Context<'a> {
     pub zoomed: bool,
     /// Mindestens eine Session wartet auf dich.
     pub waiting: bool,
+    /// Anzahl der in der Liste markierten Sessions.
+    pub marked: usize,
 }
 
 impl Menu {
@@ -112,9 +121,14 @@ impl Menu {
         if in_window || ctx.selected_has_window {
             add('c', "Close window", Action::CloseWindow);
         }
-        if in_window || ctx.has_selection {
+        // Markierte Sessions gelten nur mit Fokus auf der Liste; im Fenster meint x dessen Session.
+        if !in_window && ctx.marked > 0 {
+            let label = format!("Delete {} marked", ctx.marked);
+            add('x', &label, Action::DeleteSession);
+        } else if in_window || ctx.has_selection {
             add('x', "Delete session", Action::DeleteSession);
         }
+        add('o', "Delete sessions older than …", Action::DeleteOlder);
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
                 let label = format!("Focus window {}", i + 1);
@@ -208,6 +222,43 @@ impl Menu {
         }
     }
 
+    /// Auswahl der Altersgrenze für das Löschen alter Sessions.
+    pub fn pick_age() -> Self {
+        let items = AGES
+            .iter()
+            .map(|&(hotkey, days)| Item {
+                hotkey,
+                label: age_label(days).to_string(),
+                action: Action::DeleteOlderThan(days),
+            })
+            .collect();
+        Self {
+            title: "Delete sessions older than".to_string(),
+            items,
+            selected: 0,
+            purpose: None,
+        }
+    }
+
+    /// Sicherheitsabfrage vor dem Löschen mehrerer Sessions. Enter wählt „No“: ein versehentliches
+    /// Enter soll nicht gleich viele Sessions kosten.
+    pub fn confirm_delete_many(question: String, claude_ids: Vec<String>) -> Self {
+        let item = |c, label: &str, action| Item {
+            hotkey: c,
+            label: label.to_string(),
+            action,
+        };
+        Self {
+            title: question,
+            items: vec![
+                item('y', "Yes, delete permanently", Action::ConfirmDelete),
+                item('n', "No", Action::Cancel),
+            ],
+            selected: 1,
+            purpose: Some(Purpose::DeleteMany(claude_ids)),
+        }
+    }
+
     /// Rückfrage, bevor eine anderswo laufende Session ein zweites Mal gestartet wird. Enter wählt
     /// „No“: zwei Prozesse in einem Protokoll sollen nie aus Versehen entstehen.
     pub fn confirm_open(title: &str, claude_id: String, slot: Option<usize>) -> Self {
@@ -263,6 +314,28 @@ impl Menu {
     }
 }
 
+/// Wählbare Altersgrenzen: Taste und Tage.
+const AGES: [(char, u64); 3] = [('d', 1), ('w', 7), ('m', 30)];
+
+/// „1 day“, „1 week“, „1 month“ bzw. „N days“.
+pub fn age_label(days: u64) -> String {
+    match days {
+        1 => "1 day".to_string(),
+        7 => "1 week".to_string(),
+        30 => "1 month".to_string(),
+        n => format!("{n} days"),
+    }
+}
+
+/// „1 session“ bzw. „N sessions“.
+pub fn sessions(n: usize) -> String {
+    if n == 1 {
+        "1 session".to_string()
+    } else {
+        format!("{n} sessions")
+    }
+}
+
 fn digit(n: usize) -> char {
     char::from_digit(n as u32, 10).unwrap_or('?')
 }
@@ -293,6 +366,7 @@ mod tests {
             stacked: false,
             zoomed: false,
             waiting: false,
+            marked: 0,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -314,6 +388,7 @@ mod tests {
             stacked: false,
             zoomed: false,
             waiting: false,
+            marked: 0,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -331,6 +406,7 @@ mod tests {
             stacked: false,
             zoomed: false,
             waiting: false,
+            marked: 0,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
     }
@@ -347,6 +423,7 @@ mod tests {
             stacked: false,
             zoomed: false,
             waiting: false,
+            marked: 0,
         });
         menu.items
             .iter()
@@ -379,6 +456,7 @@ mod tests {
             stacked,
             zoomed: false,
             waiting: false,
+            marked: 0,
         });
         menu.items
             .iter()
@@ -409,6 +487,7 @@ mod tests {
             stacked: false,
             zoomed,
             waiting: false,
+            marked: 0,
         });
         menu.items
             .iter()
@@ -440,6 +519,7 @@ mod tests {
                 stacked: false,
                 zoomed: false,
                 waiting,
+                marked: 0,
             })
             .items
             .iter()
@@ -484,6 +564,60 @@ mod tests {
                 "Replace Window 3",
                 "Replace Window 4"
             ]
+        );
+    }
+
+    #[test]
+    fn marked_sessions_change_delete_in_list_only() {
+        let windows = names(1);
+        let ctx = |focus| Context {
+            focus,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed: false,
+            waiting: false,
+            marked: 3,
+        };
+        let label = |menu: Menu| {
+            menu.items
+                .into_iter()
+                .find(|i| i.hotkey == 'x')
+                .map(|i| i.label)
+        };
+        assert_eq!(
+            label(Menu::commands(&ctx(Focus::List))).as_deref(),
+            Some("Delete 3 marked")
+        );
+        assert_eq!(
+            label(Menu::commands(&ctx(Focus::Window(0)))).as_deref(),
+            Some("Delete session")
+        );
+    }
+
+    #[test]
+    fn age_picker_offers_day_week_month() {
+        let mut menu = Menu::pick_age();
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('w'))),
+            Outcome::Run(Action::DeleteOlderThan(7))
+        );
+        assert_eq!(age_label(30), "1 month");
+    }
+
+    #[test]
+    fn bulk_delete_defaults_to_no() {
+        let mut menu = Menu::confirm_delete_many("Delete 2 sessions?".into(), vec!["a".into()]);
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Enter)),
+            Outcome::Run(Action::Cancel)
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('y'))),
+            Outcome::Run(Action::ConfirmDelete)
         );
     }
 

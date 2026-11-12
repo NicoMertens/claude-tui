@@ -77,6 +77,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(keys::PREFIX_HINT, Style::default().fg(theme::ACCENT)),
         Span::styled(" Menu", Style::default().fg(theme::MUTED)),
     ];
+    if !app.marked.is_empty() {
+        hint.push(Span::styled(
+            format!(" · {} marked", app.marked.len()),
+            Style::default().fg(theme::MENU),
+        ));
+    }
     if let Some(update) = &app.update {
         hint.push(Span::styled(
             format!(" · v{} available (u)", update.version),
@@ -266,8 +272,11 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
             .map(|m| SystemTime::now().duration_since(m).unwrap_or_default()),
     };
     let time = since.map(short_age).unwrap_or_default();
-    // Symbol + Leerzeichen, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
-    let title_width = width.saturating_sub(2 + 4 + 6);
+    // Markierte Sessions (Leertaste) tragen ein Häkchen vor dem Titel.
+    let marked = app.marked.contains(&entry.claude_id);
+    let mark = if marked { "✓ " } else { "" };
+    // Symbol + Leerzeichen, Häkchen, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
+    let title_width = width.saturating_sub(2 + mark.len().min(2) + 4 + 6);
     let title = head(&entry.title, title_width);
     let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
 
@@ -281,6 +290,7 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     };
     let line = Line::from(vec![
         Span::styled(format!("{symbol} "), Style::default().fg(color)),
+        Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(format!("{title}{padding}"), name_style),
         Span::styled(
             window,
