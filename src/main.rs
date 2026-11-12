@@ -15,6 +15,7 @@ mod recent;
 mod selection;
 mod session;
 mod state;
+mod tags;
 mod term_view;
 mod theme;
 mod trace;

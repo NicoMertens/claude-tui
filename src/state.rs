@@ -1,12 +1,13 @@
 //! Fensterlayout über einen Neustart hinweg: welche Claude-Session in welchem Fenster lag und wo
-//! der Fokus war. Gespeichert als `state.json` im Konfigurationsordner.
+//! der Fokus war, dazu die Schnellwahl-Nummern. Gespeichert als `state.json` im
+//! Konfigurationsordner.
 
 use std::fs;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::paths;
+use crate::{paths, tags::Tags};
 
 const FILE_NAME: &str = "state.json";
 
@@ -22,6 +23,9 @@ pub struct State {
     /// Zwei Fenster übereinander statt nebeneinander.
     #[serde(default)]
     pub stacked: bool,
+    /// Schnellwahl-Nummer → Claude-Session-ID (Alt+Zahl / Ctrl+Zahl).
+    #[serde(default)]
+    pub tags: Tags,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -50,8 +54,16 @@ mod tests {
             focus: Some(1),
             list_hidden: true,
             stacked: true,
+            tags: Tags::from([(3, "b".to_string())]),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);
+    }
+
+    #[test]
+    fn older_file_without_tags_still_loads() {
+        let state: State = serde_json::from_str(r#"{"windows":["a"],"focus":0}"#).expect("json");
+        assert!(state.tags.is_empty());
+        assert_eq!(state.windows, ["a"]);
     }
 }

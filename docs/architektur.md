@@ -34,14 +34,15 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session; Lesestand als `sessions-cache.json`, beim Start im Hintergrund nachgelesen |
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik) |
-| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander) als `state.json` für den Neustart |
+| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander, Schnellwahl-Nummern) als `state.json` für den Neustart |
+| `tags.rs` | Schnellwahl-Nummern 1–9 → Claude-ID: vergeben, umhängen, entfernen (`Alt+Zahl` / `Ctrl+Zahl`) |
 | `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
 | `trace.rs` | Zeitmessung bei `CLAUDE_TUI_TRACE=1`: Zeilen mit Unix-ms und PID nach `trace.log` (App und Hook-Prozesse) |
 | `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen (HTTP-Hooks, sonst Befehls-Hooks), Event → Zustand → Statusdatei, Statusdateien lesen und aufräumen |
 | `hook_server.rs` | HTTP-Server auf `127.0.0.1` für die Hook-Meldungen (eine Anfrage je Event, Token im Pfad) |
 | `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), nächste wartende Session reihum für Menüpunkt `w`, `CLAUDE_TUI_NO_BELL` |
-| `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel |
+| `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel, `Alt`/`Ctrl+Zahl` als Schnellwahl |
 | `ui.rs` | Zeichnen: Sessionliste (Menühinweis im unteren Rahmen; ausblendbar, dann Fenster in voller Breite), Fenster mit Nummer, Zustand und Fokusrahmen, Menü als blaues Overlay mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `selection.rs` | Mausmarkierung im Fenster, Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |
 | `install.rs` | `install` / `uninstall`: Binary an festen Ort, Benutzer-PATH (Windows über PowerShell/Registry) |

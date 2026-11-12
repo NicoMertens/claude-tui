@@ -73,7 +73,8 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),
 gruppiert nach Arbeitsverzeichnis — Gruppen mit der jüngsten Aktivität oben, darin laufende Sessions
-zuerst. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
+zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
+[Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
@@ -102,7 +103,8 @@ oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie das Menü), alle 
 grauen.
 
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
-you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
+you** (gelb), **ready** (grau) — z. B. `[1] #3 claude-tui-rust · ✻ working` (`#3` nur mit
+Schnellwahl-Nummer) — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
 
 ## Tasten
 
@@ -112,8 +114,34 @@ you** (gelb), **ready** (grau) — z. B. `1 · claude-tui-rust · ✻ working` �
 |---|---|
 | `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
+| `Alt+1`–`Alt+9` | Schnellwahl-Nummer für die Session mit Fokus vergeben bzw. mit derselben Zahl wieder entfernen |
+| `Ctrl+1`–`Ctrl+9` | Session mit dieser Schnellwahl-Nummer zeigen |
 
-`Ctrl+Pfeil` erreicht Claude dadurch nie; Wortsprünge im Eingabefeld gehen über `Alt+←/→`.
+`Ctrl+Pfeil`, `Alt+Zahl` und `Ctrl+Zahl` erreichen Claude dadurch nie; Wortsprünge im Eingabefeld
+gehen über `Alt+←/→`.
+
+### Schnellwahl (`Alt+Zahl` / `Ctrl+Zahl`)
+
+`Alt+Zahl` gibt der Session mit Fokus — der im Fenster mit Fokus bzw. der in der Liste gewählten —
+eine Nummer von 1 bis 9. Sie steht als `#3` vor dem Titel in der Sessionliste und in der
+Fensterleiste. Jede Nummer gehört höchstens einer Session: Vergibt man sie neu, verliert die
+bisherige Session sie. Eine Session hat höchstens eine Nummer; eine andere Zahl ersetzt sie.
+Dieselbe Zahl noch einmal entfernt die Nummer.
+
+`Ctrl+Zahl` zeigt die Session mit dieser Nummer:
+
+- Hat sie schon ein Fenster, bekommt es den Fokus.
+- Sonst, bei Fokus auf einem Fenster: Sie ersetzt dort die bisherige Session, die im Hintergrund
+  weiterläuft.
+- Sonst, bei Fokus auf der Sessionliste: wie `Enter` (Fensterauswahl bzw. Fenster 1).
+
+Eine gespeicherte Session wird dabei mit `--resume` fortgesetzt; läuft sie anderswo, kommt dieselbe
+Rückfrage wie in der Liste. Die Nummern bleiben über einen Neustart erhalten (`state.json`).
+Gelöschte Sessions verlieren ihre Nummer.
+
+Nur reines `Alt` bzw. `Ctrl` zählt: `Ctrl+Alt` ist unter Windows AltGr (`²`, `³`, `{`, `[` …) und
+geht weiter an die Session. Ob `Ctrl+Zahl` ankommt, hängt vom Terminal ab; unter Linux/macOS kommt
+es in vielen Terminals nicht an.
 
 ### Fokus auf einem Fenster
 
