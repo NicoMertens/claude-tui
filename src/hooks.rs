@@ -176,15 +176,8 @@ fn parse_report(text: &str) -> Option<Report> {
 fn write_report(dir: &Path, key: &str, status: Status, at: SystemTime) -> Result<()> {
     anyhow::ensure!(valid_key(key), "invalid session key");
     let text = format_report(status, at).context("no hook state for exited")?;
-    fs::create_dir_all(dir)?;
-    // Erst eine eigene Datei schreiben, dann umbenennen: die App liest nie eine halbe Zeile.
-    let tmp = dir.join(format!("{key}.{}.tmp", std::process::id()));
-    fs::write(&tmp, text)?;
-    let result = fs::rename(&tmp, dir.join(key));
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    Ok(result?)
+    // Atomar: die App liest nie eine halbe Zeile.
+    Ok(paths::write_atomic(&dir.join(key), text)?)
 }
 
 fn read_in(dir: &Path, key: &str) -> Option<Report> {
@@ -325,7 +318,7 @@ pub fn write_settings() -> Result<PathBuf> {
 /// Schreibt `file`, wenn es in diesem Lauf (`written`) noch nicht geschah oder die Datei fehlt.
 /// Der erste Aufruf schreibt immer: eine liegengebliebene Datei eines abgestürzten Laufs mit
 /// derselben (wiederverwendeten) PID enthielte Port und Token eines toten Servers. Geschrieben wird
-/// per Umbenennen, damit ein gerade startendes Claude nie eine halb geschriebene Datei liest.
+/// atomar, damit ein gerade startendes Claude nie eine halb geschriebene Datei liest.
 fn ensure_settings(
     file: &Path,
     written: &AtomicBool,
@@ -334,12 +327,8 @@ fn ensure_settings(
     if written.load(Ordering::Acquire) && file.is_file() {
         return Ok(());
     }
-    if let Some(dir) = file.parent() {
-        fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    }
-    let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, text()?).with_context(|| format!("cannot write {}", tmp.display()))?;
-    fs::rename(&tmp, file).with_context(|| format!("cannot write {}", file.display()))?;
+    paths::write_atomic(file, text()?)
+        .with_context(|| format!("cannot write {}", file.display()))?;
     written.store(true, Ordering::Release);
     Ok(())
 }
@@ -356,7 +345,7 @@ pub fn remove_settings() {
 fn is_stale_settings(name: &str) -> bool {
     name == LEGACY_SETTINGS_FILE
         || (name.starts_with(SETTINGS_PREFIX)
-            && (name.ends_with(SETTINGS_SUFFIX) || name.ends_with(".json.tmp")))
+            && (name.ends_with(SETTINGS_SUFFIX) || name.ends_with(".tmp")))
 }
 
 #[cfg(test)]
@@ -435,7 +424,7 @@ mod tests {
         assert!(is_stale_settings(name));
         assert!(is_stale_settings("hooks.json"));
         assert!(!is_stale_settings("state.json"));
-        assert!(is_stale_settings("hooks-1.json.tmp"));
+        assert!(is_stale_settings("hooks-1.json.4711.0.tmp"));
         assert!(!is_stale_settings("hooks-notes.txt"));
     }
 

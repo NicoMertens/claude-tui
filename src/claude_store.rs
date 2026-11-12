@@ -130,9 +130,7 @@ impl Store {
         let Ok(bytes) = serde_json::to_vec(&cache) else {
             return;
         };
-        // Erst temporär schreiben, dann umbenennen: ein Abbruch hinterlässt keinen halben Cache.
-        let tmp = file.with_extension("json.tmp");
-        if fs::write(&tmp, bytes).is_ok() && fs::rename(&tmp, &file).is_ok() {
+        if paths::write_atomic(&file, bytes).is_ok() {
             self.dirty = false;
         }
     }
@@ -276,9 +274,7 @@ struct CacheRef<'a> {
 }
 
 fn cache_file() -> Option<PathBuf> {
-    let dir = paths::config_dir()?;
-    fs::create_dir_all(&dir).ok()?;
-    Some(dir.join(CACHE_FILE))
+    paths::config_dir().map(|dir| dir.join(CACHE_FILE))
 }
 
 fn read_from(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {

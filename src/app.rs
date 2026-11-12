@@ -151,6 +151,7 @@ impl App {
         trace::mark("app: cache loaded");
         let store_load = spawn_store_load();
         hooks::start_server();
+        crate::paths::restrict_config_dir();
         hooks::purge_stale();
         let mut app = Self {
             sessions: Vec::new(),

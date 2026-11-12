@@ -7,7 +7,7 @@
 //! kostet ein Aufruf nur eine Abfrage eines `OnceLock`.
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::Write,
     sync::{Mutex, OnceLock},
     time::{Instant, SystemTime},
@@ -35,7 +35,7 @@ fn open() -> Option<Trace> {
         return None;
     }
     let dir = paths::config_dir()?;
-    fs::create_dir_all(&dir).ok()?;
+    paths::create_private_dir(&dir).ok()?;
     let file = OpenOptions::new()
         .create(true)
         .append(true)
