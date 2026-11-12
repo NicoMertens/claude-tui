@@ -1,6 +1,10 @@
 //! Sessionliste: gespeicherte Claude-Sessions und laufende Prozesse, gruppiert nach Verzeichnis.
 
-use std::{collections::HashSet, path::PathBuf, time::SystemTime};
+use std::{
+    collections::{hash_map::Entry as MapEntry, HashMap, HashSet},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use crate::{claude_store::StoredSession, windows::SessionId};
 
@@ -73,14 +77,20 @@ pub fn build(
         }
     }
 
+    // Schlüssel je Verzeichnis einmal berechnen: die Liste wird oft neu gebaut, und unter Windows
+    // kostete jeder Vergleich zwei kleingeschriebene Kopien.
     let mut groups: Vec<Group> = Vec::new();
+    let mut index: HashMap<PathBuf, usize> = HashMap::new();
     for (cwd, entry) in entries {
-        match groups.iter_mut().find(|g| same_dir(&g.cwd, &cwd)) {
-            Some(group) => group.entries.push(entry),
-            None => groups.push(Group {
-                cwd,
-                entries: vec![entry],
-            }),
+        match index.entry(dir_key(&cwd)) {
+            MapEntry::Occupied(slot) => groups[*slot.get()].entries.push(entry),
+            MapEntry::Vacant(slot) => {
+                slot.insert(groups.len());
+                groups.push(Group {
+                    cwd,
+                    entries: vec![entry],
+                });
+            }
         }
     }
     for group in &mut groups {
@@ -95,11 +105,12 @@ fn rank(entry: &Entry) -> (bool, Option<SystemTime>) {
     (entry.running.is_some(), entry.modified)
 }
 
-fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
+/// Vergleichsschlüssel eines Verzeichnisses; unter Windows ohne Groß-/Kleinschreibung.
+fn dir_key(path: &Path) -> PathBuf {
     if cfg!(windows) {
-        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+        PathBuf::from(path.to_string_lossy().to_lowercase())
     } else {
-        a == b
+        path.to_path_buf()
     }
 }
 

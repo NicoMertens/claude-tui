@@ -7,7 +7,8 @@
 
 use std::{
     fs,
-    path::PathBuf,
+    io::Write,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, SystemTime},
@@ -42,11 +43,6 @@ const TARGET: Option<&str> = if cfg!(all(windows, target_arch = "x86_64")) {
     None
 };
 const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
-const EXE_NAME: &str = if cfg!(windows) {
-    "claude-tui.exe"
-} else {
-    "claude-tui"
-};
 
 #[derive(Deserialize)]
 struct Release {
@@ -107,12 +103,40 @@ fn check_against(current: &str) -> Result<Option<Available>> {
 /// Lädt, prüft und installiert die neue Version; gilt ab dem nächsten Start.
 pub fn install(update: &Available) -> Result<()> {
     let binary = fetch_binary(update)?;
-    let staged = std::env::temp_dir().join(format!("claude-tui-{}-{EXE_NAME}", update.version));
-    fs::write(&staged, &binary).with_context(|| format!("cannot write {}", staged.display()))?;
-    make_executable(&staged)?;
-    let replaced = self_replace::self_replace(&staged).context("cannot replace claude-tui");
+    let exe = std::env::current_exe().context("cannot locate the running claude-tui")?;
+    let dir = exe
+        .parent()
+        .context("cannot locate the folder of claude-tui")?;
+    let staged = dir.join(format!(
+        ".claude-tui-update-{}{EXE_SUFFIX}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let replaced = stage(&staged, &binary)
+        .and_then(|()| self_replace::self_replace(&staged).context("cannot replace claude-tui"));
     let _ = fs::remove_file(&staged);
     replaced
+}
+
+/// Legt die geprüfte Binary zum Ersetzen ab — neben der laufenden statt im gemeinsamen
+/// Temp-Ordner, unter zufälligem Namen und nur als neue Datei. Unter Linux ist `/tmp` für alle
+/// Benutzer beschreibbar: ein vorhersagbarer Name ließe sich vorab als Symlink oder als fremde,
+/// noch beschreibbare Datei anlegen und zwischen Prüfung und Ersetzen austauschen. Der Ordner der
+/// Binary muss ohnehin beschreibbar sein, `self_replace` legt dort ebenfalls Dateien an.
+fn stage(path: &Path, binary: &[u8]) -> Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o700);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("cannot create {}", path.display()))?;
+    file.write_all(binary)
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    make_executable(path)
 }
 
 /// Binary und `sha256.sum` laden, Prüfsumme vergleichen.
@@ -207,14 +231,11 @@ fn remember_check() {
     let Some(file) = check_file() else {
         return;
     };
-    if let Some(dir) = file.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
     let state = CheckState {
         checked_at: now_secs(),
     };
     if let Ok(text) = serde_json::to_string(&state) {
-        let _ = fs::write(file, text);
+        let _ = paths::write_atomic(&file, text);
     }
 }
 
@@ -244,14 +265,14 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(unix)]
-fn make_executable(path: &std::path::Path) -> Result<()> {
+fn make_executable(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn make_executable(_path: &std::path::Path) -> Result<()> {
+fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 

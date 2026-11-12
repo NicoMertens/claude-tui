@@ -218,17 +218,21 @@ impl Session {
             self.status = Status::Exited;
             return;
         }
-        if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
+        // Meldungen an den eigenen Hook-Server liegen im Speicher und gelten sofort; die Datei der
+        // Befehls-Hooks (Rückfall) wird nur alle `HOOK_POLL` gelesen.
+        if let Some(report) = hooks::received(&self.claude_id) {
+            self.hook = Some(report);
+        } else if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
             self.hook = hooks::read(&self.claude_id);
             self.hook_checked = Some(Instant::now());
-            if self.hook.is_some() && !self.hook_traced {
-                self.hook_traced = true;
-                trace::mark(format_args!(
-                    "session {}: first hook report after {}",
-                    self.claude_id,
-                    since(self.started)
-                ));
-            }
+        }
+        if self.hook.is_some() && !self.hook_traced {
+            self.hook_traced = true;
+            trace::mark(format_args!(
+                "session {}: first hook report after {}",
+                self.claude_id,
+                since(self.started)
+            ));
         }
         if self.first_content.is_none() {
             if self.screen().screen().contents().trim().is_empty() {
@@ -305,6 +309,7 @@ impl Session {
     }
 
     pub fn paste(&mut self, text: &str) -> Result<()> {
+        let text = strip_escapes(text);
         if self.screen().screen().bracketed_paste() {
             let wrapped = format!("\x1b[200~{text}\x1b[201~");
             self.write(wrapped.as_bytes())
@@ -386,6 +391,27 @@ fn last_line(screen: &str) -> Option<String> {
 fn waits_for_decision(screen: &str) -> bool {
     const MARKERS: [&str; 3] = ["Do you want to", "❯ 1. Yes", "Would you like to"];
     MARKERS.iter().any(|m| screen.contains(m))
+}
+
+/// Entfernt Escape-Zeichen (ESC und das 8-Bit-CSI) aus eingefügtem Text. Sonst könnte Text aus der
+/// Zwischenablage mit `ESC[201~` den Bracketed-Paste-Rahmen vorzeitig schließen, und der Rest käme
+/// bei Claude als getippte Eingabe an — samt Enter. Terminals wie xterm filtern genauso.
+fn strip_escapes(text: &str) -> String {
+    text.chars()
+        .filter(|&c| c != '\x1b' && c != '\u{9b}')
+        .collect()
+}
+
+/// Claude-Session-IDs sind UUIDs in der Bindestrich-Form.
+pub fn valid_claude_id(id: &str) -> bool {
+    id.len() == 36 && uuid::Uuid::try_parse(id).is_ok()
+}
+
+/// Job-IDs von Hintergrund-Sessions: Buchstaben, Ziffern und `-`, vorn kein `-` (keine Option).
+pub fn valid_job_id(id: &str) -> bool {
+    id.len() <= 64
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn shell_command(command: &str, extra_args: &[String]) -> CommandBuilder {
@@ -522,6 +548,28 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn pasted_text_cannot_close_bracketed_paste() {
+        assert_eq!(
+            strip_escapes("harmlos\x1b[201~rm -rf ~\r\u{9b}201~"),
+            "harmlos[201~rm -rf ~\r201~"
+        );
+        assert_eq!(strip_escapes("äöü\ttab\n"), "äöü\ttab\n");
+    }
+
+    #[test]
+    fn only_well_formed_ids_are_accepted() {
+        assert!(valid_claude_id("0b6f3c1e-1d2a-4c5b-9e8f-1234567890ab"));
+        assert!(!valid_claude_id("0b6f3c1e1d2a4c5b9e8f1234567890ab"));
+        assert!(!valid_claude_id("$(touch pwned)"));
+        assert!(!valid_claude_id("x&calc"));
+        assert!(!valid_claude_id("--dangerously-skip-permissions"));
+        assert!(valid_job_id("befc32e4"));
+        assert!(!valid_job_id("--help"));
+        assert!(!valid_job_id("a;b"));
+        assert!(!valid_job_id(""));
     }
 
     #[test]

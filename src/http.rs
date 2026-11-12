@@ -8,7 +8,9 @@
 //!    Security-Framework). Unter Linux gibt es keinen Rückfall — der würde die Binary an OpenSSL
 //!    binden, und `curl` ist dort praktisch immer installiert.
 //!
-//! Die Echtheit der Dateien sichert ohnehin die SHA-256-Prüfung im Updater.
+//! Beide Wege nur über HTTPS, auch bei Weiterleitungen. Die SHA-256-Prüfung im Updater stellt
+//! sicher, dass die Binary unversehrt angekommen ist — nicht, von wem sie stammt: `sha256.sum` liegt
+//! im selben Release, wer Releases veröffentlichen kann, liefert beides.
 
 use std::{io::ErrorKind, path::PathBuf, process::Command};
 
@@ -89,6 +91,7 @@ fn fallback(url: &str, kind: Kind) -> Result<Vec<u8>> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .tls_config(tls)
         .timeout_global(Some(Duration::from_secs(TIMEOUT_SECS)))
+        .https_only(true)
         .user_agent(USER_AGENT)
         .build()
         .into();

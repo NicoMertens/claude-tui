@@ -1,14 +1,19 @@
 //! Zustandsmeldung über Claude-Code-Hooks: claude-tui gibt jedem gestarteten Claude-Prozess per
 //! `--settings` Hooks mit. Normalerweise HTTP-Hooks an den eigenen Server (`hook_server.rs`), sonst
-//! als Rückfall Befehls-Hooks, die `claude-tui hook <Event>` aufrufen. Beide schreiben den Zustand
-//! in `status/<Claude-ID>` im Konfigurationsordner; die App liest ihn dort. Die
+//! als Rückfall Befehls-Hooks, die `claude-tui hook <Event>` aufrufen. Der Server legt den Zustand
+//! im Speicher ab ([`receive`]); die Befehls-Hooks laufen als eigene Prozesse und schreiben ihn nach
+//! `status/<Claude-ID>` im Konfigurationsordner, wo die App ihn liest. Die
 //! `~/.claude/settings.json` des Nutzers bleibt unberührt.
 
 use std::{
+    collections::BTreeMap,
     fs,
     io::Read,
-    path::PathBuf,
-    sync::OnceLock,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, MutexGuard, OnceLock, PoisonError,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -29,7 +34,10 @@ pub fn start_server() {
 /// nach `/clear` gleich, wenn Claude intern eine neue `session_id` vergibt.
 pub const SESSION_ENV: &str = "CLAUDE_TUI_SESSION";
 const STATUS_DIR: &str = "status";
-const SETTINGS_FILE: &str = "hooks.json";
+const SETTINGS_PREFIX: &str = "hooks-";
+const SETTINGS_SUFFIX: &str = ".json";
+/// Gemeinsame Datei bis v0.7; wird nur noch aufgeräumt.
+const LEGACY_SETTINGS_FILE: &str = "hooks.json";
 /// Obergrenze je Befehls-Hook in Sekunden. Der Aufruf selbst dauert Millisekunden, aber ein
 /// Virenscanner kann den Start der unsignierten Binary um 10 s und mehr verzögern.
 const HOOK_TIMEOUT: u64 = 30;
@@ -114,8 +122,8 @@ pub fn run_cli(event: Option<&str>) {
     apply(event, &input, &key);
 }
 
-/// Wirkung eines Hook-Events auf die Statusdatei der Session `key`.
-pub fn apply(event: &str, input: &Value, key: &str) {
+/// Wirkung eines Hook-Events auf die Statusdatei der Session `key` (Befehls-Hooks).
+fn apply(event: &str, input: &Value, key: &str) {
     let Some(dir) = status_dir() else {
         return;
     };
@@ -167,55 +175,100 @@ fn parse_report(text: &str) -> Option<Report> {
     Some(Report { status, at })
 }
 
-fn write_report(dir: &std::path::Path, key: &str, status: Status, at: SystemTime) -> Result<()> {
+fn write_report(dir: &Path, key: &str, status: Status, at: SystemTime) -> Result<()> {
     anyhow::ensure!(valid_key(key), "invalid session key");
     let text = format_report(status, at).context("no hook state for exited")?;
-    fs::create_dir_all(dir)?;
-    // Erst eine eigene Datei schreiben, dann umbenennen: die App liest nie eine halbe Zeile.
-    let tmp = dir.join(format!("{key}.{}.tmp", std::process::id()));
-    fs::write(&tmp, text)?;
-    let result = fs::rename(&tmp, dir.join(key));
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    Ok(result?)
+    // Atomar: die App liest nie eine halbe Zeile.
+    Ok(paths::write_atomic(&dir.join(key), text)?)
 }
 
-fn read_in(dir: &std::path::Path, key: &str) -> Option<Report> {
+fn read_in(dir: &Path, key: &str) -> Option<Report> {
     if !valid_key(key) {
         return None;
     }
     parse_report(&fs::read_to_string(dir.join(key)).ok()?)
 }
 
-fn remove_in(dir: &std::path::Path, key: &str) {
+fn remove_in(dir: &Path, key: &str) {
     if valid_key(key) {
         let _ = fs::remove_file(dir.join(key));
     }
 }
 
-/// Letzte Hook-Meldung einer Session; `None`, solange keine vorliegt.
+/// Meldungen, die der Hook-Server dieses Prozesses empfangen hat. Server und App laufen im selben
+/// Prozess — der Umweg über Statusdateien (schreiben, alle 250 ms je Session lesen) entfällt.
+static RECEIVED: Mutex<BTreeMap<String, Report>> = Mutex::new(BTreeMap::new());
+
+fn received_map() -> MutexGuard<'static, BTreeMap<String, Report>> {
+    RECEIVED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Wirkung eines Hook-Events, das der eigene Hook-Server empfangen hat.
+pub fn receive(event: &str, input: &Value, key: &str) {
+    if !valid_key(key) {
+        return;
+    }
+    let mut reports = received_map();
+    match effect(event, input) {
+        Effect::Set(status) => {
+            reports.insert(
+                key.to_string(),
+                Report {
+                    status,
+                    at: SystemTime::now(),
+                },
+            );
+        }
+        Effect::Remove => {
+            reports.remove(key);
+        }
+        Effect::Keep => {}
+    }
+}
+
+/// Letzte Meldung einer Session an den eigenen Hook-Server (billig, ohne Dateizugriff).
+pub fn received(claude_id: &str) -> Option<Report> {
+    received_map().get(claude_id).copied()
+}
+
+/// Letzte Hook-Meldung einer Session aus ihrer Statusdatei (Befehls-Hooks); `None`, solange keine
+/// vorliegt.
 pub fn read(claude_id: &str) -> Option<Report> {
     read_in(&status_dir()?, claude_id)
 }
 
-/// Statusdatei einer Session entfernen (vor dem Start, nach dem Ende).
+/// Meldungen einer Session verwerfen (vor dem Start, nach dem Ende).
 pub fn clear(claude_id: &str) {
+    received_map().remove(claude_id);
     if let Some(dir) = status_dir() {
         remove_in(&dir, claude_id);
     }
 }
 
-/// Entfernt Statusdateien abgebrochener Läufe (lange nicht geändert).
+/// Entfernt Statusdateien und Hook-Einstellungen abgebrochener Läufe (lange nicht geändert).
+/// Trifft es die Einstellungen eines noch laufenden claude-tui, schreibt der sie beim nächsten
+/// Session-Start neu.
 pub fn purge_stale() {
-    let Some(entries) = status_dir().and_then(|d| fs::read_dir(d).ok()) else {
+    let Some(config) = paths::config_dir() else {
+        return;
+    };
+    purge_old_in(&config.join(STATUS_DIR), |_| true);
+    purge_old_in(&config, is_stale_settings);
+}
+
+fn purge_old_in(dir: &Path, wanted: impl Fn(&str) -> bool) {
+    let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
+        if !entry.file_name().to_str().is_some_and(&wanted) {
+            continue;
+        }
         let old = entry
             .metadata()
-            .and_then(|m| m.modified())
             .ok()
+            .filter(fs::Metadata::is_file)
+            .and_then(|m| m.modified().ok())
             .and_then(|m| m.elapsed().ok())
             .is_some_and(|age| age > STALE_AFTER);
         if old {
@@ -272,21 +325,67 @@ fn settings(target: &Target) -> Value {
     json!({ "hooks": hooks })
 }
 
-/// Schreibt die Hook-Einstellungen in den Konfigurationsordner und liefert den Pfad für
-/// `--settings`.
+/// `hooks-<PID>.json`: je laufender claude-tui eine eigene Datei — sie enthält die URL des eigenen
+/// Hook-Servers, die eine zweite Instanz sonst überschriebe.
+fn settings_file(dir: &Path) -> PathBuf {
+    dir.join(format!(
+        "{SETTINGS_PREFIX}{}{SETTINGS_SUFFIX}",
+        std::process::id()
+    ))
+}
+
+/// In diesem Lauf schon geschrieben.
+static SETTINGS_WRITTEN: AtomicBool = AtomicBool::new(false);
+
+/// Liefert den Pfad der Hook-Einstellungen für `--settings`. Der Inhalt ändert sich während eines
+/// Laufs nicht: geschrieben wird beim ersten Aufruf und danach nur, wenn die Datei fehlt
+/// (`purge_stale` einer anderen Instanz).
 pub fn write_settings() -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("own executable not found")?;
-    let exe = exe.to_string_lossy();
-    let target = match SERVER_URL.get().and_then(Option::as_deref) {
-        Some(url) => Target::Http(url),
-        None => Target::Command(&exe),
-    };
     let dir = paths::config_dir().context("no config directory (APPDATA/HOME) found")?;
-    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    let file = dir.join(SETTINGS_FILE);
-    let text = serde_json::to_string_pretty(&settings(&target))?;
-    fs::write(&file, text).with_context(|| format!("cannot write {}", file.display()))?;
+    let file = settings_file(&dir);
+    ensure_settings(&file, &SETTINGS_WRITTEN, || {
+        let exe = std::env::current_exe().context("own executable not found")?;
+        let exe = exe.to_string_lossy();
+        let target = match SERVER_URL.get().and_then(Option::as_deref) {
+            Some(url) => Target::Http(url),
+            None => Target::Command(&exe),
+        };
+        Ok(serde_json::to_string_pretty(&settings(&target))?)
+    })?;
     Ok(file)
+}
+
+/// Schreibt `file`, wenn es in diesem Lauf (`written`) noch nicht geschah oder die Datei fehlt.
+/// Der erste Aufruf schreibt immer: eine liegengebliebene Datei eines abgestürzten Laufs mit
+/// derselben (wiederverwendeten) PID enthielte Port und Token eines toten Servers. Geschrieben wird
+/// atomar, damit ein gerade startendes Claude nie eine halb geschriebene Datei liest.
+fn ensure_settings(
+    file: &Path,
+    written: &AtomicBool,
+    text: impl FnOnce() -> Result<String>,
+) -> Result<()> {
+    if written.load(Ordering::Acquire) && file.is_file() {
+        return Ok(());
+    }
+    paths::write_atomic(file, text()?)
+        .with_context(|| format!("cannot write {}", file.display()))?;
+    written.store(true, Ordering::Release);
+    Ok(())
+}
+
+/// Entfernt die Hook-Einstellungen dieses Laufs (beim Beenden).
+pub fn remove_settings() {
+    if let Some(dir) = paths::config_dir() {
+        let _ = fs::remove_file(settings_file(&dir));
+    }
+}
+
+/// Hook-Einstellungen abgebrochener Läufe (lange nicht geändert) und die gemeinsame `hooks.json`
+/// älterer Versionen.
+fn is_stale_settings(name: &str) -> bool {
+    name == LEGACY_SETTINGS_FILE
+        || (name.starts_with(SETTINGS_PREFIX)
+            && (name.ends_with(SETTINGS_SUFFIX) || name.ends_with(".tmp")))
 }
 
 #[cfg(test)]
@@ -355,6 +454,55 @@ mod tests {
         assert!(!valid_key(""));
         let dir = std::env::temp_dir();
         assert!(write_report(&dir, "..\\x", Status::Idle, SystemTime::now()).is_err());
+    }
+
+    #[test]
+    fn settings_files_are_per_process_and_purgeable() {
+        let file = settings_file(Path::new("cfg"));
+        let name = file.file_name().and_then(|n| n.to_str()).expect("Name");
+        assert_eq!(name, format!("hooks-{}.json", std::process::id()));
+        assert!(is_stale_settings(name));
+        assert!(is_stale_settings("hooks.json"));
+        assert!(!is_stale_settings("state.json"));
+        assert!(is_stale_settings("hooks-1.json.4711.0.tmp"));
+        assert!(!is_stale_settings("hooks-notes.txt"));
+    }
+
+    #[test]
+    fn leftover_settings_are_replaced_once_then_kept() {
+        let dir = std::env::temp_dir().join(format!("claude-tui-settings-{}", std::process::id()));
+        let file = dir.join("hooks-1.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&file, "alter Lauf").unwrap();
+        let written = AtomicBool::new(false);
+        ensure_settings(&file, &written, || Ok("neu".into())).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "neu", "Rest ersetzt");
+        ensure_settings(&file, &written, || Ok("nochmal".into())).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "neu",
+            "nicht neu geschrieben"
+        );
+        fs::remove_file(&file).unwrap();
+        ensure_settings(&file, &written, || Ok("wieder da".into())).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "wieder da", "fehlte");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn server_reports_live_in_memory_until_cleared() {
+        let key = "7f0c2a9e-0000-4000-8000-00000000abcd";
+        receive("PermissionRequest", &Value::Null, key);
+        assert_eq!(received(key).map(|r| r.status), Some(Status::Waiting));
+        receive("Stop", &Value::Null, key);
+        assert_eq!(received(key).map(|r| r.status), Some(Status::Idle));
+        receive("SessionEnd", &Value::Null, key);
+        assert_eq!(received(key), None);
+        receive("UserPromptSubmit", &Value::Null, key);
+        clear(key);
+        assert_eq!(received(key), None);
+        receive("Stop", &Value::Null, "../böse");
+        assert_eq!(received("../böse"), None);
     }
 
     #[test]

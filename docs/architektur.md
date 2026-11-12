@@ -24,7 +24,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 | Datei | Aufgabe |
 |---|---|
-| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild) |
+| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild). Gezeichnet wird nur nach Ereignissen, neuer Ausgabe oder geändertem Zustand (`App::tick` meldet das), sonst alle 120 ms bei Spinnern bzw. jede Sekunde; die Sessionliste baut `App::tick` nur nach Änderungen bzw. sekündlich neu |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
 | `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
 | `layout.rs` | Fensterrechtecke für 1–4 Fenster (2 wahlweise übereinander), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil` |
@@ -35,7 +35,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik) |
 | `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander) als `state.json` für den Neustart |
-| `paths.rs` | Konfigurationsordner von claude-tui und Datenordner von Claude Code |
+| `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
 | `trace.rs` | Zeitmessung bei `CLAUDE_TUI_TRACE=1`: Zeilen mit Unix-ms und PID nach `trace.log` (App und Hook-Prozesse) |
 | `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen (HTTP-Hooks, sonst Befehls-Hooks), Event → Zustand → Statusdatei, Statusdateien lesen und aufräumen |
@@ -45,7 +45,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `ui.rs` | Zeichnen: Sessionliste (Menühinweis im unteren Rahmen; ausblendbar, dann Fenster in voller Breite), Fenster mit Nummer, Zustand und Fokusrahmen, Menü als blaues Overlay mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `selection.rs` | Mausmarkierung im Fenster, Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |
 | `install.rs` | `install` / `uninstall`: Binary an festen Ort, Benutzer-PATH (Windows über PowerShell/Registry) |
-| `update.rs` | Update über GitHub-Releases: tägliche Prüfung im Hintergrund, SHA-256 (`sha2`), Austausch der laufenden Datei (`self-replace`) |
+| `update.rs` | Update über GitHub-Releases: tägliche Prüfung im Hintergrund, SHA-256 (`sha2`), Austausch der laufenden Datei (`self-replace`; die neue Binary wird neben der laufenden unter Zufallsnamen abgelegt, nicht im gemeinsamen Temp-Ordner) |
 | `http.rs` | HTTPS-Abrufe ohne eigenen TLS-Stack: `curl` des Systems, Rückfall auf `ureq` mit System-TLS (nur Windows/macOS) |
 | `term_view.rs` | zeichnet einen `vt100`-Bildschirm (Farben, fett, *dim*, kursiv, unterstrichen, invers, Cursor) |
 | `theme.rs` | Farben (Claude-Orange `#D97757` auf dunklem Grund) und Status-Beschriftungen |
@@ -54,7 +54,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 1. `Session::spawn` öffnet ein PTY und startet den Befehl mit `--session-id <neue UUID>` bzw.
    `--resume <ID>`; so ist jeder Prozess einer Claude-Session zugeordnet. Dazu kommen
-   `--settings <Konfigurationsordner>/hooks.json` (siehe [Hooks](#hooks)) und die
+   `--settings <Konfigurationsordner>/hooks-<PID>.json` (siehe [Hooks](#hooks)) und die
    Umgebungsvariable `CLAUDE_TUI_SESSION=<ID>`. `Windows::place` legt ihn
    in ein Fenster, `state.rs` speichert das Layout nach jeder Änderung.
 2. Ein Lese-Thread je Session schreibt die Ausgabe in einen `vt100::Parser` (hinter `Mutex`) und
@@ -94,7 +94,11 @@ gesetzten Schlüssel für diese Session; die `~/.claude/settings.json` des Nutze
 angefasst. Hook-Einträge mehrerer Ebenen werden zusammengeführt
 ([Hooks](https://code.claude.com/docs/en/hooks)), eigene Hooks des Nutzers laufen also weiter.
 
-Die Datei `hooks.json` im Konfigurationsordner wird bei jedem Start einer Session neu geschrieben.
+Die Datei `hooks-<PID>.json` im Konfigurationsordner gehört zu genau einem laufenden claude-tui (sie
+enthält die URL seines Hook-Servers). Sie wird beim ersten Session-Start geschrieben — über eine
+temporäre Datei und Umbenennen, damit ein startendes Claude nie eine halbe Datei liest — und beim
+Beenden gelöscht. Reste abgebrochener Läufe und die gemeinsame `hooks.json` älterer Versionen räumt
+`hooks::purge_stale` nach sieben Tagen ohne Änderung weg.
 
 **HTTP-Hooks (Normalfall).** Beim Start öffnet claude-tui einen kleinen HTTP-Server auf
 `127.0.0.1:<freier Port>` (`hook_server.rs`). Jeder Eintrag ist ein Hook vom Typ `http`:
@@ -122,21 +126,23 @@ verspätete Meldung kann dabei eine neuere überschreiben. `claude-tui hook <Eve
 Hook-JSON von stdin, gibt nie etwas aus (bei `SessionStart`/`UserPromptSubmit` landete Ausgabe in
 Claudes Kontext) und endet immer mit Exit-Code 0.
 
-Beide Wege schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>` (erst
-temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id` aus
-dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine neue
-Session-ID vergibt.
+Der Hook-Server läuft im Prozess der App und legt den Zustand im Speicher ab
+(`hooks::receive`); er gilt beim nächsten Durchlauf der Hauptschleife. Die Befehls-Hooks sind
+eigene Prozesse und schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>`
+(erst temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id`
+aus dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine
+neue Session-ID vergibt.
 
 | Event | Zustand |
 |---|---|
 | `SessionStart` (nur Befehls-Hooks), `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact` | arbeitet |
 | `PermissionRequest` (sofort beim Freigabedialog), `Notification` mit `permission_prompt` / `elicitation_dialog` (erst nach ca. 6 s ohne Eingabe) | wartet auf dich |
-| `SessionEnd` | Statusdatei löschen |
+| `SessionEnd` | Meldung verwerfen |
 
-Die App liest die Statusdatei je Session alle 250 ms. Vor dem Start einer Session und beim Beenden
-ihres Prozesses wird die Statusdatei gelöscht; Dateien, die älter als 7 Tage sind, räumt der
-Programmstart weg.
+Ohne Meldung im Speicher liest die App die Statusdatei je Session alle 250 ms. Vor dem Start einer
+Session und beim Beenden ihres Prozesses werden Meldung und Statusdatei verworfen; Dateien, die
+älter als 7 Tage sind, räumt der Programmstart weg.
 
 Unter Windows übergibt claude-tui den Befehl wortweise an `cmd.exe /C`: `portable-pty` quotet
 Argumente nach den C-Runtime-Regeln (`\"`), die `cmd.exe` nicht versteht. So bekommt nur der

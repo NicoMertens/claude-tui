@@ -36,11 +36,8 @@ fn parse(text: &str) -> Vec<PathBuf> {
 
 pub fn save(list: &[PathBuf]) -> Result<()> {
     let file = file().context("no config directory (APPDATA/HOME) found")?;
-    if let Some(dir) = file.parent() {
-        fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    }
     let text: String = list.iter().map(|p| format!("{}\n", p.display())).collect();
-    fs::write(&file, text).with_context(|| format!("cannot write {}", file.display()))
+    paths::write_atomic(&file, text).with_context(|| format!("cannot write {}", file.display()))
 }
 
 /// Stellt `dir` an den Anfang, entfernt Doppelte und kürzt auf die Höchstzahl.

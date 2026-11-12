@@ -11,7 +11,7 @@
 use std::{
     collections::HashMap,
     fs,
-    io::{Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime},
@@ -130,22 +130,22 @@ impl Store {
         let Ok(bytes) = serde_json::to_vec(&cache) else {
             return;
         };
-        // Erst temporär schreiben, dann umbenennen: ein Abbruch hinterlässt keinen halben Cache.
-        let tmp = file.with_extension("json.tmp");
-        if fs::write(&tmp, bytes).is_ok() && fs::rename(&tmp, &file).is_ok() {
+        if paths::write_atomic(&file, bytes).is_ok() {
             self.dirty = false;
         }
     }
 
     /// Sucht neue und gewachsene Protokolle und wertet das Neue aus. Fehler beim Lesen einzelner
-    /// Dateien werden übergangen: die Liste ist eine Anzeige, kein Muss.
-    pub fn refresh(&mut self) {
+    /// Dateien werden übergangen: die Liste ist eine Anzeige, kein Muss. Liefert, ob sich etwas
+    /// geändert hat.
+    pub fn refresh(&mut self) -> bool {
         let Some(root) = self.root.as_deref() else {
-            return;
+            return false;
         };
         let Ok(projects) = fs::read_dir(root) else {
-            return;
+            return false;
         };
+        let mut changed_any = false;
         let mut seen = Vec::new();
         for project in projects.flatten() {
             let Ok(files) = fs::read_dir(project.path()) else {
@@ -157,7 +157,7 @@ impl Store {
                     if let Ok(meta) = file.metadata() {
                         let changed =
                             update_file(&mut self.files, &path, meta.len(), meta.modified().ok());
-                        self.dirty |= changed;
+                        changed_any |= changed;
                         seen.push(path);
                     }
                 }
@@ -166,7 +166,9 @@ impl Store {
         let seen: std::collections::HashSet<PathBuf> = seen.into_iter().collect();
         let before = self.files.len();
         self.files.retain(|path, _| seen.contains(path));
-        self.dirty |= self.files.len() != before;
+        changed_any |= self.files.len() != before;
+        self.dirty |= changed_any;
+        changed_any
     }
 
     /// Sessions mit Arbeitsverzeichnis und Titel (leere Sessions ohne Prompt fallen weg).
@@ -259,8 +261,12 @@ fn update_file(
     if len == state.offset {
         return changed;
     }
-    if let Ok(read) = read_from(path, state.offset) {
-        let used = apply(&mut state.info, &read) as u64;
+    let opened = fs::File::open(path).and_then(|mut file| {
+        file.seek(SeekFrom::Start(state.offset))?;
+        Ok(file)
+    });
+    if let Ok(file) = opened {
+        let used = apply(&mut state.info, BufReader::new(file));
         state.offset += used;
         changed |= used > 0;
     }
@@ -276,26 +282,22 @@ struct CacheRef<'a> {
 }
 
 fn cache_file() -> Option<PathBuf> {
-    let dir = paths::config_dir()?;
-    fs::create_dir_all(&dir).ok()?;
-    Some(dir.join(CACHE_FILE))
+    paths::config_dir().map(|dir| dir.join(CACHE_FILE))
 }
 
-fn read_from(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
-    let mut file = fs::File::open(path)?;
-    file.seek(SeekFrom::Start(offset))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-    Ok(buf)
-}
-
-/// Wertet alle vollständigen Zeilen aus und liefert, wie viele Bytes verbraucht sind.
-fn apply(info: &mut Info, bytes: &[u8]) -> usize {
-    let Some(end) = bytes.iter().rposition(|&b| b == b'\n') else {
-        return 0;
-    };
-    for raw in bytes[..end].split(|&b| b == b'\n') {
-        let Ok(text) = std::str::from_utf8(raw) else {
+/// Wertet alle vollständigen Zeilen aus und liefert, wie viele Bytes verbraucht sind; eine
+/// unvollständige letzte Zeile bleibt für später. Zeilenweise statt die Datei am Stück: Protokolle
+/// werden viele MB groß, im Speicher liegt so höchstens die längste Zeile.
+fn apply(info: &mut Info, mut reader: impl BufRead) -> u64 {
+    let mut used = 0;
+    let mut raw = Vec::new();
+    loop {
+        raw.clear();
+        match reader.read_until(b'\n', &mut raw) {
+            Ok(n) if raw.last() == Some(&b'\n') => used += n as u64,
+            _ => return used,
+        }
+        let Ok(text) = std::str::from_utf8(&raw[..raw.len() - 1]) else {
             continue;
         };
         // Billiger Vorfilter: die meisten Zeilen sind Nachrichten, die hier nichts beitragen.
@@ -326,12 +328,15 @@ fn apply(info: &mut Info, bytes: &[u8]) -> usize {
             _ => {}
         }
     }
-    end + 1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn apply_bytes(info: &mut Info, bytes: &[u8]) -> u64 {
+        apply(info, bytes)
+    }
 
     #[test]
     fn custom_title_wins_over_ai_title_and_prompt() {
@@ -344,11 +349,11 @@ mod tests {
             r#"{"type":"ai-title","aiTitle":"KI-Titel"}"#,
             "\n",
         );
-        apply(&mut info, text.as_bytes());
+        apply_bytes(&mut info, text.as_bytes());
         assert_eq!(info.cwd, Some(PathBuf::from("S:\\private")));
         assert_eq!(info.title(), Some("KI-Titel"));
 
-        apply(
+        apply_bytes(
             &mut info,
             b"{\"type\":\"custom-title\",\"customTitle\":\"eigener Name\"}\n",
         );
@@ -358,17 +363,17 @@ mod tests {
     #[test]
     fn last_agent_color_wins_and_default_resets() {
         let mut info = Info::default();
-        apply(
+        apply_bytes(
             &mut info,
             b"{\"type\":\"agent-color\",\"agentColor\":\"orange\"}\n",
         );
         assert_eq!(info.color.as_deref(), Some("orange"));
-        apply(
+        apply_bytes(
             &mut info,
             b"{\"type\":\"agent-color\",\"agentColor\":\"blue\"}\n",
         );
         assert_eq!(info.color.as_deref(), Some("blue"));
-        apply(
+        apply_bytes(
             &mut info,
             b"{\"type\":\"agent-color\",\"agentColor\":\"default\"}\n",
         );
@@ -379,8 +384,11 @@ mod tests {
     fn incomplete_last_line_is_kept_for_later() {
         let mut info = Info::default();
         let text = b"{\"type\":\"ai-title\",\"aiTitle\":\"A\"}\n{\"type\":\"ai-ti";
-        let used = apply(&mut info, text);
-        assert_eq!(used, text.iter().position(|&b| b == b'\n').unwrap_or(0) + 1);
+        let used = apply_bytes(&mut info, text);
+        assert_eq!(
+            used as usize,
+            text.iter().position(|&b| b == b'\n').unwrap_or(0) + 1
+        );
         assert_eq!(info.ai_title.as_deref(), Some("A"));
     }
 

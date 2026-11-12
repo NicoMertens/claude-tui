@@ -25,14 +25,14 @@ mod windows;
 
 use std::{
     io::{self, Write as _},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyEventKind,
+        Event, KeyEventKind, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -96,6 +96,7 @@ fn main() -> Result<()> {
 
     let result = run(&mut terminal, command);
 
+    hooks::remove_settings();
     restore_terminal();
     terminal.show_cursor()?;
     result
@@ -112,13 +113,27 @@ fn restore_terminal() {
 fn run(terminal: &mut Term, command: String) -> Result<()> {
     let size = terminal.size()?;
     let mut app = app::App::new(command, Rect::new(0, 0, size.width, size.height))?;
-    let mut first_frame = true;
+    // Seit dem letzten Bild hat sich etwas geändert (Ereignis, Zustand); `None` = noch kein Bild.
+    let mut changed = true;
+    let mut last_draw: Option<Instant> = None;
 
     while !app.should_quit {
-        app.tick();
-        terminal.draw(|f| ui::draw(f, &app))?;
-        if std::mem::take(&mut first_frame) {
-            trace::mark("app: first frame drawn");
+        changed |= app.tick();
+        let due = redraw_due(
+            changed,
+            app.latest_output(),
+            last_draw,
+            app.animating(),
+            Instant::now(),
+        );
+        if due {
+            let started = Instant::now();
+            terminal.draw(|f| ui::draw(f, &app))?;
+            if last_draw.is_none() {
+                trace::mark("app: first frame drawn");
+            }
+            last_draw = Some(started);
+            changed = false;
         }
         if std::mem::take(&mut app.ring_bell) {
             // BEL bewegt den Cursor nicht; nach dem Zeichnen stört es das Bild nicht.
@@ -136,10 +151,13 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
                 Event::Paste(text) => app.on_paste(&text)?,
+                // Reine Mausbewegung ändert nichts — das Terminal meldet sie ständig.
+                Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => continue,
                 Event::Mouse(mouse) => app.on_mouse(mouse),
                 Event::Resize(w, h) => app.resize(Rect::new(0, 0, w, h)),
-                _ => {}
+                _ => continue,
             }
+            changed = true;
             if app.should_quit {
                 break;
             }
@@ -151,3 +169,80 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
 
 /// Höchstens so viele Ereignisse je Bild.
 const MAX_EVENTS_PER_FRAME: usize = 64;
+/// Bildabstand, solange sich etwas von selbst bewegt (Spinner).
+const ANIMATION_FRAME: Duration = theme::SPINNER_FRAME;
+/// Ohne Anlass wird spätestens nach dieser Zeit neu gezeichnet — für Uhrzeit-Anzeigen
+/// („starting … 3s“, „vor 2m“) und als Sicherheitsnetz.
+const HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// Neu zeichnen? Ja beim ersten Bild, nach einer Änderung, nach neuer Ausgabe einer Session
+/// (`latest_output` nach dem Beginn des letzten Bildes) und wenn Animation bzw. Uhr es verlangen.
+/// Sonst nicht: Jedes Bild setzt alle Zellen der Fenster neu, bei 60 Bildern je Sekunde kostete
+/// das auch im Leerlauf spürbar Rechenzeit.
+fn redraw_due(
+    changed: bool,
+    latest_output: Option<Instant>,
+    last_draw: Option<Instant>,
+    animating: bool,
+    now: Instant,
+) -> bool {
+    let Some(last) = last_draw else {
+        return true;
+    };
+    let interval = if animating {
+        ANIMATION_FRAME
+    } else {
+        HEARTBEAT
+    };
+    changed
+        || latest_output.is_some_and(|output| output >= last)
+        || now.saturating_duration_since(last) >= interval
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_frame_changes_and_output_force_a_redraw() {
+        let last = Instant::now();
+        let soon = last + Duration::from_millis(20);
+        assert!(redraw_due(false, None, None, false, soon), "erstes Bild");
+        assert!(redraw_due(true, None, Some(last), false, soon), "Änderung");
+        assert!(
+            redraw_due(
+                false,
+                Some(last + Duration::from_millis(5)),
+                Some(last),
+                false,
+                soon
+            ),
+            "Ausgabe nach dem letzten Bild"
+        );
+        assert!(
+            !redraw_due(
+                false,
+                Some(last - Duration::from_millis(5)),
+                Some(last),
+                false,
+                soon
+            ),
+            "Ausgabe schon gezeichnet"
+        );
+    }
+
+    #[test]
+    fn idle_screen_redraws_only_on_heartbeat_or_animation() {
+        let last = Instant::now();
+        let soon = last + Duration::from_millis(200);
+        assert!(
+            !redraw_due(false, None, Some(last), false, soon),
+            "Leerlauf"
+        );
+        assert!(redraw_due(false, None, Some(last), true, soon), "Spinner");
+        assert!(
+            redraw_due(false, None, Some(last), false, last + HEARTBEAT),
+            "Uhr"
+        );
+    }
+}

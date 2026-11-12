@@ -10,7 +10,7 @@ claude-tui --version
 
 claude-tui hängt an den Befehl selbst `--session-id <neue ID>` (neue Session) bzw. `--resume <ID>`
 (gespeicherte Session fortsetzen) an — Optionen wie `-c` oder `--resume` gehören deshalb nicht in den
-Befehl. Dazu kommt `--settings <Konfigurationsordner>/hooks.json`: Hooks, über die Claude Code
+Befehl. Dazu kommt `--settings <Konfigurationsordner>/hooks-<PID>.json`: Hooks, über die Claude Code
 seinen Zustand meldet (siehe [Zustände](#zustände-in-der-seitenleiste)). Sie gelten nur für die von
 claude-tui gestarteten Prozesse; die eigene `~/.claude/settings.json` bleibt unverändert. Unter Windows läuft er über `cmd.exe /C`, unter Linux/macOS über `sh -c`, damit
 PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
