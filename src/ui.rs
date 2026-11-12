@@ -199,7 +199,10 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
     if !picker.recent.is_empty() {
         lines.push(section_title("recent"));
         for (i, dir) in picker.recent.iter().enumerate() {
-            let text = format!(" {}", tail(&dir.display().to_string(), width - 1));
+            let text = format!(
+                " {}",
+                tail(&dir.display().to_string(), width.saturating_sub(1))
+            );
             lines.push(selectable(text, picker.selected == Some(i), width));
         }
     }
