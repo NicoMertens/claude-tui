@@ -128,7 +128,10 @@ impl Menu {
         } else if in_window || ctx.has_selection {
             add('x', "Delete session", Action::DeleteSession);
         }
-        add('o', "Delete sessions older than …", Action::DeleteOlder);
+        // Betrifft die ganze Liste, nicht das Fenster – deshalb nur mit Fokus auf der Liste.
+        if !in_window {
+            add('o', "Delete sessions older than …", Action::DeleteOlder);
+        }
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
                 let label = format!("Focus window {}", i + 1);
@@ -596,6 +599,26 @@ mod tests {
             label(Menu::commands(&ctx(Focus::Window(0)))).as_deref(),
             Some("Delete session")
         );
+    }
+
+    #[test]
+    fn delete_older_only_in_session_list() {
+        let windows = names(1);
+        let ctx = |focus| Context {
+            focus,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection: false,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed: false,
+            waiting: false,
+            marked: 0,
+        };
+        let has_older = |menu: Menu| menu.items.iter().any(|i| i.action == Action::DeleteOlder);
+        assert!(has_older(Menu::commands(&ctx(Focus::List))));
+        assert!(!has_older(Menu::commands(&ctx(Focus::Window(0)))));
     }
 
     #[test]
