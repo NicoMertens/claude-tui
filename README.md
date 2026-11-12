@@ -19,8 +19,9 @@ Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Ctrl+Pfeil`, alle Befehle im `
 
 ## Installieren
 
-Fertige Archive für Windows, Linux und macOS gibt es unter
-[Releases](https://github.com/NicoMertens/claude-tui/releases). Archiv entpacken, dann:
+Fertige Programme für Windows, Linux und macOS gibt es unter
+[Releases](https://github.com/NicoMertens/claude-tui/releases) — je Plattform eine einzelne Datei
+`claude-tui-v<Version>-<Ziel>[.exe]`. Herunterladen (unter Linux/macOS `chmod +x`), dann:
 
 ```
 claude-tui install     # kopiert sich an einen festen Ort und trägt ihn in den PATH ein
@@ -31,11 +32,10 @@ Danach startet `claude-tui` in jedem neuen Terminal. Unter Windows landet es in
 `~/.local/bin`. Windows in einem Schritt (PowerShell):
 
 ```powershell
-$zip = "$env:TEMP\claude-tui.zip"; $dir = "$env:TEMP\claude-tui"
+$exe = "$env:TEMP\claude-tui.exe"
 $url = (irm https://api.github.com/repos/NicoMertens/claude-tui/releases/latest).assets |
-  ? name -like '*x86_64-pc-windows-msvc.zip' | % browser_download_url
-iwr $url -OutFile $zip; Expand-Archive $zip $dir -Force
-& (gci $dir -Recurse -Filter claude-tui.exe)[0].FullName install
+  ? name -like '*x86_64-pc-windows-msvc.exe' | % browser_download_url
+iwr $url -OutFile $exe; & $exe install
 ```
 
 **Updates:** claude-tui schaut beim Start höchstens einmal am Tag auf GitHub nach einer neuen

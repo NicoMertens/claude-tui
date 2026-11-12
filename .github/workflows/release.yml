@@ -54,11 +54,15 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Archiv packen
+      - name: Binary bereitstellen
         run: |
           name="claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
+          bin="target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}" README.md "dist/$name/"
+          cp "$bin" "dist/$name${{ matrix.ext }}"
+          # Übergangsweise zusätzlich das alte Archiv: der Updater bis v0.5.0 sucht danach.
+          # Entfällt, sobald keine dieser Versionen mehr im Einsatz ist.
+          cp "$bin" README.md "dist/$name/"
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a "$name.zip" "$name" > /dev/null

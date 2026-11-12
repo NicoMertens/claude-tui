@@ -11,8 +11,6 @@ publish = false
 anyhow = "1"
 arboard = { version = "3", default-features = false }
 crossterm = "0.29"
-# Entpacken (gzip für .tar.gz, Deflate für .zip) mit dem reinen Rust-Backend.
-flate2 = "1"
 portable-pty = "0.8"
 ratatui = "0.30"
 self-replace = "1"
@@ -21,13 +19,6 @@ serde_json = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 vt100 = "0.18"
-
-# Release-Archive: .zip unter Windows, .tar.gz sonst (siehe release.yml)
-[target.'cfg(windows)'.dependencies]
-zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
-
-[target.'cfg(not(windows))'.dependencies]
-tar = { version = "0.4", default-features = false }
 
 # Rückfall für Updates, wenn curl fehlt: HTTPS über das TLS des Betriebssystems (siehe http.rs).
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]

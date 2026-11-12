@@ -1,13 +1,12 @@
 //! Selbst-Update über die GitHub-Releases des Projekts.
 //!
-//! Ablauf: neuestes Release abfragen, Version vergleichen, das Archiv für die eigene Plattform
-//! (`claude-tui-v<Version>-<Ziel>.zip|.tar.gz`) und `sha256.sum` laden, Prüfsumme vergleichen,
-//! Binary entpacken und die laufende Datei ersetzen (`self-replace`; unter Windows über
+//! Ablauf: neuestes Release abfragen, Version vergleichen, die Binary für die eigene Plattform
+//! (`claude-tui-v<Version>-<Ziel>[.exe]`) und `sha256.sum` laden, Prüfsumme vergleichen und die
+//! laufende Datei ersetzen (`self-replace`; unter Windows über
 //! Umbenennen, weil die laufende `.exe` gesperrt ist). Wirksam ab dem nächsten Start.
 
 use std::{
     fs,
-    io::{Cursor, Read},
     path::PathBuf,
     sync::mpsc::{self, Receiver},
     thread,
@@ -28,7 +27,7 @@ const CHECK_FILE: &str = "update-check.json";
 /// Abschalten der automatischen Prüfung beim Start.
 const OPT_OUT_ENV: &str = "CLAUDE_TUI_NO_UPDATE_CHECK";
 
-/// Zieltripel, wie es in den Archivnamen des Release-Workflows steht.
+/// Zieltripel, wie es in den Dateinamen des Release-Workflows steht.
 const TARGET: Option<&str> = if cfg!(all(windows, target_arch = "x86_64")) {
     Some("x86_64-pc-windows-msvc")
 } else if cfg!(all(windows, target_arch = "aarch64")) {
@@ -42,7 +41,7 @@ const TARGET: Option<&str> = if cfg!(all(windows, target_arch = "x86_64")) {
 } else {
     None
 };
-const ARCHIVE_EXT: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
+const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
 const EXE_NAME: &str = if cfg!(windows) {
     "claude-tui.exe"
 } else {
@@ -65,8 +64,8 @@ struct Asset {
 #[derive(Clone, Debug)]
 pub struct Available {
     pub version: String,
-    archive_name: String,
-    archive_url: String,
+    binary_name: String,
+    binary_url: String,
     sums_url: String,
 }
 
@@ -85,7 +84,7 @@ fn check_against(current: &str) -> Result<Option<Available>> {
     if !is_newer(&version, current) {
         return Ok(None);
     }
-    let archive_name = format!("claude-tui-{}-{target}.{ARCHIVE_EXT}", release.tag_name);
+    let binary_name = format!("claude-tui-{}-{target}{EXE_SUFFIX}", release.tag_name);
     let url_of = |name: &str| {
         release
             .assets
@@ -93,14 +92,14 @@ fn check_against(current: &str) -> Result<Option<Available>> {
             .find(|a| a.name == name)
             .map(|a| a.browser_download_url.clone())
     };
-    let archive_url = url_of(&archive_name)
-        .with_context(|| format!("release {} has no {archive_name}", release.tag_name))?;
+    let binary_url = url_of(&binary_name)
+        .with_context(|| format!("release {} has no {binary_name}", release.tag_name))?;
     let sums_url = url_of("sha256.sum")
         .with_context(|| format!("release {} has no sha256.sum", release.tag_name))?;
     Ok(Some(Available {
         version,
-        archive_name,
-        archive_url,
+        binary_name,
+        binary_url,
         sums_url,
     }))
 }
@@ -116,20 +115,20 @@ pub fn install(update: &Available) -> Result<()> {
     replaced
 }
 
-/// Archiv und `sha256.sum` laden, Prüfsumme vergleichen, Binary entpacken.
+/// Binary und `sha256.sum` laden, Prüfsumme vergleichen.
 fn fetch_binary(update: &Available) -> Result<Vec<u8>> {
-    let archive = http::get(&update.archive_url, http::Kind::File)?;
+    let binary = http::get(&update.binary_url, http::Kind::File)?;
     let sums = String::from_utf8(http::get(&update.sums_url, http::Kind::File)?)?;
-    let expected = expected_sum(&sums, &update.archive_name)
-        .with_context(|| format!("sha256.sum lists no {}", update.archive_name))?;
-    let actual = hex(&Sha256::digest(&archive));
+    let expected = expected_sum(&sums, &update.binary_name)
+        .with_context(|| format!("sha256.sum lists no {}", update.binary_name))?;
+    let actual = hex(&Sha256::digest(&binary));
     if !actual.eq_ignore_ascii_case(expected) {
         bail!(
             "checksum mismatch for {} – update aborted",
-            update.archive_name
+            update.binary_name
         );
     }
-    extract(&archive)
+    Ok(binary)
 }
 
 /// `claude-tui update` auf der Kommandozeile.
@@ -244,35 +243,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-#[cfg(windows)]
-fn extract(archive: &[u8]) -> Result<Vec<u8>> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(archive)).context("damaged archive")?;
-    for i in 0..zip.len() {
-        let mut file = zip.by_index(i)?;
-        let is_binary = file.name()?.rsplit('/').next() == Some(EXE_NAME);
-        if is_binary {
-            let mut binary = Vec::new();
-            file.read_to_end(&mut binary)?;
-            return Ok(binary);
-        }
-    }
-    bail!("{EXE_NAME} not found in archive")
-}
-
-#[cfg(not(windows))]
-fn extract(archive: &[u8]) -> Result<Vec<u8>> {
-    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(archive)));
-    for entry in tar.entries().context("damaged archive")? {
-        let mut entry = entry?;
-        if entry.path()?.file_name().is_some_and(|n| n == EXE_NAME) {
-            let mut binary = Vec::new();
-            entry.read_to_end(&mut binary)?;
-            return Ok(binary);
-        }
-    }
-    bail!("{EXE_NAME} not found in archive")
-}
-
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -300,12 +270,12 @@ mod tests {
 
     #[test]
     fn checksum_line_is_found_by_file_name() {
-        let sums = "aaa  claude-tui-v0.2.0-x86_64-pc-windows-msvc.zip\nbbb  claude-tui-v0.2.0-x86_64-unknown-linux-gnu.tar.gz\n";
+        let sums = "aaa  claude-tui-v0.6.0-x86_64-pc-windows-msvc.exe\nbbb  claude-tui-v0.6.0-x86_64-unknown-linux-gnu\n";
         assert_eq!(
-            expected_sum(sums, "claude-tui-v0.2.0-x86_64-unknown-linux-gnu.tar.gz"),
+            expected_sum(sums, "claude-tui-v0.6.0-x86_64-unknown-linux-gnu"),
             Some("bbb")
         );
-        assert_eq!(expected_sum(sums, "fehlt.zip"), None);
+        assert_eq!(expected_sum(sums, "fehlt.exe"), None);
     }
 
     #[test]
@@ -313,7 +283,8 @@ mod tests {
         assert_eq!(hex(&[0x00, 0xab, 0xff]), "00abff");
     }
 
-    /// Gegen das echte GitHub-Release: abfragen, laden, Prüfsumme, entpacken — ohne zu ersetzen.
+    /// Gegen das echte GitHub-Release: abfragen, laden, Prüfsumme — ohne zu ersetzen.
+    /// Klappt erst, wenn das neueste Release einzelne Binaries enthält (ab v0.6.0).
     /// Braucht Netz, daher nur auf Zuruf: `cargo test -- --ignored`.
     #[test]
     #[ignore]

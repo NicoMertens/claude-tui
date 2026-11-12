@@ -25,22 +25,20 @@ von Cargo, im Git ignoriert und jederzeit mit `cargo clean` löschbar.
 | Workflow | Auslöser | Was passiert |
 |---|---|---|
 | `ci.yml` | Push auf `develop`, Pull Request | `cargo fmt --check`, `clippy -D warnings`, `cargo test` auf Windows, Linux, macOS |
-| `release.yml` | Push auf `release` (oder manuell) | Version aus `Cargo.toml` lesen, Build für 5 Ziele, GitHub-Release mit Tag `v<Version>`, Archiven und Prüfsummen |
+| `release.yml` | Push auf `release` (oder manuell) | Version aus `Cargo.toml` lesen, Build für 5 Ziele, GitHub-Release mit Tag `v<Version>`, Binaries und Prüfsummen |
 
 Ziele: `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`,
 `aarch64-apple-darwin`, `x86_64-apple-darwin`.
 
 ## Release-Dateien
 
-Je Ziel ein Archiv nach dem Schema `claude-tui-v<Version>-<Ziel>`, darin die Binary und die
-`README.md`:
+Je Ziel die nackte Binary `claude-tui-v<Version>-<Ziel>` (unter Windows mit `.exe`) — kein
+Entpacken nötig, und genau diese Datei lädt auch `claude-tui update`. Dazu `sha256.sum` mit den
+SHA-256-Prüfsummen aller Dateien (prüfen mit `sha256sum -c sha256.sum`).
 
-| Plattform | Format |
-|---|---|
-| Windows | `.zip` |
-| Linux, macOS | `.tar.gz` |
-
-Dazu `sha256.sum` mit den SHA-256-Prüfsummen aller Archive (prüfen mit `sha256sum -c sha256.sum`).
+Übergangsweise liegt je Ziel zusätzlich das alte Archiv bei (`.zip` unter Windows, sonst `.tar.gz`,
+darin Binary und `README.md`), weil der Updater bis v0.5.0 danach sucht. Fällt weg, sobald keine
+dieser Versionen mehr im Einsatz ist.
 
 ## Release erstellen
 
