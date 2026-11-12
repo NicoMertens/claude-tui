@@ -54,7 +54,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 1. `Session::spawn` öffnet ein PTY und startet den Befehl mit `--session-id <neue UUID>` bzw.
    `--resume <ID>`; so ist jeder Prozess einer Claude-Session zugeordnet. Dazu kommen
-   `--settings <Konfigurationsordner>/hooks.json` (siehe [Hooks](#hooks)) und die
+   `--settings <Konfigurationsordner>/hooks-<PID>.json` (siehe [Hooks](#hooks)) und die
    Umgebungsvariable `CLAUDE_TUI_SESSION=<ID>`. `Windows::place` legt ihn
    in ein Fenster, `state.rs` speichert das Layout nach jeder Änderung.
 2. Ein Lese-Thread je Session schreibt die Ausgabe in einen `vt100::Parser` (hinter `Mutex`) und
@@ -94,7 +94,11 @@ gesetzten Schlüssel für diese Session; die `~/.claude/settings.json` des Nutze
 angefasst. Hook-Einträge mehrerer Ebenen werden zusammengeführt
 ([Hooks](https://code.claude.com/docs/en/hooks)), eigene Hooks des Nutzers laufen also weiter.
 
-Die Datei `hooks.json` im Konfigurationsordner wird bei jedem Start einer Session neu geschrieben.
+Die Datei `hooks-<PID>.json` im Konfigurationsordner gehört zu genau einem laufenden claude-tui (sie
+enthält die URL seines Hook-Servers). Sie wird beim ersten Session-Start geschrieben — über eine
+temporäre Datei und Umbenennen, damit ein startendes Claude nie eine halbe Datei liest — und beim
+Beenden gelöscht. Reste abgebrochener Läufe und die gemeinsame `hooks.json` älterer Versionen räumt
+`hooks::purge_stale` nach sieben Tagen ohne Änderung weg.
 
 **HTTP-Hooks (Normalfall).** Beim Start öffnet claude-tui einen kleinen HTTP-Server auf
 `127.0.0.1:<freier Port>` (`hook_server.rs`). Jeder Eintrag ist ein Hook vom Typ `http`:

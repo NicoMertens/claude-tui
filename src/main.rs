@@ -96,6 +96,7 @@ fn main() -> Result<()> {
 
     let result = run(&mut terminal, command);
 
+    hooks::remove_settings();
     restore_terminal();
     terminal.show_cursor()?;
     result

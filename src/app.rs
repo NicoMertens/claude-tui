@@ -19,7 +19,7 @@ use crate::{
     menu::{self, Action, Context, Menu, Outcome, Purpose},
     recent,
     selection::{self, Cell, Selection},
-    session::{Session, Status},
+    session::{self, Session, Status},
     state::{self, State},
     trace, ui,
     update::{self, Available},
@@ -1204,33 +1204,39 @@ impl App {
 
     /// `start_now = false`: nur Fenster und PTY anlegen, der Prozess startet später (Startreihe).
     fn spawn_with(&mut self, dir: &Path, launch: Launch, start_now: bool) -> Result<SessionId> {
-        let (claude_id, args, attach) = match launch {
+        // IDs stammen aus Dateinamen bzw. Dateien unter `~/.claude` und gehen als Argumente an die
+        // Shell: nur gültige Formen, damit weder Shell-Code noch eine Option (`--…`) daraus wird.
+        let (claude_id, mut extra, attach) = match launch {
             Launch::New => {
                 let claude_id = uuid::Uuid::new_v4().to_string();
-                let args = format!("--session-id {claude_id}");
+                let args = vec!["--session-id".to_string(), claude_id.clone()];
                 (claude_id, args, false)
             }
             Launch::Resume(claude_id) => {
-                let args = format!("--resume {claude_id}");
+                anyhow::ensure!(
+                    session::valid_claude_id(&claude_id),
+                    "cannot resume session with invalid id {claude_id:?}"
+                );
+                let args = vec!["--resume".to_string(), claude_id.clone()];
                 (claude_id, args, false)
             }
-            Launch::Attach(claude_id, job) => (claude_id, format!("attach {job}"), true),
+            Launch::Attach(claude_id, job) => {
+                // Die Claude-ID geht hier nicht in die Befehlszeile, nur die Job-ID.
+                anyhow::ensure!(
+                    session::valid_job_id(&job),
+                    "cannot attach to background session with invalid id {job:?}"
+                );
+                (claude_id, vec!["attach".to_string(), job], true)
+            }
         };
-        let command = format!("{} {args}", self.command);
         // Ohne Hook-Einstellungen bleibt es bei der Heuristik; die Session startet trotzdem. Eine
         // Hintergrund-Session läuft mit ihren eigenen Einstellungen weiter, `attach` nimmt keine.
-        let extra: Vec<String> = if attach {
-            Vec::new()
-        } else {
-            hooks::write_settings()
-                .map(|file| {
-                    vec![
-                        "--settings".to_string(),
-                        file.to_string_lossy().into_owned(),
-                    ]
-                })
-                .unwrap_or_default()
-        };
+        if !attach {
+            if let Ok(file) = hooks::write_settings() {
+                extra.push("--settings".to_string());
+                extra.push(file.to_string_lossy().into_owned());
+            }
+        }
         // Meldung eines früheren Laufs derselben Claude-Session gilt nicht mehr.
         hooks::clear(&claude_id);
         self.next_id += 1;
@@ -1239,7 +1245,7 @@ impl App {
         let session = Session::spawn(
             id,
             claude_id,
-            &command,
+            &self.command,
             &extra,
             dir,
             inner.height.max(1),
