@@ -117,7 +117,7 @@ fn handle(stream: TcpStream, expected_path: &str) {
                 });
                 if let Some(key) = key {
                     trace::mark(format_args!("hook {event} for {key} (http)"));
-                    hooks::apply(&event, &input, &key);
+                    hooks::receive(&event, &input, &key);
                 }
             }
             "200 OK"

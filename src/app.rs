@@ -41,6 +41,8 @@ const FLASH_DURATION: Duration = Duration::from_secs(5);
 /// So lange nach dem Ende eines eigenen Prozesses gilt seine Session noch als eigene: Datei in
 /// `~/.claude/sessions` und letzte Schreibzugriffe stammen noch von ihm.
 const ENDED_GRACE: Duration = Duration::from_secs(30);
+/// Ohne Anlass wird die Sessionliste höchstens so oft neu gebaut.
+const LIST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
 /// Claude-ID) je Session. Gruppenüberschriften fehlen absichtlich.
@@ -123,6 +125,10 @@ pub struct App {
     pending_restore: Option<State>,
     last_scan: Instant,
     last_cache_save: Instant,
+    /// Die Sessionliste muss neu gebaut werden (Sessions kamen oder gingen, Protokolle änderten
+    /// sich); sonst nur alle [`LIST_INTERVAL`].
+    list_dirty: bool,
+    last_list: Instant,
     /// Wiederhergestellte Sessions, deren Prozess noch nicht läuft, in Startreihenfolge.
     start_queue: VecDeque<SessionId>,
     /// Zuletzt gestartete Session aus der Reihe und Startzeit (siehe [STAGGER_MAX]).
@@ -182,6 +188,8 @@ impl App {
             pending_restore: None,
             last_scan: Instant::now(),
             last_cache_save: Instant::now(),
+            list_dirty: true,
+            last_list: Instant::now(),
             start_queue: VecDeque::new(),
             starting: None,
             claimed: external::Claimed::new(),
@@ -301,6 +309,7 @@ impl App {
         trace::mark("app: sessions loaded");
         self.store_load = None;
         self.store = store;
+        self.list_dirty = true;
         self.store.save_cache();
         self.last_scan = Instant::now();
         self.last_cache_save = Instant::now();
@@ -364,13 +373,23 @@ impl App {
             .map(|(_, _, rect)| rect)
     }
 
-    pub fn tick(&mut self) {
+    /// Hintergrundarbeit je Durchlauf der Hauptschleife. Liefert, ob sich etwas Sichtbares geändert
+    /// hat (Zustände, Hinweise, Liste, Update) — dann muss neu gezeichnet werden. Ausgabe der
+    /// Sessions zählt hier nicht, die prüft die Hauptschleife über [`Self::latest_output`].
+    pub fn tick(&mut self) -> bool {
+        let notice_before = self.notice.clone();
+        let update_before = (
+            self.update.as_ref().map(|u| u.version.clone()),
+            self.update_install.is_some(),
+            self.loading(),
+        );
         let mut changes = Vec::new();
         for session in &mut self.sessions {
             let before = session.status;
             session.refresh();
             changes.push((session.id, before, session.status));
         }
+        let statuses_changed = changes.iter().any(|&(_, before, after)| before != after);
         for id in waiting::newly_waiting(changes, self.windows.focused_session()) {
             self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
             self.ring_bell = waiting::bell_enabled();
@@ -404,18 +423,49 @@ impl App {
             .as_ref()
             .and_then(|rx| rx.try_iter().last())
         {
-            self.claimed = claimed;
+            if claimed != self.claimed {
+                self.claimed = claimed;
+                self.list_dirty = true;
+            }
         }
         // Während des Einlesens beim Start nicht doppelt lesen.
         if self.store_load.is_none() && self.last_scan.elapsed() >= STORE_INTERVAL {
-            self.store.refresh();
+            self.list_dirty |= self.store.refresh();
             self.last_scan = Instant::now();
             if self.last_cache_save.elapsed() >= CACHE_INTERVAL {
                 self.store.save_cache();
                 self.last_cache_save = Instant::now();
             }
         }
-        self.rebuild_list();
+        // Die Liste hängt auch von der Uhr ab (`ENDED_GRACE`, `external::RECENT_WRITE`); daher
+        // außer nach Änderungen auch regelmäßig neu bauen — aber nicht in jedem Durchlauf.
+        let list_changed =
+            (self.list_dirty || self.last_list.elapsed() >= LIST_INTERVAL) && self.rebuild_list();
+        let update_after = (
+            self.update.as_ref().map(|u| u.version.clone()),
+            self.update_install.is_some(),
+            self.loading(),
+        );
+        statuses_changed
+            || list_changed
+            || self.notice != notice_before
+            || update_after != update_before
+    }
+
+    /// Jüngste Ausgabe irgendeiner Session — die Hauptschleife zeichnet neu, wenn sie nach dem
+    /// letzten Bild liegt.
+    pub fn latest_output(&self) -> Option<Instant> {
+        self.sessions.iter().map(Session::last_output).max()
+    }
+
+    /// Etwas auf dem Bildschirm bewegt sich von selbst: Spinner einer startenden oder arbeitenden
+    /// Session, „loading sessions …“.
+    pub fn animating(&self) -> bool {
+        self.loading()
+            || self
+                .sessions
+                .iter()
+                .any(|s| matches!(s.status, Status::Starting | Status::Working))
     }
 
     /// Ergebnisse der Update-Prüfung bzw. -Installation aus den Hintergrund-Threads abholen.
@@ -440,7 +490,9 @@ impl App {
         }
     }
 
-    fn rebuild_list(&mut self) {
+    /// Baut die Sessionliste neu; `true`, wenn sich an Liste, Cursor oder Markierung etwas
+    /// geändert hat.
+    fn rebuild_list(&mut self) -> bool {
         let running: Vec<Running> = self
             .sessions
             .iter()
@@ -464,10 +516,11 @@ impl App {
             self.started,
             SystemTime::now(),
         );
-        let before: Vec<String> = list::flatten(&self.groups)
-            .map(|e| e.claude_id.clone())
-            .collect();
-        self.groups = list::build(stored, &running, &elsewhere);
+        let old = std::mem::replace(&mut self.groups, list::build(stored, &running, &elsewhere));
+        self.list_dirty = false;
+        self.last_list = Instant::now();
+        let cursor_before = self.cursor.clone();
+        let marked_before = self.marked.len();
         let listed: HashSet<&str> = list::flatten(&self.groups)
             .map(|e| e.claude_id.as_str())
             .collect();
@@ -476,7 +529,7 @@ impl App {
             let still: HashSet<&str> = list::flatten(&self.groups)
                 .map(|e| e.claude_id.as_str())
                 .collect();
-            let before: Vec<&str> = before.iter().map(String::as_str).collect();
+            let before: Vec<&str> = list::flatten(&old).map(|e| e.claude_id.as_str()).collect();
             let successor = self
                 .cursor
                 .as_deref()
@@ -489,6 +542,7 @@ impl App {
                 })
                 .map(str::to_string);
         }
+        old != self.groups || self.cursor != cursor_before || self.marked.len() != marked_before
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -1159,6 +1213,7 @@ impl App {
         }
         self.windows.remove_session(id);
         self.sessions.retain(|s| s.id != id);
+        self.list_dirty = true;
         self.after_layout_change();
     }
 

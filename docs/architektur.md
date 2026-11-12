@@ -24,7 +24,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 
 | Datei | Aufgabe |
 |---|---|
-| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild) |
+| `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild). Gezeichnet wird nur nach Ereignissen, neuer Ausgabe oder geändertem Zustand (`App::tick` meldet das), sonst alle 120 ms bei Spinnern bzw. jede Sekunde; die Sessionliste baut `App::tick` nur nach Änderungen bzw. sekündlich neu |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
 | `windows.rs` | welche Session in welchem Fenster liegt (max. 4, Nachrücken, Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
 | `layout.rs` | Fensterrechtecke für 1–4 Fenster (2 wahlweise übereinander), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil` |
@@ -126,21 +126,23 @@ verspätete Meldung kann dabei eine neuere überschreiben. `claude-tui hook <Eve
 Hook-JSON von stdin, gibt nie etwas aus (bei `SessionStart`/`UserPromptSubmit` landete Ausgabe in
 Claudes Kontext) und endet immer mit Exit-Code 0.
 
-Beide Wege schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>` (erst
-temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id` aus
-dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine neue
-Session-ID vergibt.
+Der Hook-Server läuft im Prozess der App und legt den Zustand im Speicher ab
+(`hooks::receive`); er gilt beim nächsten Durchlauf der Hauptschleife. Die Befehls-Hooks sind
+eigene Prozesse und schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>`
+(erst temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id`
+aus dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine
+neue Session-ID vergibt.
 
 | Event | Zustand |
 |---|---|
 | `SessionStart` (nur Befehls-Hooks), `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact` | arbeitet |
 | `PermissionRequest` (sofort beim Freigabedialog), `Notification` mit `permission_prompt` / `elicitation_dialog` (erst nach ca. 6 s ohne Eingabe) | wartet auf dich |
-| `SessionEnd` | Statusdatei löschen |
+| `SessionEnd` | Meldung verwerfen |
 
-Die App liest die Statusdatei je Session alle 250 ms. Vor dem Start einer Session und beim Beenden
-ihres Prozesses wird die Statusdatei gelöscht; Dateien, die älter als 7 Tage sind, räumt der
-Programmstart weg.
+Ohne Meldung im Speicher liest die App die Statusdatei je Session alle 250 ms. Vor dem Start einer
+Session und beim Beenden ihres Prozesses werden Meldung und Statusdatei verworfen; Dateien, die
+älter als 7 Tage sind, räumt der Programmstart weg.
 
 Unter Windows übergibt claude-tui den Befehl wortweise an `cmd.exe /C`: `portable-pty` quotet
 Argumente nach den C-Runtime-Regeln (`\"`), die `cmd.exe` nicht versteht. So bekommt nur der

@@ -1,16 +1,18 @@
 //! Zustandsmeldung über Claude-Code-Hooks: claude-tui gibt jedem gestarteten Claude-Prozess per
 //! `--settings` Hooks mit. Normalerweise HTTP-Hooks an den eigenen Server (`hook_server.rs`), sonst
-//! als Rückfall Befehls-Hooks, die `claude-tui hook <Event>` aufrufen. Beide schreiben den Zustand
-//! in `status/<Claude-ID>` im Konfigurationsordner; die App liest ihn dort. Die
+//! als Rückfall Befehls-Hooks, die `claude-tui hook <Event>` aufrufen. Der Server legt den Zustand
+//! im Speicher ab ([`receive`]); die Befehls-Hooks laufen als eigene Prozesse und schreiben ihn nach
+//! `status/<Claude-ID>` im Konfigurationsordner, wo die App ihn liest. Die
 //! `~/.claude/settings.json` des Nutzers bleibt unberührt.
 
 use std::{
+    collections::BTreeMap,
     fs,
     io::Read,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        OnceLock,
+        Mutex, MutexGuard, OnceLock, PoisonError,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -120,8 +122,8 @@ pub fn run_cli(event: Option<&str>) {
     apply(event, &input, &key);
 }
 
-/// Wirkung eines Hook-Events auf die Statusdatei der Session `key`.
-pub fn apply(event: &str, input: &Value, key: &str) {
+/// Wirkung eines Hook-Events auf die Statusdatei der Session `key` (Befehls-Hooks).
+fn apply(event: &str, input: &Value, key: &str) {
     let Some(dir) = status_dir() else {
         return;
     };
@@ -193,13 +195,51 @@ fn remove_in(dir: &Path, key: &str) {
     }
 }
 
-/// Letzte Hook-Meldung einer Session; `None`, solange keine vorliegt.
+/// Meldungen, die der Hook-Server dieses Prozesses empfangen hat. Server und App laufen im selben
+/// Prozess — der Umweg über Statusdateien (schreiben, alle 250 ms je Session lesen) entfällt.
+static RECEIVED: Mutex<BTreeMap<String, Report>> = Mutex::new(BTreeMap::new());
+
+fn received_map() -> MutexGuard<'static, BTreeMap<String, Report>> {
+    RECEIVED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Wirkung eines Hook-Events, das der eigene Hook-Server empfangen hat.
+pub fn receive(event: &str, input: &Value, key: &str) {
+    if !valid_key(key) {
+        return;
+    }
+    let mut reports = received_map();
+    match effect(event, input) {
+        Effect::Set(status) => {
+            reports.insert(
+                key.to_string(),
+                Report {
+                    status,
+                    at: SystemTime::now(),
+                },
+            );
+        }
+        Effect::Remove => {
+            reports.remove(key);
+        }
+        Effect::Keep => {}
+    }
+}
+
+/// Letzte Meldung einer Session an den eigenen Hook-Server (billig, ohne Dateizugriff).
+pub fn received(claude_id: &str) -> Option<Report> {
+    received_map().get(claude_id).copied()
+}
+
+/// Letzte Hook-Meldung einer Session aus ihrer Statusdatei (Befehls-Hooks); `None`, solange keine
+/// vorliegt.
 pub fn read(claude_id: &str) -> Option<Report> {
     read_in(&status_dir()?, claude_id)
 }
 
-/// Statusdatei einer Session entfernen (vor dem Start, nach dem Ende).
+/// Meldungen einer Session verwerfen (vor dem Start, nach dem Ende).
 pub fn clear(claude_id: &str) {
+    received_map().remove(claude_id);
     if let Some(dir) = status_dir() {
         remove_in(&dir, claude_id);
     }
@@ -447,6 +487,22 @@ mod tests {
         ensure_settings(&file, &written, || Ok("wieder da".into())).unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "wieder da", "fehlte");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn server_reports_live_in_memory_until_cleared() {
+        let key = "7f0c2a9e-0000-4000-8000-00000000abcd";
+        receive("PermissionRequest", &Value::Null, key);
+        assert_eq!(received(key).map(|r| r.status), Some(Status::Waiting));
+        receive("Stop", &Value::Null, key);
+        assert_eq!(received(key).map(|r| r.status), Some(Status::Idle));
+        receive("SessionEnd", &Value::Null, key);
+        assert_eq!(received(key), None);
+        receive("UserPromptSubmit", &Value::Null, key);
+        clear(key);
+        assert_eq!(received(key), None);
+        receive("Stop", &Value::Null, "../böse");
+        assert_eq!(received("../böse"), None);
     }
 
     #[test]

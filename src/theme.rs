@@ -25,7 +25,7 @@ const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);
 /// Bilder des Claude-Spinners; läuft vor und zurück wie in Claude Code. Kein `✳` (U+2733): das
 /// stellt Windows als Emoji dar (grünes Quadrat, doppelt breit).
 const SPINNER: [&str; 6] = ["·", "✢", "✣", "✶", "✻", "✽"];
-const SPINNER_FRAME: Duration = Duration::from_millis(120);
+pub const SPINNER_FRAME: Duration = Duration::from_millis(120);
 
 /// Symbol und Farbe eines Zustands; `None` = gespeichert, läuft nicht. `elapsed` treibt den
 /// Spinner an.

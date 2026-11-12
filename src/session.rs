@@ -218,17 +218,21 @@ impl Session {
             self.status = Status::Exited;
             return;
         }
-        if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
+        // Meldungen an den eigenen Hook-Server liegen im Speicher und gelten sofort; die Datei der
+        // Befehls-Hooks (Rückfall) wird nur alle `HOOK_POLL` gelesen.
+        if let Some(report) = hooks::received(&self.claude_id) {
+            self.hook = Some(report);
+        } else if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
             self.hook = hooks::read(&self.claude_id);
             self.hook_checked = Some(Instant::now());
-            if self.hook.is_some() && !self.hook_traced {
-                self.hook_traced = true;
-                trace::mark(format_args!(
-                    "session {}: first hook report after {}",
-                    self.claude_id,
-                    since(self.started)
-                ));
-            }
+        }
+        if self.hook.is_some() && !self.hook_traced {
+            self.hook_traced = true;
+            trace::mark(format_args!(
+                "session {}: first hook report after {}",
+                self.claude_id,
+                since(self.started)
+            ));
         }
         if self.first_content.is_none() {
             if self.screen().screen().contents().trim().is_empty() {
