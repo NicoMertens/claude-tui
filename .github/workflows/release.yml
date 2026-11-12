@@ -58,18 +58,18 @@ jobs:
         run: |
           name="claude-tui-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
           bin="target/${{ matrix.target }}/release/claude-tui${{ matrix.ext }}"
-          mkdir -p "dist/$name"
-          cp "$bin" "dist/$name${{ matrix.ext }}"
+          mkdir -p dist
           # Übergangsweise zusätzlich das alte Archiv: der Updater bis v0.5.0 sucht danach.
-          # Entfällt, sobald keine dieser Versionen mehr im Einsatz ist.
-          cp "$bin" README.md "dist/$name/"
-          cd dist
+          # Entfällt, sobald keine dieser Versionen mehr im Einsatz ist. Gepackt wird in einem
+          # eigenen Ordner: unter Linux/macOS heißt die nackte Binary genau wie der Archivordner.
+          mkdir -p "stage/$name"
+          cp "$bin" README.md "stage/$name/"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "$name.zip" "$name" > /dev/null
+            (cd stage && 7z a "../dist/$name.zip" "$name" > /dev/null)
           else
-            tar -czf "$name.tar.gz" "$name"
+            tar -czf "dist/$name.tar.gz" -C stage "$name"
           fi
-          rm -rf "$name"
+          cp "$bin" "dist/$name${{ matrix.ext }}"
       - uses: actions/upload-artifact@v4
         with:
           name: claude-tui-${{ matrix.target }}
