@@ -14,6 +14,7 @@ use crate::{
     keys,
     list::Entry,
     menu::Menu,
+    tags,
     term_view::TermView,
     theme, update,
     windows::Focus,
@@ -281,8 +282,9 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     // Markierte Sessions (Leertaste) tragen ein Häkchen vor dem Titel.
     let marked = app.marked.contains(&entry.claude_id);
     let mark = if marked { "✓ " } else { "" };
+    let tag = tag_label(app, &entry.claude_id);
     // Symbol + Leerzeichen, Häkchen, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
-    let title_width = width.saturating_sub(2 + mark.len().min(2) + 4 + 6);
+    let title_width = width.saturating_sub(2 + mark.chars().count() + tag.chars().count() + 4 + 6);
     let title = head(&entry.title, title_width);
     let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
 
@@ -296,6 +298,7 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
     };
     let line = Line::from(vec![
         Span::styled(format!("{symbol} "), Style::default().fg(color)),
+        Span::styled(tag, tag_style()),
         Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(format!("{title}{padding}"), name_style),
         Span::styled(
@@ -452,6 +455,17 @@ fn dir_picker_width(picker: &DirPicker) -> usize {
         .max(DIR_PICKER_MIN_WIDTH)
 }
 
+/// Schnellwahl-Nummer vor dem Titel (`#3 `), leer ohne Nummer.
+fn tag_label(app: &App, claude_id: &str) -> String {
+    tags::number_of(&app.tags, claude_id).map_or_else(String::new, |n| format!("#{n} "))
+}
+
+fn tag_style() -> Style {
+    Style::default()
+        .fg(theme::MENU)
+        .add_modifier(Modifier::BOLD)
+}
+
 fn draw_windows(f: &mut Frame, app: &App) {
     let rects = app.window_rects();
     if rects.is_empty() {
@@ -473,10 +487,13 @@ fn draw_windows(f: &mut Frame, app: &App) {
         }
         let focused = app.windows.focus() == Focus::Window(slot);
         let color = frame_color(focused);
-        let title = Span::styled(
-            format!(" {} · {} ", slot + 1, app.title_of(id)),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        );
+        let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+        let tag = tag_label(app, &session.claude_id);
+        let title = vec![
+            Span::styled(format!(" [{}] ", slot + 1), title_style),
+            Span::styled(tag, tag_style()),
+            Span::styled(format!("{} ", app.title_of(id)), title_style),
+        ];
         let (label, label_color) = theme::status_label(session.status);
         let (symbol, _) = theme::status_symbol(Some(session.status), clock());
         let separator = Span::styled("· ", Style::default().fg(color));
@@ -484,7 +501,8 @@ fn draw_windows(f: &mut Frame, app: &App) {
             format!("{symbol} {label} "),
             Style::default().fg(label_color),
         );
-        let mut spans = vec![title, separator, status];
+        let mut spans = title;
+        spans.extend([separator, status]);
         if app.windows.zoomed() == Some(slot) {
             spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
         }

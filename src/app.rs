@@ -13,7 +13,8 @@ use ratatui::layout::{Margin, Position, Rect};
 use crate::{
     claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
-    external, hooks, keys,
+    external, hooks,
+    keys::{self, TagKey},
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{self, Action, Context, Menu, Outcome, Purpose},
@@ -21,6 +22,7 @@ use crate::{
     selection::{self, Cell, Selection},
     session::{self, Session, Status},
     state::{self, State},
+    tags::{self, Tags, Toggled},
     trace, ui,
     update::{self, Available},
     waiting,
@@ -85,6 +87,8 @@ pub struct App {
     pub cursor: Option<String>,
     /// In der Liste markierte Sessions (Leertaste); `x` löscht sie gemeinsam.
     pub marked: HashSet<String>,
+    /// Schnellwahl-Nummern (Alt+Zahl vergibt, Ctrl+Zahl zeigt); bleiben über `state.json` erhalten.
+    pub tags: Tags,
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
@@ -165,6 +169,7 @@ impl App {
             groups: Vec::new(),
             cursor: None,
             marked: HashSet::new(),
+            tags: Tags::new(),
             menu: None,
             dir_picker: None,
             notice: None,
@@ -201,7 +206,9 @@ impl App {
             stacked: false,
             next_id: 0,
         };
-        let saved = state::load();
+        let mut saved = state::load();
+        // Vor dem Wiederherstellen übernehmen: jedes `place` speichert den Zustand neu.
+        app.tags = std::mem::take(&mut saved.tags);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
@@ -588,6 +595,16 @@ impl App {
             self.open_commands();
             return Ok(());
         }
+        // Wie Ctrl+Pfeil erreichen Alt+Zahl und Ctrl+Zahl die Session nie.
+        if let Some(tag_key) = keys::tag_key(&key) {
+            return match tag_key {
+                TagKey::Toggle(number) => {
+                    self.toggle_tag(number);
+                    Ok(())
+                }
+                TagKey::Show(number) => self.show_tagged(number),
+            };
+        }
         match self.windows.focused_session() {
             Some(id) => {
                 if let Some(session) = self.session_mut(id) {
@@ -767,6 +784,69 @@ impl App {
     pub fn resize(&mut self, screen: Rect) {
         self.screen = screen;
         self.resize_windows();
+    }
+
+    /// Claude-ID der Session im Fenster mit Fokus bzw. der in der Liste gewählten.
+    fn focused_claude_id(&self) -> Option<String> {
+        match self.windows.focused_session() {
+            Some(id) => self.session(id).map(|s| s.claude_id.clone()),
+            None => self.selected_entry().map(|e| e.claude_id.clone()),
+        }
+    }
+
+    fn toggle_tag(&mut self, number: u8) {
+        let Some(claude_id) = self.focused_claude_id() else {
+            return;
+        };
+        let message = match tags::toggle(&mut self.tags, number, &claude_id) {
+            Toggled::Set => format!("tag {number} set (Ctrl+{number} shows it)"),
+            Toggled::Removed => format!("tag {number} removed"),
+        };
+        self.flash_notice(message);
+        self.save_state();
+    }
+
+    /// Zeigt die Session mit dieser Nummer: hat sie ein Fenster, bekommt es den Fokus. Sonst ersetzt
+    /// sie die Session im Fenster mit Fokus bzw. geht — bei Fokus auf der Liste — weiter wie Enter.
+    fn show_tagged(&mut self, number: u8) -> Result<()> {
+        let Some(claude_id) = self.tags.get(&number).cloned() else {
+            self.flash_notice(format!(
+                "no session tagged {number} (Alt+{number} tags one)"
+            ));
+            return Ok(());
+        };
+        let Some(entry) = list::flatten(&self.groups)
+            .find(|e| e.claude_id == claude_id)
+            .cloned()
+        else {
+            // Die Liste kann beim Start noch unvollständig sein; dann bleibt die Nummer stehen.
+            if self.loading() {
+                self.flash_notice("loading sessions …".to_string());
+            } else {
+                self.tags.remove(&number);
+                self.save_state();
+                self.flash_notice(format!("session tagged {number} no longer exists"));
+            }
+            return Ok(());
+        };
+        self.cursor = Some(claude_id);
+        let focused_slot = match self.windows.focus() {
+            Focus::Window(slot) => Some(slot),
+            Focus::List => None,
+        };
+        if let Some(slot) = entry.running.and_then(|id| self.windows.window_of(id)) {
+            self.set_focus(Focus::Window(slot));
+            return Ok(());
+        }
+        match (entry.running, focused_slot) {
+            (Some(id), Some(slot)) => self.place(id, slot),
+            (None, Some(slot)) => self.open_stored(&entry, Some(slot))?,
+            (_, None) => {
+                let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+                self.on_list_key(enter)?;
+            }
+        }
+        Ok(())
     }
 
     fn on_list_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -1076,6 +1156,9 @@ impl App {
         if let Some(id) = running {
             self.remove_process(id);
         }
+        if tags::remove_session(&mut self.tags, claude_id) {
+            self.save_state();
+        }
         let path = self.store.path_of(claude_id);
         path.map_or(Ok(()), |p| claude_store::delete(&p))
     }
@@ -1238,6 +1321,7 @@ impl App {
             },
             list_hidden: self.list_hidden,
             stacked: self.stacked,
+            tags: self.tags.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);

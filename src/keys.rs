@@ -108,9 +108,45 @@ pub fn focus_direction(key: &KeyEvent) -> Option<Direction> {
     }
 }
 
+/// Schnellwahl über die Zifferntasten 1–9.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagKey {
+    /// `Alt+Zahl`: Nummer vergeben bzw. wieder entfernen.
+    Toggle(u8),
+    /// `Ctrl+Zahl`: Session mit dieser Nummer zeigen.
+    Show(u8),
+}
+
+/// Nur reines Alt bzw. reines Ctrl — Ctrl+Alt ist unter Windows AltGr, auf deutscher Tastatur
+/// liegen darauf ², ³, {, [, ], }.
+pub fn tag_key(key: &KeyEvent) -> Option<TagKey> {
+    let KeyCode::Char(c @ '1'..='9') = key.code else {
+        return None;
+    };
+    let number = c as u8 - b'0';
+    if key.modifiers == KeyModifiers::ALT {
+        Some(TagKey::Toggle(number))
+    } else if key.modifiers == KeyModifiers::CONTROL {
+        Some(TagKey::Show(number))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tag_keys_need_pure_alt_or_ctrl() {
+        let digit = |mods| tag_key(&KeyEvent::new(KeyCode::Char('3'), mods));
+        assert_eq!(digit(KeyModifiers::ALT), Some(TagKey::Toggle(3)));
+        assert_eq!(digit(KeyModifiers::CONTROL), Some(TagKey::Show(3)));
+        assert_eq!(digit(KeyModifiers::CONTROL | KeyModifiers::ALT), None);
+        assert_eq!(digit(KeyModifiers::NONE), None);
+        let zero = KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT);
+        assert_eq!(tag_key(&zero), None);
+    }
 
     #[test]
     fn ctrl_arrow_is_focus_change_but_alt_arrow_is_not() {
