@@ -40,8 +40,12 @@ pub enum Status {
 
 pub struct Session {
     pub id: SessionId,
-    /// ID der Claude-Code-Session (`--session-id` bzw. `--resume`).
+    /// ID der Claude-Code-Session (`--session-id` bzw. `--resume`). Kann wechseln, wenn Claude Code
+    /// die Session als Hintergrund-Job weiterführt (siehe `external::parked_into`).
     pub claude_id: String,
+    /// Claude-ID beim Start; darunter melden sich die Hooks (`CLAUDE_TUI_SESSION`), auch nach
+    /// einem Wechsel von `claude_id`.
+    hook_id: String,
     pub cwd: PathBuf,
     pub status: Status,
     size: (u16, u16),
@@ -130,6 +134,7 @@ impl Session {
 
         let mut session = Self {
             id,
+            hook_id: claude_id.clone(),
             claude_id,
             cwd: cwd.to_path_buf(),
             status: Status::Starting,
@@ -220,10 +225,10 @@ impl Session {
         }
         // Meldungen an den eigenen Hook-Server liegen im Speicher und gelten sofort; die Datei der
         // Befehls-Hooks (Rückfall) wird nur alle `HOOK_POLL` gelesen.
-        if let Some(report) = hooks::received(&self.claude_id) {
+        if let Some(report) = hooks::received(&self.hook_id) {
             self.hook = Some(report);
         } else if self.hook_checked.is_none_or(|t| t.elapsed() >= HOOK_POLL) {
-            self.hook = hooks::read(&self.claude_id);
+            self.hook = hooks::read(&self.hook_id);
             self.hook_checked = Some(Instant::now());
         }
         if self.hook.is_some() && !self.hook_traced {
@@ -357,7 +362,7 @@ impl Drop for Session {
         if let Some(child) = self.child.as_mut() {
             let _ = child.kill();
         }
-        hooks::clear(&self.claude_id);
+        hooks::clear(&self.hook_id);
     }
 }
 

@@ -2,7 +2,7 @@
 //! der Fokus war, dazu die Schnellwahl-Nummern und die eigenen Gruppen. Gespeichert als `state.json` im
 //! Konfigurationsordner.
 
-use std::fs;
+use std::{collections::BTreeMap, fs};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,10 @@ pub struct State {
     /// Zuletzt verwendete Gruppennamen, neueste zuerst.
     #[serde(default)]
     pub recent_groups: Vec<String>,
+    /// Von Claude Code als Hintergrund-Job weitergeführte Sessions: alte Claude-ID → neue. Die
+    /// alte wird in der Liste nicht mehr gezeigt.
+    #[serde(default)]
+    pub superseded: BTreeMap<String, String>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -63,6 +67,7 @@ mod tests {
             tags: Tags::from([(3, "b".to_string())]),
             groups: Assignments::from([("a".to_string(), "G".to_string())]),
             recent_groups: vec!["G".into()],
+            superseded: BTreeMap::from([("alt".to_string(), "b".to_string())]),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);
