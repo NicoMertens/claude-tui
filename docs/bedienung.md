@@ -190,6 +190,7 @@ vom Fokus ab:
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
+| `h` | [Hilfe](#hilfe) anzeigen | Hilfe anzeigen |
 | `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
 
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
@@ -249,6 +250,23 @@ im aktuellen Verzeichnis.
 und, solange weniger als 4 offen sind, „New window“. Eine ersetzte Session läuft im Hintergrund
 weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
 
+### Hilfe
+
+`h` im Menü öffnet die Hilfe: ein Overlay mittig über allen Fenstern (ist die Fensterfläche
+schmaler als 50 Spalten, über dem ganzen Bildschirm). Es erklärt den Aufbau, die Zustandssymbole,
+alle Tasten, die Menüpunkte und die Maus — auf Englisch, wie die übrige Oberfläche. Die Menüpunkte
+stammen aus derselben Tabelle wie das Menü selbst.
+
+| Taste | Wirkung |
+|---|---|
+| `↑` / `↓` (`k` / `j`), Mausrad | zeilenweise scrollen |
+| `PgUp` / `PgDn`, `Leertaste` | seitenweise scrollen |
+| `Home` / `End` | Anfang / Ende |
+| `Esc`, `q`, `Ctrl+A` | schließen (auch ein Klick daneben) |
+
+Passt alles hinein, entfällt das Scrollen; sonst nennt die Fußzeile den sichtbaren Ausschnitt
+(`12–40 of 85`).
+
 ### Gruppen
 
 Sessions lassen sich in eigene Gruppen packen, unabhängig vom Verzeichnis. Eine gruppierte Session
@@ -282,7 +300,8 @@ Ein Klick auf eine Session in der Sessionliste wählt sie aus und gibt der Liste
 
 **Offenes Menü:** Ein Klick außerhalb des Menü-Overlays schließt es und wirkt wie oben beschrieben.
 Klicks und Mausrad auf dem Overlay selbst tun nichts (das Menü wird per Tastatur bedient) und
-erreichen das Fenster darunter nicht.
+erreichen das Fenster darunter nicht. Einzige Ausnahme: Über der [Hilfe](#hilfe) scrollt das Mausrad
+deren Text.
 
 **Markieren und Kopieren in Claude:** Schaltet das Programm im Fenster selbst die Maus ein — Claude
 Code tut das im Fullscreen-Modus, der bei neueren Installationen Standard ist (`/tui fullscreen`

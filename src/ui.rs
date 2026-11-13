@@ -12,6 +12,7 @@ use crate::{
     app::{App, ListHits},
     dirpick::DirPicker,
     grouppick::{Choice, GroupPicker},
+    help::{self, Help},
     keys,
     list::{Entry, Heading},
     menu::Menu,
@@ -379,6 +380,10 @@ const DIR_PICKER_MIN_WIDTH: usize = 40;
 /// Menü, Fensterauswahl, Löschabfrage oder Verzeichnisauswahl als Overlay über dem fokussierten
 /// Fenster; merkt sich die Fläche für die Maus.
 fn draw_overlay(f: &mut Frame, app: &App) {
+    if let Some(help) = &app.help {
+        draw_help(f, app, help);
+        return;
+    }
     let (title, rows, content_width) = match (&app.dir_picker, &app.group_picker, &app.menu) {
         (Some(picker), _, _) => (
             "Directory".to_string(),
@@ -424,6 +429,69 @@ fn draw_overlay(f: &mut Frame, app: &App) {
     f.render_widget(Clear, area);
     draw_panel(f, &title, lines, area);
     app.overlay.set(Some(area));
+}
+
+/// Ist die Fensterfläche schmaler, steht die Hilfe mittig über dem ganzen Bildschirm.
+const HELP_MIN_WIDTH: u16 = 50;
+
+/// Hilfe als Overlay mittig über allen Fenstern (unabhängig vom Fokus); was nicht passt, wird
+/// gescrollt.
+fn draw_help(f: &mut Frame, app: &App, help: &Help) {
+    let screen = f.area();
+    let [_, windows] = split(screen, app.list_hidden);
+    let mut target = windows.intersection(screen);
+    if target.width < HELP_MIN_WIDTH {
+        target = screen;
+    }
+    let preferred = u16::try_from(help::PREFERRED_WIDTH + 4).unwrap_or(u16::MAX);
+    let width = preferred.min(target.width);
+    // Rahmen und je ein Leerzeichen Abstand links und rechts.
+    let lines = help::lines(usize::from(width.saturating_sub(4)));
+    let total = lines.len();
+    // Rahmen oben/unten und die Fußzeile.
+    let wanted = u16::try_from(total + 3).unwrap_or(u16::MAX);
+    let area = overlay_rect(target, target, width, wanted);
+    let body = usize::from(area.height.saturating_sub(3));
+    let top = help.view(total, body);
+    let mut out: Vec<Line<'static>> = lines.iter().skip(top).take(body).map(help_line).collect();
+    let footer = if total > body {
+        let last = (top + body).min(total);
+        format!(
+            " {}–{last} of {total} · ↑↓ PgUp PgDn scroll · Esc close",
+            top + 1
+        )
+    } else {
+        MENU_FOOTER.to_string()
+    };
+    out.push(muted(&footer));
+    f.render_widget(Clear, area);
+    draw_panel(f, "Help", out, area);
+    app.overlay.set(Some(area));
+}
+
+fn help_line(line: &help::Line) -> Line<'static> {
+    let text = |t: &str| Span::styled(t.to_string(), Style::default().fg(theme::TEXT));
+    match line {
+        help::Line::Blank => Line::default(),
+        help::Line::Heading(title) => Line::from(Span::styled(
+            format!(" {title}"),
+            Style::default()
+                .fg(theme::MENU)
+                .add_modifier(Modifier::BOLD),
+        )),
+        help::Line::Text(t) => Line::from(vec![Span::raw(" "), text(t)]),
+        help::Line::Key { keys, text: t } => {
+            let pad = help::KEYS_WIDTH.saturating_sub(help::width_of(keys));
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    format!("{keys}{}", " ".repeat(pad)),
+                    Style::default().fg(theme::ACCENT),
+                ),
+                text(t),
+            ])
+        }
+    }
 }
 
 /// Fläche des Overlays: `width` × `height`, zentriert in `target` und auf dessen Größe begrenzt.

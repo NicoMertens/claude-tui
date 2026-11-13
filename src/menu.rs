@@ -38,10 +38,116 @@ pub enum Action {
     SetGroup,
     /// Neuere Version von GitHub installieren.
     Update,
+    /// Hilfeseite öffnen.
+    Help,
     Quit,
     /// Fensterauswahl: Ziel-Fensterindex.
     Place(usize),
 }
+
+/// Eintrag der gemeinsamen Tabelle für Menü und Hilfe: Taste, Grundbeschriftung im Menü und
+/// Erklärung in der Hilfe. Punkte mit wechselnder Beschriftung (z. B. „Delete 3 marked“) nehmen
+/// hier nur die Taste.
+pub struct Entry {
+    pub hotkey: char,
+    /// Tasten, wie die Hilfe sie nennt, falls nicht nur `hotkey` (sonst leer).
+    keys: &'static str,
+    pub label: &'static str,
+    pub help: &'static str,
+}
+
+const fn entry(hotkey: char, label: &'static str, help: &'static str) -> Entry {
+    Entry {
+        hotkey,
+        keys: "",
+        label,
+        help,
+    }
+}
+
+impl Entry {
+    /// Tasten, wie die Hilfe sie nennt.
+    pub fn keys(&self) -> String {
+        if self.keys.is_empty() {
+            self.hotkey.to_string()
+        } else {
+            self.keys.to_string()
+        }
+    }
+}
+
+pub const NEW_SESSION: Entry = entry(
+    'n',
+    "New session",
+    "New session: pick a directory, then a window",
+);
+pub const CLOSE_WINDOW: Entry = entry(
+    'c',
+    "Close window",
+    "Close the window; the session keeps running in the background",
+);
+pub const DELETE: Entry = entry(
+    'x',
+    "Delete session",
+    "Delete the session for good; in the list all marked sessions",
+);
+pub const GROUP: Entry = entry(
+    'g',
+    "Group …",
+    "Put the session (in the list: all marked) into a group; None removes it",
+);
+pub const DELETE_OLDER: Entry = entry(
+    'o',
+    "Delete sessions older than …",
+    "List only: delete saved sessions older than a day, week or month",
+);
+/// Fokuswechsel; die Fenster nehmen ihre Nummer als Taste, die Liste diese.
+pub const FOCUS: Entry = Entry {
+    hotkey: '0',
+    keys: "1…4 / 0",
+    label: "Focus session list",
+    help: "Focus this window / the session list",
+};
+pub const NEXT_WAITING: Entry = entry(
+    'w',
+    "Next waiting session",
+    "Jump to the next session waiting for you (only when one waits)",
+);
+pub const TOGGLE_LIST: Entry = entry('s', "Hide session list", "Hide or show the session list");
+pub const TOGGLE_STACKED: Entry = entry(
+    'l',
+    "Stack windows",
+    "With exactly 2 windows: stack them or put them side by side",
+);
+pub const TOGGLE_ZOOM: Entry = entry(
+    'z',
+    "Zoom window",
+    "From 2 windows: give the focused one the whole area; again to unzoom",
+);
+pub const UPDATE: Entry = entry(
+    'u',
+    "Update",
+    "Install a newer release (only when one is available)",
+);
+pub const HELP: Entry = entry('h', "Help", "Show this help");
+pub const QUIT: Entry = entry('q', "Quit claude-tui", "Quit claude-tui; all sessions end");
+
+/// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
+pub const ENTRIES: [&Entry; 13] = [
+    &NEW_SESSION,
+    &CLOSE_WINDOW,
+    &DELETE,
+    &GROUP,
+    &DELETE_OLDER,
+    &FOCUS,
+    &NEXT_WAITING,
+    &TOGGLE_LIST,
+    &TOGGLE_STACKED,
+    &TOGGLE_ZOOM,
+    &UPDATE,
+    &HELP,
+    &QUIT,
+];
 
 #[derive(Debug)]
 pub struct Item {
@@ -110,74 +216,79 @@ pub struct Context<'a> {
 impl Menu {
     pub fn commands(ctx: &Context) -> Self {
         let mut items = Vec::new();
-        let mut add = |hotkey, label: &str, action| {
+        let mut add = |entry: &Entry, label: &str, action| {
             items.push(Item {
-                hotkey,
+                hotkey: entry.hotkey,
                 label: label.to_string(),
                 action,
             })
         };
         let in_window = matches!(ctx.focus, Focus::Window(_));
 
-        add('n', "New session", Action::NewSession);
+        add(&NEW_SESSION, NEW_SESSION.label, Action::NewSession);
         if in_window || ctx.selected_has_window {
-            add('c', "Close window", Action::CloseWindow);
+            add(&CLOSE_WINDOW, CLOSE_WINDOW.label, Action::CloseWindow);
         }
         // Markierte Sessions gelten nur mit Fokus auf der Liste; im Fenster meint x dessen Session.
         if !in_window && ctx.marked > 0 {
             let label = format!("Delete {} marked", ctx.marked);
-            add('x', &label, Action::DeleteSession);
+            add(&DELETE, &label, Action::DeleteSession);
         } else if in_window || ctx.has_selection {
-            add('x', "Delete session", Action::DeleteSession);
+            add(&DELETE, DELETE.label, Action::DeleteSession);
         }
         if !in_window && ctx.marked > 0 {
             let label = format!("Group {} marked …", ctx.marked);
-            add('g', &label, Action::SetGroup);
+            add(&GROUP, &label, Action::SetGroup);
         } else if in_window || ctx.has_selection {
-            add('g', "Group …", Action::SetGroup);
+            add(&GROUP, GROUP.label, Action::SetGroup);
         }
         // Betrifft die ganze Liste, nicht das Fenster – deshalb nur mit Fokus auf der Liste.
         if !in_window {
-            add('o', "Delete sessions older than …", Action::DeleteOlder);
+            add(&DELETE_OLDER, DELETE_OLDER.label, Action::DeleteOlder);
         }
         for i in 0..ctx.windows.len() {
             if ctx.focus != Focus::Window(i) {
+                let window = Entry {
+                    hotkey: digit(i + 1),
+                    ..FOCUS
+                };
                 let label = format!("Focus window {}", i + 1);
-                add(digit(i + 1), &label, Action::Focus(Focus::Window(i)));
+                add(&window, &label, Action::Focus(Focus::Window(i)));
             }
         }
         if in_window {
-            add('0', "Focus session list", Action::Focus(Focus::List));
+            add(&FOCUS, FOCUS.label, Action::Focus(Focus::List));
         }
         if ctx.waiting {
-            add('w', "Next waiting session", Action::NextWaiting);
+            add(&NEXT_WAITING, NEXT_WAITING.label, Action::NextWaiting);
         }
         // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
         if ctx.list_hidden {
-            add('s', "Show session list", Action::ToggleList);
+            add(&TOGGLE_LIST, "Show session list", Action::ToggleList);
         } else if !ctx.windows.is_empty() {
-            add('s', "Hide session list", Action::ToggleList);
+            add(&TOGGLE_LIST, TOGGLE_LIST.label, Action::ToggleList);
         }
         // Die Anordnung ist nur bei genau zwei Fenstern wählbar.
         if ctx.windows.len() == 2 {
             let label = if ctx.stacked {
                 "Windows side by side"
             } else {
-                "Stack windows"
+                TOGGLE_STACKED.label
             };
-            add('l', label, Action::ToggleStacked);
+            add(&TOGGLE_STACKED, label, Action::ToggleStacked);
         }
         // Zoomen lohnt erst ab zwei Fenstern; aufheben muss immer gehen.
         if ctx.zoomed {
-            add('z', "Unzoom", Action::ToggleZoom);
+            add(&TOGGLE_ZOOM, "Unzoom", Action::ToggleZoom);
         } else if in_window && ctx.windows.len() >= 2 {
-            add('z', "Zoom window", Action::ToggleZoom);
+            add(&TOGGLE_ZOOM, TOGGLE_ZOOM.label, Action::ToggleZoom);
         }
         if let Some(version) = ctx.update {
             let label = format!("Update to v{version}");
-            add('u', &label, Action::Update);
+            add(&UPDATE, &label, Action::Update);
         }
-        add('q', "Quit claude-tui", Action::Quit);
+        add(&HELP, HELP.label, Action::Help);
+        add(&QUIT, QUIT.label, Action::Quit);
 
         let title = match ctx.focus {
             Focus::Window(i) => format!("Menue {}", i + 1),
@@ -646,6 +757,59 @@ mod tests {
             Some("g Group 2 marked …")
         );
         assert_eq!(label(Menu::commands(&ctx(Focus::List, false, 0))), None);
+    }
+
+    #[test]
+    fn every_menu_key_is_in_the_shared_table_once() {
+        let mut hotkeys: Vec<char> = ENTRIES.iter().map(|e| e.hotkey).collect();
+        hotkeys.sort_unstable();
+        hotkeys.dedup();
+        assert_eq!(hotkeys.len(), ENTRIES.len());
+
+        let windows = names(4);
+        for (focus, marked, flag) in [
+            (Focus::List, 0, false),
+            (Focus::List, 2, true),
+            (Focus::Window(1), 0, true),
+        ] {
+            let menu = Menu::commands(&Context {
+                focus,
+                windows: &windows[..if flag { 2 } else { 4 }],
+                selected_has_window: true,
+                has_selection: true,
+                update: Some("9.9.9"),
+                list_hidden: flag,
+                stacked: flag,
+                zoomed: flag,
+                waiting: true,
+                marked,
+            });
+            for item in menu.items {
+                let known = item.hotkey.is_ascii_digit() || hotkeys.contains(&item.hotkey);
+                assert!(known, "{} {}", item.hotkey, item.label);
+            }
+        }
+    }
+
+    #[test]
+    fn help_item_opens_help() {
+        let windows = names(1);
+        let mut menu = Menu::commands(&Context {
+            focus: Focus::List,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection: false,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed: false,
+            waiting: false,
+            marked: 0,
+        });
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('h'))),
+            Outcome::Run(Action::Help)
+        );
     }
 
     #[test]

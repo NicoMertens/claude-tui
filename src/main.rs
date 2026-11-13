@@ -4,6 +4,7 @@ mod dirpick;
 mod external;
 mod grouppick;
 mod groups;
+mod help;
 mod hook_server;
 mod hooks;
 mod http;
