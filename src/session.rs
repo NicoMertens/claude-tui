@@ -41,7 +41,8 @@ pub enum Status {
 pub struct Session {
     pub id: SessionId,
     /// ID der Claude-Code-Session (`--session-id` bzw. `--resume`). Kann wechseln, wenn Claude Code
-    /// die Session als Hintergrund-Job weiterführt (siehe `external::parked_into`).
+    /// die Session als Hintergrund-Job weiterführt (siehe `external::parked_into`) oder im Prozess
+    /// mit `/resume` bzw. `/clear` eine andere lädt (siehe [`Self::take_switch`]).
     pub claude_id: String,
     /// Claude-ID beim Start; darunter melden sich die Hooks (`CLAUDE_TUI_SESSION`), auch nach
     /// einem Wechsel von `claude_id`.
@@ -205,6 +206,11 @@ impl Session {
 
     pub fn application_cursor(&self) -> bool {
         self.screen().screen().application_cursor()
+    }
+
+    /// Sessionwechsel im Prozess, den die Hooks gemeldet haben (einmal abholbar).
+    pub fn take_switch(&self) -> Option<hooks::Switch> {
+        hooks::take_switch(&self.hook_id)
     }
 
     pub fn refresh(&mut self) {

@@ -30,8 +30,10 @@ pub fn start_server() {
     SERVER_URL.get_or_init(hook_server::start);
 }
 
-/// Umgebungsvariable mit der Claude-ID, unter der claude-tui den Prozess führt. Sie bleibt auch
-/// nach `/clear` gleich, wenn Claude intern eine neue `session_id` vergibt.
+/// Umgebungsvariable mit der Claude-ID, unter der claude-tui den Prozess gestartet hat. Sie bleibt
+/// gleich, wenn Claude im selben Prozess die Session wechselt (`/clear`, `/resume`); die Meldungen
+/// laufen weiter unter dieser Start-ID, die aktuelle `session_id` steht im Event-JSON (siehe
+/// [`take_switch`]).
 pub const SESSION_ENV: &str = "CLAUDE_TUI_SESSION";
 const STATUS_DIR: &str = "status";
 const SETTINGS_PREFIX: &str = "hooks-";
@@ -208,6 +210,7 @@ pub fn receive(event: &str, input: &Value, key: &str) {
     if !valid_key(key) {
         return;
     }
+    note_switch(event, input, key);
     let mut reports = received_map();
     match effect(event, input) {
         Effect::Set(status) => {
@@ -226,6 +229,81 @@ pub fn receive(event: &str, input: &Value, key: &str) {
     }
 }
 
+/// Sessionwechsel im selben Prozess: Claude hat mit `/resume` bzw. `/clear` eine andere Session
+/// geladen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Switch {
+    /// Die jetzt geladene Session.
+    pub session_id: String,
+    /// `/clear`: dieselbe Arbeit unter neuer ID, Nummer und Gruppe wandern mit. Bei `/resume`
+    /// bleiben sie bei der alten Session.
+    pub carry: bool,
+}
+
+/// Je Start-ID die zuletzt beendete Session (`SessionEnd` mit `clear`/`resume`) und ob es `/clear`
+/// war. Erst ein späteres Event mit anderer `session_id` gilt als Wechsel: Ohne diese Sperre würden
+/// auch die Hooks einer von Claude verlegten Session (Hintergrund-Job, gleiche Umgebung) als
+/// Wechsel zählen.
+static ENDED: Mutex<BTreeMap<String, (String, bool)>> = Mutex::new(BTreeMap::new());
+/// Erkannte, noch nicht abgeholte Wechsel je Start-ID.
+static SWITCHED: Mutex<BTreeMap<String, Switch>> = Mutex::new(BTreeMap::new());
+
+fn lock<T>(map: &'static Mutex<T>) -> MutexGuard<'static, T> {
+    map.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Merkt sich das Ende einer Session und erkennt am nächsten Event den Wechsel.
+fn note_switch(event: &str, input: &Value, key: &str) {
+    let Some(session_id) = input
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|id| crate::session::valid_claude_id(id))
+    else {
+        return;
+    };
+    // `SessionStart` (über `curl` weitergeleitet) nennt die geladene Session und den Anlass direkt:
+    // `/resume`, `/clear` bzw. `/branch` (Quelle `fork`). Gleiche ID wie bisher (etwa `--resume`
+    // beim Start) verwirft die App.
+    if event == "SessionStart" {
+        let source = input.get("source").and_then(Value::as_str);
+        if let Some(source @ ("resume" | "clear" | "fork")) = source {
+            lock(&ENDED).remove(key);
+            crate::trace::mark(format_args!("hook {key}: {source} -> {session_id}"));
+            let switch = Switch {
+                session_id: session_id.to_string(),
+                carry: source == "clear",
+            };
+            lock(&SWITCHED).insert(key.to_string(), switch);
+        }
+        return;
+    }
+    if event == "SessionEnd" {
+        let reason = input.get("reason").and_then(Value::as_str);
+        if let Some(reason @ ("clear" | "resume")) = reason {
+            let clear = reason == "clear";
+            lock(&ENDED).insert(key.to_string(), (session_id.to_string(), clear));
+        }
+        return;
+    }
+    let Some((old, clear)) = lock(&ENDED).remove(key) else {
+        return;
+    };
+    if session_id == old {
+        return;
+    }
+    crate::trace::mark(format_args!("hook {key}: switched {old} -> {session_id}"));
+    let switch = Switch {
+        session_id: session_id.to_string(),
+        carry: clear,
+    };
+    lock(&SWITCHED).insert(key.to_string(), switch);
+}
+
+/// Holt einen erkannten Sessionwechsel des Prozesses mit dieser Start-ID ab.
+pub fn take_switch(hook_id: &str) -> Option<Switch> {
+    lock(&SWITCHED).remove(hook_id)
+}
+
 /// Letzte Meldung einer Session an den eigenen Hook-Server (billig, ohne Dateizugriff).
 pub fn received(claude_id: &str) -> Option<Report> {
     received_map().get(claude_id).copied()
@@ -240,6 +318,8 @@ pub fn read(claude_id: &str) -> Option<Report> {
 /// Meldungen einer Session verwerfen (vor dem Start, nach dem Ende).
 pub fn clear(claude_id: &str) {
     received_map().remove(claude_id);
+    lock(&ENDED).remove(claude_id);
+    lock(&SWITCHED).remove(claude_id);
     if let Some(dir) = status_dir() {
         remove_in(&dir, claude_id);
     }
@@ -293,15 +373,27 @@ enum Target<'a> {
 /// Befehl: Exec-Form (`command` + `args`), Claude startet die Binary direkt ohne Shell. `async`,
 /// weil ein langsamer Start sonst jeden Prompt und jedes Werkzeug blockiert; dafür kann eine
 /// verspätete Meldung kurz eine neuere überschreiben, bis das nächste Event kommt.
+///
+/// `disableAgentView`: Mit Agent View verlegt Claude Code eine Session bei `/resume` oder `←` in
+/// einen Hintergrund-Job und hängt das Fenster nur noch daran; welche Session es dann zeigt, lässt
+/// sich von außen nicht verlässlich feststellen. Ohne Agent View wechselt `/resume` im selben
+/// Prozess, und die Hooks melden den Wechsel (siehe [`take_switch`]).
 fn settings(target: &Target) -> Value {
     let hooks: serde_json::Map<String, Value> = EVENTS
         .iter()
-        // `SessionStart` ruft HTTP-Hooks nicht auf (getestet mit Claude Code 2.1.322: der
-        // Befehls-Hook lief, der HTTP-Hook nicht). Bis zur ersten Meldung entscheidet dann die
-        // Heuristik — ein Befehls-Hook als Ersatz brächte den langsamen Prozessstart zurück.
-        .filter(|&&event| !(matches!(target, Target::Http(_)) && event == "SessionStart"))
-        .map(|event| {
+        .map(|&event| {
             let handler = match target {
+                // `SessionStart` unterstützt nur Befehls-Hooks (Claude-Code-Doku; mit 2.1.322
+                // geprüft). `curl` des Systems reicht das Event an den eigenen Server weiter: ein
+                // signiertes Programm, das kein Virenscanner bei jedem Start ausbremst wie die
+                // unsignierte claude-tui-Binary.
+                Target::Http(url) if event == "SessionStart" => json!({
+                    "type": "command",
+                    "command": crate::http::curl_program().to_string_lossy(),
+                    "args": forward_args(url),
+                    "async": true,
+                    "timeout": HTTP_TIMEOUT,
+                }),
                 Target::Http(url) => json!({
                     "type": "http",
                     "url": url,
@@ -322,7 +414,32 @@ fn settings(target: &Target) -> Value {
             (event.to_string(), json!([{ "hooks": [handler] }]))
         })
         .collect();
-    json!({ "hooks": hooks })
+    json!({ "hooks": hooks, "disableAgentView": true })
+}
+
+/// `curl`-Argumente: Event-JSON von stdin an den Hook-Server, Session-ID als Header aus
+/// `CLAUDE_TUI_SESSION` (`--variable`/`--expand-header`, ab curl 8.3; Windows 11 hat 8.x). Still,
+/// damit nichts in Claudes Kontext landet.
+fn forward_args(url: &str) -> Vec<String> {
+    [
+        "-s",
+        "-o",
+        if cfg!(windows) { "NUL" } else { "/dev/null" },
+        "-m",
+        "3",
+        "--data-binary",
+        "@-",
+        "-H",
+        "Content-Type: application/json",
+        "--variable",
+        &format!("%{SESSION_ENV}"),
+        "--expand-header",
+        &format!("{}: {{{{{SESSION_ENV}}}}}", hook_server::SESSION_HEADER),
+        url,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 /// `hooks-<PID>.json`: je laufender claude-tui eine eigene Datei — sie enthält die URL des eigenen
@@ -394,6 +511,87 @@ mod tests {
 
     fn notification(kind: &str) -> Value {
         json!({ "hook_event_name": "Notification", "notification_type": kind })
+    }
+
+    fn event(name: &str, session_id: &str, reason: Option<&str>) -> Value {
+        let mut value = json!({"hook_event_name": name, "session_id": session_id});
+        if let Some(reason) = reason {
+            value["reason"] = json!(reason);
+        }
+        value
+    }
+
+    const OLD: &str = "0b6f3c1e-1d2a-4c5b-9e8f-1234567890ab";
+    const NEW: &str = "1c7a4d2f-2e3b-4d6c-8f9a-234567890abc";
+
+    #[test]
+    fn resume_switches_on_the_next_event_and_keeps_tags() {
+        let key = "switch-resume";
+        receive("SessionEnd", &event("SessionEnd", OLD, Some("resume")), key);
+        assert_eq!(take_switch(key), None);
+        receive(
+            "UserPromptSubmit",
+            &event("UserPromptSubmit", NEW, None),
+            key,
+        );
+        let expected = Switch {
+            session_id: NEW.to_string(),
+            carry: false,
+        };
+        assert_eq!(take_switch(key), Some(expected));
+        assert_eq!(take_switch(key), None);
+    }
+
+    #[test]
+    fn clear_switch_carries_tags() {
+        let key = "switch-clear";
+        receive("SessionEnd", &event("SessionEnd", OLD, Some("clear")), key);
+        receive("Stop", &event("Stop", NEW, None), key);
+        assert!(take_switch(key).is_some_and(|s| s.carry));
+    }
+
+    #[test]
+    fn other_session_ids_without_session_end_are_no_switch() {
+        // So melden sich z. B. die Hooks einer von Claude verlegten Session.
+        let key = "switch-none";
+        receive("Stop", &event("Stop", NEW, None), key);
+        receive("SessionEnd", &event("SessionEnd", OLD, Some("other")), key);
+        receive("Stop", &event("Stop", NEW, None), key);
+        assert_eq!(take_switch(key), None);
+    }
+
+    #[test]
+    fn same_or_invalid_session_id_is_no_switch() {
+        let key = "switch-same";
+        receive("SessionEnd", &event("SessionEnd", OLD, Some("resume")), key);
+        receive("Stop", &event("Stop", OLD, None), key);
+        receive("Stop", &event("Stop", NEW, None), key);
+        assert_eq!(take_switch(key), None);
+
+        let key = "switch-invalid";
+        receive("SessionEnd", &event("SessionEnd", OLD, Some("resume")), key);
+        receive("Stop", &event("Stop", "$(calc)", None), key);
+        assert_eq!(take_switch(key), None);
+    }
+
+    #[test]
+    fn session_start_reports_resume_clear_and_branch() {
+        let start = |source: &str, id: &str| {
+            let mut value = event("SessionStart", id, None);
+            value["source"] = json!(source);
+            value
+        };
+        let key = "switch-start";
+        receive("SessionStart", &start("startup", OLD), key);
+        assert_eq!(take_switch(key), None);
+        receive("SessionStart", &start("fork", NEW), key);
+        let expected = Switch {
+            session_id: NEW.to_string(),
+            carry: false,
+        };
+        assert_eq!(take_switch(key), Some(expected));
+        receive("SessionStart", &start("clear", OLD), key);
+        assert!(take_switch(key).is_some_and(|s| s.carry));
     }
 
     #[test]
@@ -523,8 +721,25 @@ mod tests {
             "${CLAUDE_TUI_SESSION}"
         );
         assert_eq!(stop["allowedEnvVars"], json!(["CLAUDE_TUI_SESSION"]));
-        assert!(value["hooks"].get("SessionStart").is_none());
-        assert_eq!(value["hooks"].as_object().unwrap().len(), EVENTS.len() - 1);
+        assert_eq!(value["hooks"].as_object().unwrap().len(), EVENTS.len());
+        assert_eq!(value["disableAgentView"], true);
+    }
+
+    #[test]
+    fn session_start_is_forwarded_by_curl_with_session_header() {
+        let value = settings(&Target::Http("http://127.0.0.1:4711/hook/t"));
+        let start = &value["hooks"]["SessionStart"][0]["hooks"][0];
+        assert_eq!(start["type"], "command");
+        assert!(start["command"].as_str().unwrap().contains("curl"));
+        let args: Vec<&str> = start["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(args.contains(&"%CLAUDE_TUI_SESSION"));
+        assert!(args.contains(&"X-Claude-Tui-Session: {{CLAUDE_TUI_SESSION}}"));
+        assert_eq!(args.last(), Some(&"http://127.0.0.1:4711/hook/t"));
     }
 
     #[test]

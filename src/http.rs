@@ -41,7 +41,7 @@ enum CurlError {
     Failed(String),
 }
 
-fn curl_program() -> PathBuf {
+pub fn curl_program() -> PathBuf {
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
         PathBuf::from(root).join("System32").join("curl.exe")

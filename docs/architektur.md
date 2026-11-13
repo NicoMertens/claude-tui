@@ -127,9 +127,19 @@ die unsignierte `claude-tui.exe` bei **jedem** Start prüft, kostete das 3–4 s
 Absenden jeder Nachricht und vor und nach jedem Werkzeug. Selbst `async` half nicht, weil schon das
 Anlegen des Prozesses Claude aufhält.
 
-`SessionStart` ruft HTTP-Hooks nicht auf (geprüft mit Claude Code 2.1.322: ein Befehls-Hook für
-dasselbe Event lief, der HTTP-Hook nicht). Für dieses Event trägt claude-tui deshalb nichts ein;
-bis zur ersten Meldung entscheidet die Heuristik.
+`SessionStart` unterstützt laut [Hooks-Doku](https://code.claude.com/docs/en/hooks) nur
+Befehls- und MCP-Hooks (mit 2.1.322 geprüft: der HTTP-Hook lief nicht). Für dieses Event trägt
+claude-tui deshalb einen Befehls-Hook ein, der das `curl` des Systems startet (unter Windows fest
+`%SystemRoot%\System32\curl.exe`, signiert, vom Virenscanner nicht bei jedem Start ausgebremst):
+Es schickt das Event-JSON von stdin an denselben Server, die Session-ID setzt curl über
+`--variable %CLAUDE_TUI_SESSION` und `--expand-header` (ab curl 8.3) in den Header.
+
+Die Einstellungsdatei setzt außerdem **`disableAgentView: true`**. Mit Agent View verlegt Claude
+Code eine Session bei `/resume` oder `←` in einen Hintergrund-Job und hängt das Fenster nur noch
+daran; ein angehängtes Terminal meldet laut [Agent-View-Doku](https://code.claude.com/docs/en/agent-view)
+nichts nach außen, welche Session es zeigt, lässt sich also nicht verlässlich verfolgen. Ohne Agent
+View wechselt `/resume` im selben Prozess, und die Hooks melden den Wechsel. Gilt nur für Sessions,
+die claude-tui startet; die eigene `~/.claude/settings.json` bleibt unberührt.
 
 **Befehls-Hooks (Rückfall),** wenn sich kein Port öffnen lässt: **Exec-Form** (`command` = Pfad der
 eigenen Binary aus `std::env::current_exe()`, `args` = `["hook", "<Event>"]`), Claude startet die
@@ -142,12 +152,26 @@ Der Hook-Server läuft im Prozess der App und legt den Zustand im Speicher ab
 (`hooks::receive`); er gilt beim nächsten Durchlauf der Hauptschleife. Die Befehls-Hooks sind
 eigene Prozesse und schreiben `<Zustand> <Unix-ms>` nach `<Konfigurationsordner>/status/<ID>`
 (erst temporäre Datei, dann umbenennen). Als `<ID>` dient `CLAUDE_TUI_SESSION`, sonst `session_id`
-aus dem JSON — die Umgebungsvariable bleibt auch nach `/clear` gleich, falls Claude intern eine
-neue Session-ID vergibt.
+aus dem JSON — die Umgebungsvariable bleibt gleich, wenn Claude im selben Prozess die Session
+wechselt (`/clear`, `/resume`).
+
+**Sessionwechsel im Prozess.** Lädt Claude mit `/resume` eine andere Session oder beginnt mit
+`/clear` eine neue, melden die Hooks weiter unter der Start-ID; die aktuelle Session steht in
+`session_id` im Event-JSON. Hauptsignal ist der weitergeleitete `SessionStart` mit `source`
+`resume`, `clear` oder `fork` (`/branch`): er nennt die geladene Session direkt. Rückfall:
+`hooks::note_switch` merkt sich ein `SessionEnd` mit `reason` `resume` oder `clear` und wertet das
+nächste Event mit anderer (gültiger) `session_id` als Wechsel.
+Ohne vorheriges `SessionEnd` zählt eine andere ID nicht: Auch die Hooks einer von Claude in den
+Hintergrund verlegten Session (siehe [Extern laufende Sessions](#extern-laufende-sessions)) kommen
+unter der Start-ID an. `App::follow_switch` führt Fenster und Liste dann unter der neuen ID; die
+alte bleibt als gespeicherte Session in der Liste. Schnellwahl-Nummer und Gruppe wandern nur bei
+`/clear` mit (dieselbe Arbeit), bei `/resume` bleiben sie bei der alten Session. Das nächste Event ist in der Regel der
+weitergeleitete `SessionStart` des Wechsels selbst. Läuft die neue Session schon in einem anderen Fenster von claude-tui, wird der
+Wechsel ignoriert.
 
 | Event | Zustand |
 |---|---|
-| `SessionStart` (nur Befehls-Hooks), `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
+| `SessionStart` (über `curl`), `Stop`, `StopFailure`, `Notification` mit `idle_prompt` | bereit |
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact` | arbeitet |
 | `PermissionRequest` (sofort beim Freigabedialog), `Notification` mit `permission_prompt` / `elicitation_dialog` (erst nach ca. 6 s ohne Eingabe) | wartet auf dich |
 | `SessionEnd` | Meldung verwerfen |
@@ -194,8 +218,7 @@ es gilt die Heuristik). Das ist keine zweite Instanz — die Rückfrage entfäll
 Wiederherstellen wird verbunden statt übersprungen.
 
 Grenzen: Eine PID, die nach einem Absturz an einen anderen Prozess vergeben wurde, hält eine
-liegengebliebene Datei am Leben (nur eine überflüssige Rückfrage). Wechselt eine Session in
-claude-tui per `/resume` intern auf eine andere ID, gilt diese als extern. Ohne Datei (alte
+liegengebliebene Datei am Leben (nur eine überflüssige Rückfrage). Ohne Datei (alte
 Versionen) wird eine untätige externe Session nicht erkannt.
 
 ## Grenzen / nächste Schritte
