@@ -171,7 +171,7 @@ fn muted(text: &str) -> Line<'static> {
 /// Zeile über die ganze Breite, ausgewählt in der Menüfarbe hinterlegt.
 fn selectable(text: String, selected: bool, width: usize) -> Line<'static> {
     let style = if selected {
-        Style::default().fg(theme::BG).bg(theme::MENU)
+        Style::default().fg(theme::ON_ACCENT).bg(theme::MENU)
     } else {
         Style::default().fg(theme::TEXT)
     };

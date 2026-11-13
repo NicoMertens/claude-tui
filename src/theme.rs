@@ -10,7 +10,11 @@ pub const ACCENT: Color = Color::Rgb(0xD9, 0x77, 0x57);
 pub const FOCUS: Color = Color::Rgb(0x00, 0x9F, 0xDA);
 /// Rahmen und Titel aller anderen Bereiche (grau).
 pub const UNFOCUS: Color = Color::Rgb(0x6B, 0x68, 0x64);
-pub const BG: Color = Color::Rgb(0x1A, 0x19, 0x18);
+/// Hintergrund der TUI: der Standardhintergrund des Terminals, denselben nutzt Claude Code. So
+/// gehen Rand und Sessionfenster ohne Farbsprung ineinander über.
+pub const BG: Color = Color::Reset;
+/// Schrift auf farbig hinterlegter Auswahl (Menü).
+pub const ON_ACCENT: Color = Color::Rgb(0x1A, 0x19, 0x18);
 /// Rand, Titel und Auswahl des Menüs (eigene Box unter der Sessionliste).
 pub const MENU: Color = Color::Rgb(0x00, 0x9F, 0xDA);
 /// Hintergrund der ausgewählten Zeile in der Sessionliste.
