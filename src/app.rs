@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::mpsc::Receiver,
     time::{Duration, Instant, SystemTime},
@@ -153,7 +153,11 @@ pub struct App {
     starting: Option<(SessionId, Instant)>,
     /// Laufende Claude-Prozesse laut `~/.claude/sessions` (eigene eingeschlossen).
     claimed: external::Claimed,
-    claimed_watch: Option<Receiver<external::Claimed>>,
+    claimed_watch: Option<Receiver<external::Snapshot>>,
+    /// Eigene Sessions, die Claude Code als Hintergrund-Job mit neuer ID weiterführt: alte ID →
+    /// neue. Das alte Protokoll bleibt aus der Liste (siehe [`Self::follow_parked`]); gespeichert
+    /// in `state.json`, sonst käme es nach einem Neustart als Doublette zurück.
+    superseded: BTreeMap<String, String>,
     /// Zuletzt in claude-tui beendete Sessions mit Zeitpunkt (siehe [ENDED_GRACE]).
     ended: Vec<(String, Instant)>,
     /// Start von claude-tui; ältere Schreibzugriffe zählen nicht als fremde Aktivität.
@@ -217,6 +221,7 @@ impl App {
             starting: None,
             claimed: external::Claimed::new(),
             claimed_watch: external::spawn_watcher(),
+            superseded: BTreeMap::new(),
             ended: Vec::new(),
             started: SystemTime::now(),
             screen,
@@ -229,6 +234,7 @@ impl App {
         app.tags = std::mem::take(&mut saved.tags);
         app.group_of = std::mem::take(&mut saved.groups);
         app.recent_groups = std::mem::take(&mut saved.recent_groups);
+        app.superseded = std::mem::take(&mut saved.superseded);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
@@ -259,8 +265,17 @@ impl App {
     fn restore_layout(&mut self, saved: State) {
         trace::mark(format_args!("app: restore {} windows", saved.windows.len()));
         self.stacked = saved.stacked;
-        let elsewhere = external::claimed_now(&saved.windows);
+        let now = external::claimed_now(&saved.windows);
+        let elsewhere = &now.claimed;
         for claude_id in saved.windows {
+            // Inzwischen von Claude Code als Hintergrund-Job weitergeführt: den Job öffnen.
+            let claude_id = match now.parked.get(&claude_id) {
+                Some(new) => {
+                    self.superseded.insert(claude_id, new.clone());
+                    new.clone()
+                }
+                None => claude_id,
+            };
             let Some(stored) = self.store.get(&claude_id) else {
                 continue;
             };
@@ -445,13 +460,14 @@ impl App {
             self.notice = Some(format!("{e:#}"));
         }
         self.advance_starts();
-        if let Some(claimed) = self
+        if let Some(snapshot) = self
             .claimed_watch
             .as_ref()
             .and_then(|rx| rx.try_iter().last())
         {
-            if claimed != self.claimed {
-                self.claimed = claimed;
+            self.follow_parked(&snapshot.parked);
+            if snapshot.claimed != self.claimed {
+                self.claimed = snapshot.claimed;
                 self.list_dirty = true;
             }
         }
@@ -517,6 +533,40 @@ impl App {
         }
     }
 
+    /// Claude Code hat eine eigene Session als Hintergrund-Job mit neuer ID weitergeführt (das
+    /// Fenster zeigt jetzt diesen Job): Die Session übernimmt die neue ID samt Schnellwahl-Nummer,
+    /// Gruppe, Auswahl und Markierung — sonst stünde sie doppelt in der Liste, einmal als „ext“.
+    fn follow_parked(&mut self, parked: &HashMap<String, String>) {
+        let mut changed = false;
+        for session in &mut self.sessions {
+            let Some(new) = parked.get(&session.claude_id) else {
+                continue;
+            };
+            let old = std::mem::replace(&mut session.claude_id, new.clone());
+            trace::mark(format_args!("session {old}: parked as {new}"));
+            for id in self.tags.values_mut() {
+                if *id == old {
+                    id.clone_from(new);
+                }
+            }
+            if let Some(group) = self.group_of.remove(&old) {
+                self.group_of.insert(new.clone(), group);
+            }
+            if self.cursor.as_deref() == Some(old.as_str()) {
+                self.cursor = Some(new.clone());
+            }
+            if self.marked.remove(&old) {
+                self.marked.insert(new.clone());
+            }
+            self.superseded.insert(old, new.clone());
+            changed = true;
+        }
+        if changed {
+            self.list_dirty = true;
+            self.save_state();
+        }
+    }
+
     /// Baut die Sessionliste neu; `true`, wenn sich an Liste, Cursor oder Markierung etwas
     /// geändert hat.
     fn rebuild_list(&mut self) -> bool {
@@ -530,7 +580,9 @@ impl App {
             })
             .collect();
         self.ended.retain(|(_, at)| at.elapsed() < ENDED_GRACE);
-        let stored = self.store.sessions();
+        let mut stored = self.store.sessions();
+        // Das Protokoll vor der Verlegung ist eine überholte Kopie der laufenden Session.
+        stored.retain(|s| !self.superseded.contains_key(&s.id));
         let own: HashSet<&str> = running
             .iter()
             .map(|r| r.claude_id.as_str())
@@ -1329,6 +1381,22 @@ impl App {
         if tagged || grouped {
             self.save_state();
         }
+        // Überholte Protokolle vor einer Verlegung gehören zur Session und gehen mit.
+        let predecessors: Vec<String> = self
+            .superseded
+            .iter()
+            .filter(|(_, new)| *new == claude_id)
+            .map(|(old, _)| old.clone())
+            .collect();
+        for old in &predecessors {
+            if let Some(p) = self.store.path_of(old) {
+                claude_store::delete(&p)?;
+            }
+            self.superseded.remove(old);
+        }
+        if !predecessors.is_empty() {
+            self.save_state();
+        }
         let path = self.store.path_of(claude_id);
         path.map_or(Ok(()), |p| claude_store::delete(&p))
     }
@@ -1494,6 +1562,7 @@ impl App {
             tags: self.tags.clone(),
             groups: self.group_of.clone(),
             recent_groups: self.recent_groups.clone(),
+            superseded: self.superseded.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);

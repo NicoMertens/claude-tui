@@ -9,6 +9,11 @@
 //! Hintergrund-Sessions (`claude --bg`, `"kind":"bg"`) tragen zusätzlich eine `jobId`: Solange sie
 //! laufen, lehnt `claude --resume` sie ab; geöffnet werden sie mit `claude attach <jobId>`.
 //!
+//! Claude Code kann eine laufende Session auch selbst in den Hintergrund verlegen: Sie läuft dann
+//! als Job mit neuer Session-ID (und eigenem Protokoll) weiter, der ursprüngliche Prozess zeigt
+//! sie nur noch an und trägt `parkedJobId`. Damit claude-tui die Session im Fenster nicht als
+//! fremd anzeigt, meldet [`Snapshot::parked`] den Wechsel.
+//!
 //! Das Lesen der Dateien und die Prozessabfrage (`tasklist` braucht unter Windows fast eine
 //! Sekunde) laufen in einem Hintergrund-Thread, nicht im Zeichentakt.
 
@@ -43,10 +48,21 @@ struct Claim {
     /// Nur bei Hintergrund-Sessions.
     #[serde(default)]
     job_id: Option<String>,
+    /// Job, in den dieser Prozess seine Session verlegt hat.
+    #[serde(default)]
+    parked_job_id: Option<String>,
 }
 
 /// Session-IDs laufender Claude-Prozesse, je mit der Job-ID, falls es eine Hintergrund-Session ist.
 pub type Claimed = HashMap<String, Option<String>>;
+
+/// Was der Hintergrund-Thread je Durchlauf meldet.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    pub claimed: Claimed,
+    /// Verlegte Sessions: ursprüngliche Session-ID → Session-ID des Hintergrund-Jobs.
+    pub parked: HashMap<String, String>,
+}
 
 fn parse_claim(text: &str) -> Option<Claim> {
     serde_json::from_str(text).ok()
@@ -75,26 +91,45 @@ fn claimed_ids(claims: &[Claim], alive: Option<&HashSet<u32>>) -> Claimed {
         .collect()
 }
 
-/// Einmalige, blockierende Abfrage für `ids` (beim Wiederherstellen des Fensterlayouts). Die
-/// Prozessliste wird nur abgefragt, wenn eine der Sessions überhaupt in einer Datei steht.
-pub fn claimed_now(ids: &[String]) -> Claimed {
-    let Some(dir) = paths::claude_sessions_dir() else {
-        return Claimed::new();
-    };
-    let claims: Vec<Claim> = read_claims(&dir)
-        .into_iter()
-        .filter(|c| ids.contains(&c.session_id))
+/// Verlegte Sessions (siehe Moduldoku): ursprüngliche Session-ID → Session-ID des Jobs, beide
+/// Prozesse noch am Leben.
+fn parked_into(claims: &[Claim], alive: Option<&HashSet<u32>>) -> HashMap<String, String> {
+    let live: Vec<&Claim> = claims
+        .iter()
+        .filter(|c| alive.is_none_or(|a| a.contains(&c.pid)))
         .collect();
-    if claims.is_empty() {
-        return Claimed::new();
+    live.iter()
+        .filter_map(|c| {
+            let job = c.parked_job_id.as_deref()?;
+            let target = live.iter().find(|d| d.job_id.as_deref() == Some(job))?;
+            (target.session_id != c.session_id)
+                .then(|| (c.session_id.clone(), target.session_id.clone()))
+        })
+        .collect()
+}
+
+/// Einmalige, blockierende Abfrage für `ids` (beim Wiederherstellen des Fensterlayouts). Die
+/// Prozessliste wird nur abgefragt, wenn eine der Sessions überhaupt in einer Datei steht; dann
+/// zählen auch die übrigen Dateien (der Job einer verlegten Session steht unter anderer ID).
+pub fn claimed_now(ids: &[String]) -> Snapshot {
+    let Some(dir) = paths::claude_sessions_dir() else {
+        return Snapshot::default();
+    };
+    let claims = read_claims(&dir);
+    if !claims.iter().any(|c| ids.contains(&c.session_id)) {
+        return Snapshot::default();
     }
     let pids = claims.iter().map(|c| c.pid).collect();
-    claimed_ids(&claims, alive_pids(&pids).as_ref())
+    let alive = alive_pids(&pids);
+    Snapshot {
+        claimed: claimed_ids(&claims, alive.as_ref()),
+        parked: parked_into(&claims, alive.as_ref()),
+    }
 }
 
 /// Startet den Hintergrund-Thread; er liefert alle `SCAN_INTERVAL` die Sessions laufender
 /// Claude-Prozesse und endet, sobald der Empfänger fallen gelassen wird.
-pub fn spawn_watcher() -> Option<Receiver<Claimed>> {
+pub fn spawn_watcher() -> Option<Receiver<Snapshot>> {
     let dir = paths::claude_sessions_dir()?;
     let (tx, rx) = mpsc::channel();
     let spawned = thread::Builder::new()
@@ -103,7 +138,7 @@ pub fn spawn_watcher() -> Option<Receiver<Claimed>> {
     spawned.ok().map(|_| rx)
 }
 
-fn watch(dir: &Path, tx: &mpsc::Sender<Claimed>) {
+fn watch(dir: &Path, tx: &mpsc::Sender<Snapshot>) {
     let mut last_pids = BTreeSet::new();
     let mut alive: Option<HashSet<u32>> = None;
     let mut checked: Option<Instant> = None;
@@ -116,7 +151,11 @@ fn watch(dir: &Path, tx: &mpsc::Sender<Claimed>) {
             checked = Some(Instant::now());
         }
         last_pids = pids;
-        if tx.send(claimed_ids(&claims, alive.as_ref())).is_err() {
+        let snapshot = Snapshot {
+            claimed: claimed_ids(&claims, alive.as_ref()),
+            parked: parked_into(&claims, alive.as_ref()),
+        };
+        if tx.send(snapshot).is_err() {
             return;
         }
         thread::sleep(SCAN_INTERVAL);
@@ -206,7 +245,21 @@ mod tests {
             pid,
             session_id: id.to_string(),
             job_id: None,
+            parked_job_id: None,
         }
+    }
+
+    #[test]
+    fn parked_session_points_to_its_background_job() {
+        let front = r#"{"pid":1,"sessionId":"a205","kind":"interactive","parkedJobId":"2b53"}"#;
+        let job = r#"{"pid":2,"sessionId":"2b53-full","kind":"bg","jobId":"2b53"}"#;
+        let claims: Vec<Claim> = [front, job].iter().filter_map(|t| parse_claim(t)).collect();
+        assert_eq!(
+            parked_into(&claims, None),
+            HashMap::from([("a205".to_string(), "2b53-full".to_string())])
+        );
+        // Job beendet: kein Wechsel.
+        assert!(parked_into(&claims, Some(&HashSet::from([1]))).is_empty());
     }
 
     #[test]
