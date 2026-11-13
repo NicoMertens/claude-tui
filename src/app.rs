@@ -13,7 +13,10 @@ use ratatui::layout::{Margin, Position, Rect};
 use crate::{
     claude_store::{self, Store},
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
-    external, hooks,
+    external,
+    grouppick::{GroupPicker, Outcome as GroupOutcome},
+    groups::{self, Assignments},
+    hooks,
     keys::{self, TagKey},
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
@@ -43,6 +46,8 @@ const FLASH_DURATION: Duration = Duration::from_secs(5);
 /// So lange nach dem Ende eines eigenen Prozesses gilt seine Session noch als eigene: Datei in
 /// `~/.claude/sessions` und letzte Schreibzugriffe stammen noch von ihm.
 const ENDED_GRACE: Duration = Duration::from_secs(30);
+/// Längere Sessiontitel im Kopf des Gruppen-Dialogs werden gekürzt.
+const GROUP_TITLE_MAX: usize = 30;
 /// Ohne Anlass wird die Sessionliste höchstens so oft neu gebaut.
 const LIST_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -89,6 +94,12 @@ pub struct App {
     pub marked: HashSet<String>,
     /// Schnellwahl-Nummern (Alt+Zahl vergibt, Ctrl+Zahl zeigt); bleiben über `state.json` erhalten.
     pub tags: Tags,
+    /// Eigene Gruppen je Claude-ID; bleiben über `state.json` erhalten.
+    pub group_of: Assignments,
+    /// Zuletzt verwendete Gruppennamen, neueste zuerst.
+    recent_groups: Vec<String>,
+    /// Gruppen-Dialog (Ctrl+A g).
+    pub group_picker: Option<GroupPicker>,
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
@@ -173,6 +184,9 @@ impl App {
             cursor: None,
             marked: HashSet::new(),
             tags: Tags::new(),
+            group_of: Assignments::new(),
+            recent_groups: Vec::new(),
+            group_picker: None,
             menu: None,
             dir_picker: None,
             notice: None,
@@ -213,6 +227,8 @@ impl App {
         let mut saved = state::load();
         // Vor dem Wiederherstellen übernehmen: jedes `place` speichert den Zustand neu.
         app.tags = std::mem::take(&mut saved.tags);
+        app.group_of = std::mem::take(&mut saved.groups);
+        app.recent_groups = std::mem::take(&mut saved.recent_groups);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
@@ -527,7 +543,10 @@ impl App {
             self.started,
             SystemTime::now(),
         );
-        let old = std::mem::replace(&mut self.groups, list::build(stored, &running, &elsewhere));
+        let old = std::mem::replace(
+            &mut self.groups,
+            list::build(stored, &running, &elsewhere, &self.group_of),
+        );
         self.list_dirty = false;
         self.last_list = Instant::now();
         let cursor_before = self.cursor.clone();
@@ -567,8 +586,7 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         self.selection = None;
         if let Some(direction) = keys::focus_direction(&key) {
-            self.menu = None;
-            self.dir_picker = None;
+            self.close_overlays();
             self.move_focus(direction);
             return Ok(());
         }
@@ -580,6 +598,18 @@ impl App {
                     let target = picker.target;
                     self.dir_picker = None;
                     self.on_dir_chosen(dir, target)?;
+                }
+            }
+            return Ok(());
+        }
+        if let Some(picker) = self.group_picker.as_mut() {
+            match picker.on_key(&key) {
+                GroupOutcome::Stay => {}
+                GroupOutcome::Cancel => self.group_picker = None,
+                GroupOutcome::Chosen(group) => {
+                    let targets = std::mem::take(&mut picker.targets);
+                    self.group_picker = None;
+                    self.apply_group(&targets, group);
                 }
             }
             return Ok(());
@@ -624,6 +654,10 @@ impl App {
 
     pub fn on_paste(&mut self, text: &str) -> Result<()> {
         if let Some(picker) = self.dir_picker.as_mut() {
+            picker.paste(text);
+            return Ok(());
+        }
+        if let Some(picker) = self.group_picker.as_mut() {
             picker.paste(text);
             return Ok(());
         }
@@ -672,8 +706,7 @@ impl App {
                 let Some((slot, id, cell)) = self.window_at(position) else {
                     return;
                 };
-                self.menu = None;
-                self.dir_picker = None;
+                self.close_overlays();
                 self.set_focus(Focus::Window(slot));
                 let double = self.last_click.is_some_and(|(at, last_id, last_cell)| {
                     at.elapsed() < DOUBLE_CLICK && last_id == id && last_cell == cell
@@ -743,8 +776,7 @@ impl App {
                 if !on_content || !self.session(id).is_some_and(Session::wants_mouse) {
                     return false;
                 }
-                self.menu = None;
-                self.dir_picker = None;
+                self.close_overlays();
                 self.selection = None;
                 self.dragging = false;
                 self.set_focus(Focus::Window(slot));
@@ -791,15 +823,14 @@ impl App {
     }
 
     fn on_overlay(&self, position: Position) -> bool {
-        let open = self.menu.is_some() || self.dir_picker.is_some();
+        let open = self.menu.is_some() || self.dir_picker.is_some() || self.group_picker.is_some();
         open && self.overlay.get().is_some_and(|r| r.contains(position))
     }
 
     /// Klick in die Sessionliste: Session auswählen und Fokus auf die Liste; ein zweiter Klick auf
     /// dieselbe Session kurz danach wirkt wie Enter.
     fn on_list_click(&mut self, claude_id: String) {
-        self.menu = None;
-        self.dir_picker = None;
+        self.close_overlays();
         self.selection = None;
         let double = self
             .last_list_click
@@ -815,6 +846,13 @@ impl App {
                 self.notice = Some(format!("{e:#}"));
             }
         }
+    }
+
+    /// Schließt Menü, Verzeichnisauswahl und Gruppen-Dialog.
+    fn close_overlays(&mut self) {
+        self.menu = None;
+        self.dir_picker = None;
+        self.group_picker = None;
     }
 
     /// Fenster unter der Mausposition: Fensterindex, Session und Zelle im Fensterinhalt.
@@ -1126,6 +1164,7 @@ impl App {
                 self.resize_windows();
             }
             Action::NextWaiting => self.show_next_waiting()?,
+            Action::SetGroup => self.open_group_picker(),
             Action::Quit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {
@@ -1172,6 +1211,55 @@ impl App {
             waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
             marked: self.marked.len(),
         }));
+    }
+
+    /// Gruppen-Dialog für die markierten Sessions (nur mit Fokus auf der Liste) bzw. die Session
+    /// mit Fokus. Die Ziele werden beim Öffnen festgehalten, nicht erst bei der Auswahl.
+    fn open_group_picker(&mut self) {
+        let targets: Vec<String> = if self.windows.focus() == Focus::List && !self.marked.is_empty()
+        {
+            list::flatten(&self.groups)
+                .filter(|e| self.marked.contains(&e.claude_id))
+                .map(|e| e.claude_id.clone())
+                .collect()
+        } else {
+            self.focused_claude_id().into_iter().collect()
+        };
+        let title = match targets.as_slice() {
+            [] => return,
+            [one] => {
+                let name = list::flatten(&self.groups)
+                    .find(|e| &e.claude_id == one)
+                    .map_or(NEW_SESSION_TITLE, |e| e.title.as_str());
+                format!("Group for {}", menu::shorten(name, GROUP_TITLE_MAX))
+            }
+            many => format!("Group for {}", menu::sessions(many.len())),
+        };
+        let offer_none = targets.iter().any(|id| self.group_of.contains_key(id));
+        let choices = groups::choices(&self.group_of, &self.recent_groups);
+        self.group_picker = Some(GroupPicker::new(title, targets, choices, offer_none));
+    }
+
+    /// Ordnet die Sessions der gewählten Gruppe zu (`None` = aus der Gruppe nehmen).
+    fn apply_group(&mut self, targets: &[String], group: Option<String>) {
+        let known = groups::choices(&self.group_of, &self.recent_groups);
+        let name = group.and_then(|g| groups::normalize(&g, &known));
+        groups::assign(&mut self.group_of, targets, name.as_deref());
+        let count = menu::sessions(targets.len());
+        let message = match &name {
+            Some(name) => {
+                groups::remember(&mut self.recent_groups, name);
+                format!("{count} in group \"{name}\"")
+            }
+            None => format!("{count} removed from group"),
+        };
+        // Markierung erledigt — sonst bezöge sich das nächste `x` noch auf sie.
+        if self.windows.focus() == Focus::List {
+            self.marked.clear();
+        }
+        self.rebuild_list();
+        self.save_state();
+        self.flash_notice(message);
     }
 
     /// Nächste wartende Session (Listenreihenfolge, reihum ab der aktuellen): hat sie ein Fenster,
@@ -1236,7 +1324,9 @@ impl App {
         if let Some(id) = running {
             self.remove_process(id);
         }
-        if tags::remove_session(&mut self.tags, claude_id) {
+        let tagged = tags::remove_session(&mut self.tags, claude_id);
+        let grouped = self.group_of.remove(claude_id).is_some();
+        if tagged || grouped {
             self.save_state();
         }
         let path = self.store.path_of(claude_id);
@@ -1402,6 +1492,8 @@ impl App {
             list_hidden: self.list_hidden,
             stacked: self.stacked,
             tags: self.tags.clone(),
+            groups: self.group_of.clone(),
+            recent_groups: self.recent_groups.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);

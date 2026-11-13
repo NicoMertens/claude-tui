@@ -133,9 +133,56 @@ pub fn tag_key(key: &KeyEvent) -> Option<TagKey> {
     }
 }
 
+/// Das Zeichen, das ein Tastendruck als Teil eingefügten Textes bedeutet: Zeichen ohne Ctrl/Alt
+/// (AltGr = Ctrl+Alt mit Nicht-Buchstabe zählt mit), Enter als Zeilenumbruch, Tab.
+pub fn pasted_char(key: &KeyEvent) -> Option<char> {
+    let mods = key.modifiers;
+    let ctrl = mods.contains(KeyModifiers::CONTROL);
+    let alt = mods.contains(KeyModifiers::ALT);
+    match key.code {
+        KeyCode::Char(c) if ctrl && alt && !c.is_ascii_alphabetic() => Some(c),
+        KeyCode::Char(c) if !ctrl && !alt => Some(c),
+        KeyCode::Enter if mods.is_empty() => Some('\n'),
+        KeyCode::Tab if mods.is_empty() => Some('\t'),
+        _ => None,
+    }
+}
+
+/// Ohne Pause angekommene Zeichen sind eingefügt, sobald auf einen Zeilenumbruch noch etwas folgt —
+/// so schnell tippt niemand nach Enter weiter. Ein Enter am Ende bleibt ein Absenden.
+pub fn is_paste_burst(chars: &[char]) -> bool {
+    chars
+        .iter()
+        .position(|&c| c == '\n')
+        .is_some_and(|i| i + 1 < chars.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pasted_chars_include_enter_tab_and_altgr_but_not_shortcuts() {
+        let ch = |code, mods| pasted_char(&KeyEvent::new(code, mods));
+        assert_eq!(ch(KeyCode::Char('A'), KeyModifiers::SHIFT), Some('A'));
+        assert_eq!(ch(KeyCode::Enter, KeyModifiers::NONE), Some('\n'));
+        assert_eq!(ch(KeyCode::Tab, KeyModifiers::NONE), Some('\t'));
+        let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        assert_eq!(ch(KeyCode::Char('{'), altgr), Some('{'));
+        assert_eq!(ch(KeyCode::Char('a'), KeyModifiers::CONTROL), None);
+        assert_eq!(ch(KeyCode::Char('1'), KeyModifiers::ALT), None);
+        assert_eq!(ch(KeyCode::Enter, KeyModifiers::SHIFT), None);
+        assert_eq!(ch(KeyCode::Up, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn burst_is_paste_only_if_text_follows_a_newline() {
+        assert!(is_paste_burst(&['a', '\n', 'b']));
+        assert!(is_paste_burst(&['\n', '\n']));
+        assert!(!is_paste_burst(&['a', 'b', '\n']));
+        assert!(!is_paste_burst(&['a', 'b']));
+        assert!(!is_paste_burst(&[]));
+    }
 
     #[test]
     fn tag_keys_need_pure_alt_or_ctrl() {

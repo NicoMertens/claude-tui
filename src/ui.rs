@@ -11,8 +11,9 @@ use std::time::{Duration, SystemTime};
 use crate::{
     app::{App, ListHits},
     dirpick::DirPicker,
+    grouppick::{Choice, GroupPicker},
     keys,
-    list::Entry,
+    list::{Entry, Heading},
     menu::Menu,
     tags,
     term_view::TermView,
@@ -23,6 +24,8 @@ use crate::{
 const SIDEBAR_WIDTH: u16 = 42;
 /// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
 const FOLDER_ICON: &str = "📁";
+/// Kennzeichnet eigene Gruppen; wie das Ordner-Emoji ohne Variantenzeichen zwei Spalten breit.
+const GROUP_ICON: &str = "📌";
 
 /// Teilt den Bildschirm in Sessionliste und Fensterfläche; bei ausgeblendeter Liste bekommen die
 /// Fenster die volle Breite (die Liste ist dann leer).
@@ -224,12 +227,26 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let mut rows: Vec<Option<String>> = Vec::new();
     let mut selected_item = None;
     for group in &app.groups {
-        let header = tail(&group.cwd.display().to_string(), width.saturating_sub(4));
-        // Das Ordner-Emoji ist zwei Spalten breit.
-        let line = Line::from(vec![
-            Span::raw(format!("{FOLDER_ICON} ")),
-            Span::styled(header, Style::default().fg(theme::MUTED)),
-        ]);
+        // Beide Emojis sind zwei Spalten breit. Gruppennamen hinten kürzen, Pfade vorne (der
+        // Ordnername am Ende ist der aussagekräftige Teil).
+        let line = match &group.heading {
+            Heading::Group(name) => Line::from(vec![
+                Span::raw(format!("{GROUP_ICON} ")),
+                Span::styled(
+                    head(name, width.saturating_sub(4)),
+                    Style::default()
+                        .fg(theme::MENU)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Heading::Dir(cwd) => Line::from(vec![
+                Span::raw(format!("{FOLDER_ICON} ")),
+                Span::styled(
+                    tail(&cwd.display().to_string(), width.saturating_sub(4)),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ]),
+        };
         items.push(ListItem::new(line));
         rows.push(None);
         for entry in &group.entries {
@@ -362,14 +379,19 @@ const DIR_PICKER_MIN_WIDTH: usize = 40;
 /// Menü, Fensterauswahl, Löschabfrage oder Verzeichnisauswahl als Overlay über dem fokussierten
 /// Fenster; merkt sich die Fläche für die Maus.
 fn draw_overlay(f: &mut Frame, app: &App) {
-    let (title, rows, content_width) = match (&app.dir_picker, &app.menu) {
-        (Some(picker), _) => (
+    let (title, rows, content_width) = match (&app.dir_picker, &app.group_picker, &app.menu) {
+        (Some(picker), _, _) => (
             "Directory".to_string(),
             dir_picker_rows(picker),
             dir_picker_width(picker),
         ),
-        (None, Some(menu)) => (menu.title.clone(), menu.items.len() + 1, menu_width(menu)),
-        (None, None) => {
+        (None, Some(picker), _) => (
+            picker.title.clone(),
+            group_picker_lines(picker, 0).len(),
+            group_picker_width(picker),
+        ),
+        (None, None, Some(menu)) => (menu.title.clone(), menu.items.len() + 1, menu_width(menu)),
+        (None, None, None) => {
             app.overlay.set(None);
             return;
         }
@@ -393,10 +415,11 @@ fn draw_overlay(f: &mut Frame, app: &App) {
         u16::try_from(height).unwrap_or(u16::MAX),
     );
     let inner_width = area.width.saturating_sub(2) as usize;
-    let lines = match (&app.dir_picker, &app.menu) {
-        (Some(picker), _) => dir_picker_lines(picker, inner_width),
-        (None, Some(menu)) => menu_lines(menu, inner_width),
-        (None, None) => Vec::new(),
+    let lines = match (&app.dir_picker, &app.group_picker, &app.menu) {
+        (Some(picker), _, _) => dir_picker_lines(picker, inner_width),
+        (None, Some(picker), _) => group_picker_lines(picker, inner_width),
+        (None, None, Some(menu)) => menu_lines(menu, inner_width),
+        (None, None, None) => Vec::new(),
     };
     f.render_widget(Clear, area);
     draw_panel(f, &title, lines, area);
@@ -453,6 +476,57 @@ fn dir_picker_width(picker: &DirPicker) -> usize {
         .max()
         .unwrap_or(0)
         .max(DIR_PICKER_MIN_WIDTH)
+}
+
+const GROUP_PICKER_HINT: &str = " Enter · ↑↓ pick · Esc";
+/// Mindestbreite des Inhalts im Gruppen-Dialog, damit Platz zum Tippen bleibt.
+const GROUP_PICKER_MIN_WIDTH: usize = 30;
+
+fn choice_label(choice: &Choice) -> String {
+    match choice {
+        Choice::None => " None (remove from group)".to_string(),
+        Choice::Group(name) => format!(" {name}"),
+    }
+}
+
+fn group_picker_lines(picker: &GroupPicker, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("> ", Style::default().fg(theme::ACCENT)),
+        Span::styled(
+            tail(&picker.input, width.saturating_sub(3)),
+            Style::default().fg(theme::TEXT),
+        ),
+        Span::styled("█", Style::default().fg(theme::ACCENT)),
+    ])];
+    let visible = picker.visible();
+    if !visible.is_empty() {
+        lines.push(section_title("groups"));
+        for (i, choice) in visible.iter().enumerate() {
+            let text = head(&choice_label(choice), width);
+            lines.push(selectable(text, picker.selected == Some(i), width));
+        }
+    }
+    lines.push(match picker.error {
+        Some(error) => Line::from(Span::styled(
+            format!(" {error}"),
+            Style::default().fg(theme::WAITING),
+        )),
+        None => muted(GROUP_PICKER_HINT),
+    });
+    lines
+}
+
+fn group_picker_width(picker: &GroupPicker) -> usize {
+    let input = picker.input.chars().count() + 3;
+    let error = picker.error.map_or(0, |e| e.chars().count() + 1);
+    picker
+        .visible()
+        .iter()
+        .map(|c| choice_label(c).chars().count())
+        .chain([input, error, GROUP_PICKER_HINT.chars().count()])
+        .max()
+        .unwrap_or(0)
+        .max(GROUP_PICKER_MIN_WIDTH)
 }
 
 /// Schnellwahl-Nummer vor dem Titel (`#3 `), leer ohne Nummer.

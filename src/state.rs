@@ -1,5 +1,5 @@
 //! Fensterlayout über einen Neustart hinweg: welche Claude-Session in welchem Fenster lag und wo
-//! der Fokus war, dazu die Schnellwahl-Nummern. Gespeichert als `state.json` im
+//! der Fokus war, dazu die Schnellwahl-Nummern und die eigenen Gruppen. Gespeichert als `state.json` im
 //! Konfigurationsordner.
 
 use std::fs;
@@ -7,7 +7,7 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{paths, tags::Tags};
+use crate::{groups::Assignments, paths, tags::Tags};
 
 const FILE_NAME: &str = "state.json";
 
@@ -26,6 +26,12 @@ pub struct State {
     /// Schnellwahl-Nummer → Claude-Session-ID (Alt+Zahl / Ctrl+Zahl).
     #[serde(default)]
     pub tags: Tags,
+    /// Claude-Session-ID → eigene Gruppe.
+    #[serde(default)]
+    pub groups: Assignments,
+    /// Zuletzt verwendete Gruppennamen, neueste zuerst.
+    #[serde(default)]
+    pub recent_groups: Vec<String>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -55,6 +61,8 @@ mod tests {
             list_hidden: true,
             stacked: true,
             tags: Tags::from([(3, "b".to_string())]),
+            groups: Assignments::from([("a".to_string(), "G".to_string())]),
+            recent_groups: vec!["G".into()],
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);
@@ -64,6 +72,8 @@ mod tests {
     fn older_file_without_tags_still_loads() {
         let state: State = serde_json::from_str(r#"{"windows":["a"],"focus":0}"#).expect("json");
         assert!(state.tags.is_empty());
+        assert!(state.groups.is_empty());
+        assert!(state.recent_groups.is_empty());
         assert_eq!(state.windows, ["a"]);
     }
 }

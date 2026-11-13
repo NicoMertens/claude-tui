@@ -71,9 +71,10 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 
 ## Aufbau
 
-Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`),
-gruppiert nach Arbeitsverzeichnis — Gruppen mit der jüngsten Aktivität oben, darin laufende Sessions
-zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
+Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Oben
+stehen die [eigenen Gruppen](#gruppen) (📌, alphabetisch), darunter die übrigen Sessions gruppiert
+nach Arbeitsverzeichnis (📁) — Verzeichnisse mit der jüngsten Aktivität oben. In jedem Abschnitt
+stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
 [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
@@ -182,6 +183,7 @@ vom Fokus ab:
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen |
+| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen |
 | `o` | gespeicherte Sessions älter als 1 Tag / 1 Woche / 1 Monat löschen | — |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
@@ -246,6 +248,27 @@ im aktuellen Verzeichnis.
 **Fensterauswahl:** listet die belegten Fenster („Replace Window 1“, Nummer wie in der Fensterleiste)
 und, solange weniger als 4 offen sind, „New window“. Eine ersetzte Session läuft im Hintergrund
 weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
+
+### Gruppen
+
+Sessions lassen sich in eigene Gruppen packen, unabhängig vom Verzeichnis. Eine gruppierte Session
+steht nicht mehr unter ihrem Verzeichnis, sondern unter der Gruppe; die Gruppen stehen oben in der
+Sessionliste, alphabetisch sortiert. Eine Session gehört höchstens einer Gruppe.
+
+`g` im Menü öffnet den Gruppen-Dialog für die Session mit Fokus (im Fenster bzw. die in der Liste
+gewählte) oder — mit Fokus auf der Liste — für alle markierten Sessions:
+
+| Taste | Wirkung |
+|---|---|
+| Tippen / Einfügen | Namen einer neuen Gruppe eingeben; filtert zugleich die Liste darunter |
+| `↑` / `↓` | Eintrag wählen: **None** (aus der Gruppe nehmen, nur wenn eine der Sessions in einer Gruppe ist), dann die zuletzt verwendeten und die übrigen vorhandenen Gruppen |
+| `Enter` | gewählten Eintrag übernehmen, sonst den getippten Namen |
+| `Esc` | abbrechen |
+
+Groß-/Kleinschreibung trennt keine Gruppen: `backend` landet in einer vorhandenen Gruppe `Backend`.
+„None“ ist als Name reserviert. Eine Gruppe besteht, solange ihr eine Session angehört. Zuordnung
+und die 10 zuletzt verwendeten Gruppen bleiben über einen Neustart erhalten (`state.json`);
+gelöschte Sessions verlieren ihre Gruppe.
 
 ## Maus
 

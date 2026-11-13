@@ -32,9 +32,11 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
 | `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session; Lesestand als `sessions-cache.json`, beim Start im Hintergrund nachgelesen |
-| `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen, gruppiert nach Verzeichnis |
+| `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis |
+| `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |
+| `grouppick.rs` | Gruppen-Dialog (`Ctrl+A g`): Eingabe eines neuen Namens, Auswahl aus „None“ und vorhandenen bzw. zuletzt verwendeten Gruppen |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik) |
-| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander, Schnellwahl-Nummern) als `state.json` für den Neustart |
+| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen) als `state.json` für den Neustart |
 | `tags.rs` | Schnellwahl-Nummern 1–9 → Claude-ID: vergeben, umhängen, entfernen (`Alt+Zahl` / `Ctrl+Zahl`) |
 | `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
@@ -62,7 +64,11 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 2. Ein Lese-Thread je Session schreibt die Ausgabe in einen `vt100::Parser` (hinter `Mutex`) und
    merkt sich den Zeitpunkt der letzten Ausgabe.
 3. Die Hauptschleife fragt bei jedem Takt den Status ab, zeichnet und leitet Tastendrücke als
-   Bytes an das PTY der Session im Fenster mit Fokus weiter. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
+   Bytes an das PTY der Session im Fenster mit Fokus weiter. Unter Windows kann crossterm kein
+   Bracketed Paste, eingefügter Text kommt dort als Tastendrücke an. Folgt in einer ohne Pause
+   anstehenden Folge noch Text auf ein Enter, gibt `main.rs` die Folge als eingefügten Text
+   weiter (mit Bracketed-Paste-Rahmen, wenn die Session ihn verlangt). So schickt Claude nicht
+   schon nach der ersten Zeile ab. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
    `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte). Wechselt eine
    Session dabei auf „wartet“, setzt `App::tick` einen Hinweis und `ring_bell`; `main.rs` schreibt
    das BEL nach dem Zeichnen direkt über das Terminal-Backend.
