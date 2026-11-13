@@ -436,6 +436,14 @@ impl App {
             changes.push((session.id, before, session.status));
         }
         let statuses_changed = changes.iter().any(|&(_, before, after)| before != after);
+        let switches: Vec<(SessionId, hooks::Switch)> = self
+            .sessions
+            .iter()
+            .filter_map(|s| s.take_switch().map(|switch| (s.id, switch)))
+            .collect();
+        for (id, switch) in switches {
+            self.follow_switch(id, switch);
+        }
         for id in waiting::newly_waiting(changes, self.windows.focused_session()) {
             self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
             self.ring_bell = waiting::bell_enabled();
@@ -540,6 +548,45 @@ impl App {
     /// Claude Code hat eine eigene Session als Hintergrund-Job mit neuer ID weitergeführt (das
     /// Fenster zeigt jetzt diesen Job): Die Session übernimmt die neue ID samt Schnellwahl-Nummer,
     /// Gruppe, Auswahl und Markierung — sonst stünde sie doppelt in der Liste, einmal als „ext“.
+    /// Claude hat im Prozess `id` mit `/resume` bzw. `/clear` eine andere Session geladen: Fenster
+    /// und Liste führen ab jetzt die neue. Anders als bei [`Self::follow_parked`] bleibt die alte
+    /// eine eigene Session in der Liste (kein `superseded`); Markierung bleibt bei ihr, Nummer und
+    /// Gruppe nur bei `/resume` (`carry == false`).
+    fn follow_switch(&mut self, id: SessionId, switch: hooks::Switch) {
+        let new = switch.session_id;
+        // Dieselbe Session (z. B. `SessionStart` nach `--resume` beim Start): nichts zu tun. Zwei
+        // Prozesse mit derselben Claude-ID darf es in claude-tui nicht geben.
+        if let Some(other) = self.sessions.iter().find(|s| s.claude_id == new) {
+            if other.id != id {
+                trace::mark(format_args!("switch to {new} ignored: already open"));
+            }
+            return;
+        }
+        let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) else {
+            return;
+        };
+        let old = std::mem::replace(&mut session.claude_id, new.clone());
+        trace::mark(format_args!("session {old}: switched to {new}"));
+        if switch.carry {
+            for tagged in self.tags.values_mut() {
+                if *tagged == old {
+                    tagged.clone_from(&new);
+                }
+            }
+            if let Some(group) = self.group_of.remove(&old) {
+                self.group_of.insert(new.clone(), group);
+            }
+        }
+        if self.cursor.as_deref() == Some(old.as_str()) {
+            self.cursor = Some(new);
+        }
+        // Das alte Protokoll wurde eben noch geschrieben; ohne diesen Eintrag sähe es kurz wie eine
+        // anderswo laufende Session aus.
+        self.ended.push((old, Instant::now()));
+        self.list_dirty = true;
+        self.save_state();
+    }
+
     fn follow_parked(&mut self, parked: &HashMap<String, String>) {
         let mut changed = false;
         for session in &mut self.sessions {

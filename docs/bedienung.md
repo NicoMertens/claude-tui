@@ -347,6 +347,18 @@ folgt mit einigen Sekunden Verzögerung. Beim Start setzt claude-tui eine Sessio
 gerade anderswo läuft, nicht fort, sondern meldet „… runs elsewhere – not reopened“ — eine
 Hintergrund-Session öffnet es dagegen mit `claude attach`.
 
+**Sessionwechsel in Claude:** Lädt man in einem Fenster mit `/resume` eine andere Session oder
+beginnt mit `/clear` eine neue, zeigen Fensterleiste und Sessionliste kurz danach die neue Session; die vorherige steht weiter als gespeicherte Session in
+der Liste. Schnellwahl-Nummer und Gruppe gehen bei `/clear` auf die neue Session über, bei
+`/resume` bleiben sie bei der vorherigen. Dafür schaltet claude-tui in den Sessions, die es startet,
+Claudes Agent View ab (`disableAgentView`): `/resume` wechselt dann im selben Prozess, statt die
+Session in den Hintergrund zu verlegen, und `←` am leeren Prompt öffnet keine Agent View.
+
+Eine Kopie der Unterhaltung, zu der man wechseln kann, legt **`/branch`** an: Das Fenster zeigt
+danach die Kopie, das Original steht weiter in der Sessionliste. `/fork` erzeugt ohne Agent View
+dagegen nur einen Subagenten innerhalb der Session — keine eigene Session, also auch kein Eintrag
+in der Liste.
+
 Endet ein Prozess in einem Fenster, nennt der Hinweis „… has exited: …“ die letzte Zeile, die er auf
 den Bildschirm geschrieben hat (meist die Fehlermeldung).
 

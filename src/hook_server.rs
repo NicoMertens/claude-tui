@@ -116,7 +116,12 @@ fn handle(stream: TcpStream, expected_path: &str) {
                         .map(str::to_string)
                 });
                 if let Some(key) = key {
-                    trace::mark(format_args!("hook {event} for {key} (http)"));
+                    let field = |name| input.get(name).and_then(Value::as_str).unwrap_or("-");
+                    trace::mark(format_args!(
+                        "hook {event} for {key} (http, session {}, reason {})",
+                        field("session_id"),
+                        field("reason")
+                    ));
                     hooks::receive(&event, &input, &key);
                 }
             }
