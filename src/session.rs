@@ -326,7 +326,13 @@ impl Session {
 
     pub fn paste(&mut self, text: &str) -> Result<()> {
         let text = strip_escapes(text);
-        if self.screen().screen().bracketed_paste() {
+        let bracketed = self.screen().screen().bracketed_paste();
+        crate::trace::mark(format_args!(
+            "paste: {} chars, bracketed {bracketed}, ends with newline {}",
+            text.chars().count(),
+            text.ends_with(['\n', '\r']),
+        ));
+        if bracketed {
             let wrapped = format!("\x1b[200~{text}\x1b[201~");
             self.write(wrapped.as_bytes())
         } else {

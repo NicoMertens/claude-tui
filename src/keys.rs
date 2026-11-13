@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::layout::Direction;
@@ -157,6 +159,16 @@ pub fn is_paste_burst(chars: &[char]) -> bool {
         .is_some_and(|i| i + 1 < chars.len())
 }
 
+/// Kommen Zeichen so kurz nach eingefügtem Text, gehören sie noch dazu (die Konsole liefert lange
+/// Texte stückweise) — auch ein einzelnes abschließendes Enter, das sonst abschicken würde.
+pub const PASTE_CONTINUE: Duration = Duration::from_millis(150);
+
+/// Eingefügt oder getippt: ein Stoß nach [`is_paste_burst`] oder die Fortsetzung eines gerade
+/// eingefügten Textes (`since_paste` = Zeit seit dessen Ende).
+pub fn is_paste(chars: &[char], since_paste: Option<Duration>) -> bool {
+    is_paste_burst(chars) || (!chars.is_empty() && since_paste.is_some_and(|d| d < PASTE_CONTINUE))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +185,18 @@ mod tests {
         assert_eq!(ch(KeyCode::Char('1'), KeyModifiers::ALT), None);
         assert_eq!(ch(KeyCode::Enter, KeyModifiers::SHIFT), None);
         assert_eq!(ch(KeyCode::Up, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn tail_right_after_a_paste_belongs_to_it() {
+        let soon = Some(Duration::from_millis(20));
+        let later = Some(PASTE_CONTINUE);
+        // Rest der letzten Zeile samt Enter, kurz nach dem ersten Teil.
+        assert!(is_paste(&['e', 'n', 'd', '\n'], soon));
+        assert!(is_paste(&['\n'], soon));
+        assert!(!is_paste(&['\n'], later));
+        assert!(!is_paste(&['\n'], None));
+        assert!(!is_paste(&[], soon));
     }
 
     #[test]
