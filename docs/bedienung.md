@@ -261,8 +261,18 @@ Ein Klick auf eine Session in der Sessionliste wählt sie aus und gibt der Liste
 Klicks und Mausrad auf dem Overlay selbst tun nichts (das Menü wird per Tastatur bedient) und
 erreichen das Fenster darunter nicht.
 
-**Markieren und Kopieren:** Mit gedrückter linker Maustaste in einem Fenster ziehen markiert Text
-(blau hinterlegt) — nur innerhalb dieses Fensters, auch wenn die Maus darüber hinaus gezogen wird.
+**Markieren und Kopieren in Claude:** Schaltet das Programm im Fenster selbst die Maus ein — Claude
+Code tut das im Fullscreen-Modus, der bei neueren Installationen Standard ist (`/tui fullscreen`
+bzw. `/tui default` schaltet um) —, gehen Klicks und Ziehen mit allen Tasten an das Programm.
+Claude markiert dann selbst im Gesprächsverlauf: Ziehen markiert, Doppelklick ein Wort bzw. einen
+ganzen Pfad oder eine URL, Dreifachklick eine Zeile, `Shift+Pfeil` erweitert per Tastatur (am
+Rand scrollt die Ansicht mit). Kopiert wird von Claude selbst beim Loslassen (abschaltbar über
+`/config` → *Copy on select*, dann `Ctrl+C` bei aktiver Markierung). Der Klick gibt dem Fenster
+zugleich den Fokus. Reine Mausbewegungen (Hover) werden nicht weitergereicht.
+
+**Eigene Markierung:** Hat das Programm die Maus nicht eingeschaltet, oder wird **Alt** beim
+Klicken gehalten, markiert claude-tui selbst: Ziehen mit der linken Maustaste markiert Text (blau
+hinterlegt) — nur innerhalb dieses Fensters, auch wenn die Maus darüber hinaus gezogen wird.
 Beim Loslassen landet der Text in der Zwischenablage, unten in der Sessionliste steht
 `copied N characters`. **Doppelklick** markiert und kopiert ein Wort. Ein einfacher Klick setzt nur
 den Fokus auf das Fenster. Die Markierung verschwindet mit der nächsten Taste, dem nächsten Klick

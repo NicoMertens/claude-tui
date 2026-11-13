@@ -10,6 +10,7 @@ mod keys;
 mod layout;
 mod list;
 mod menu;
+mod mouse;
 mod paths;
 mod recent;
 mod selection;
