@@ -68,7 +68,10 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
    Bracketed Paste, eingefügter Text kommt dort als Tastendrücke an. Folgt in einer ohne Pause
    anstehenden Folge noch Text auf ein Enter, gibt `main.rs` die Folge als eingefügten Text
    weiter (mit Bracketed-Paste-Rahmen, wenn die Session ihn verlangt). So schickt Claude nicht
-   schon nach der ersten Zeile ab. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
+   schon nach der ersten Zeile ab. Lange Texte liefert die Konsole stückweise, auch mitten in
+   einer Zeile: Nach dem zweiten Zeichen wartet `main.rs` deshalb kurz (10 ms) auf weitere, und
+   was bis 150 ms nach eingefügtem Text kommt, gehört noch dazu — sonst schickte das Enter am
+   Ende des Rests ab. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
    `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte). Wechselt eine
    Session dabei auf „wartet“, setzt `App::tick` einen Hinweis und `ring_bell`; `main.rs` schreibt
    das BEL nach dem Zeichnen direkt über das Terminal-Backend.

@@ -120,6 +120,8 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
     // Seit dem letzten Bild hat sich etwas geändert (Ereignis, Zustand); `None` = noch kein Bild.
     let mut changed = true;
     let mut last_draw: Option<Instant> = None;
+    // Ende des letzten als eingefügt erkannten Textes (siehe `on_typed`).
+    let mut last_paste: Option<Instant> = None;
 
     while !app.should_quit {
         changed |= app.tick();
@@ -152,7 +154,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
                 break;
             }
             timeout = Duration::ZERO;
-            changed |= handle(&mut app, event::read()?)?;
+            changed |= handle(&mut app, &mut last_paste, event::read()?)?;
             if app.should_quit {
                 break;
             }
@@ -163,12 +165,12 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
 }
 
 /// Verarbeitet ein Ereignis; `true`, wenn sich dadurch etwas geändert haben kann.
-fn handle(app: &mut app::App, event: Event) -> Result<bool> {
+fn handle(app: &mut app::App, last_paste: &mut Option<Instant>, event: Event) -> Result<bool> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Release => return Ok(false),
         Event::Key(key) if keys::pasted_char(&key).is_some() => {
-            if let Some(next) = on_typed(app, key)? {
-                handle(app, next)?;
+            if let Some(next) = on_typed(app, last_paste, key)? {
+                handle(app, last_paste, next)?;
             }
         }
         Event::Key(key) => app.on_key(key)?,
@@ -185,15 +187,21 @@ fn handle(app: &mut app::App, event: Event) -> Result<bool> {
 /// Windows-Konsolen kennen kein Bracketed Paste (crossterm lehnt es dort ab): Eingefügter Text kommt
 /// als Folge von Tastendrücken, jeder Zeilenumbruch als Enter — Claude schickte den Text dann schon
 /// nach der ersten Zeile ab. Deshalb alles sammeln, was ohne Pause ansteht, und es als eingefügten
-/// Text weitergeben, wenn [`keys::is_paste_burst`] zutrifft; sonst Taste für Taste wie gewohnt.
+/// Text weitergeben, wenn [`keys::is_paste`] zutrifft; sonst Taste für Taste wie gewohnt.
 /// Gibt das erste nicht dazugehörige Ereignis zurück.
-fn on_typed(app: &mut app::App, first: event::KeyEvent) -> Result<Option<Event>> {
+fn on_typed(
+    app: &mut app::App,
+    last_paste: &mut Option<Instant>,
+    first: event::KeyEvent,
+) -> Result<Option<Event>> {
     let mut burst = vec![first];
     let mut chars: Vec<char> = keys::pasted_char(&first).into_iter().collect();
     let mut rest = None;
     loop {
-        // Nach einem Enter kurz warten: Lange Texte liefert die Konsole stückweise.
-        let wait = if chars.len() > 1 && chars.last() == Some(&'\n') {
+        // Sobald mehr als ein Zeichen ohne Pause kam, kurz auf den Rest warten: Lange Texte
+        // liefert die Konsole stückweise, auch mitten in einer Zeile. Endete der Stoß dort, lief
+        // der Rest samt abschließendem Enter als Tippen durch und schickte ab.
+        let wait = if chars.len() > 1 {
             PASTE_GAP
         } else {
             Duration::ZERO
@@ -221,7 +229,21 @@ fn on_typed(app: &mut app::App, first: event::KeyEvent) -> Result<Option<Event>>
             }
         }
     }
-    if keys::is_paste_burst(&chars) {
+    let since_paste = last_paste.map(|at| at.elapsed());
+    let paste = keys::is_paste(&chars, since_paste);
+    trace::mark(format_args!(
+        "input: {} chars, paste {paste}, ends with newline {}, {}ms since paste, ended by {}",
+        chars.len(),
+        chars.last() == Some(&'\n'),
+        since_paste.map_or(-1, |d| d.as_millis() as i64),
+        if rest.is_some() {
+            "other event"
+        } else {
+            "pause"
+        },
+    ));
+    if paste {
+        *last_paste = Some(Instant::now());
         app.on_paste(&chars.into_iter().collect::<String>())?;
     } else {
         for key in burst {
@@ -231,7 +253,7 @@ fn on_typed(app: &mut app::App, first: event::KeyEvent) -> Result<Option<Event>>
     Ok(rest)
 }
 
-/// So lange darf nach einem Zeilenumbruch eingefügten Textes Pause sein, bevor der Rest kommt.
+/// So lange darf in einem Stoß eingefügten Textes Pause sein, bevor der Rest kommt.
 const PASTE_GAP: Duration = Duration::from_millis(10);
 
 /// Höchstens so viele Ereignisse je Bild.
