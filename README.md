@@ -7,8 +7,69 @@ rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 
 ![claude-tui mit drei Sessions: working, waiting for you, ready](docs/screenshot.png)
 
-Bis zu 4 Fenster nebeneinander, Fokuswechsel mit `Ctrl+Pfeil`, alle Befehle im `Ctrl+A`-Menü, das
-über dem Bereich mit dem Fokus erscheint.
+## Features
+
+Details zu allem stehen in der [Bedienung](docs/bedienung.md).
+
+**Fenster und Layout**
+
+- Bis zu **4 Sessions gleichzeitig** in echten PTYs, automatisch angeordnet (1, 2, 3 oder 4 Fenster).
+- Zwei Fenster wahlweise **nebeneinander oder übereinander**.
+- **Zoom** wie in tmux: ein Fenster bekommt die ganze Fläche, die übrigen Sessions laufen weiter.
+- **Sessionliste ausblendbar**, damit die Fenster die volle Breite bekommen.
+- Fokuswechsel mit `Ctrl+Pfeil`, Fokus erkennbar am blauen Rahmen.
+- Der Hintergrund ist der des Terminals, also derselbe wie in Claude Code.
+
+**Sessionliste**
+
+- Alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`), gruppiert nach Arbeitsverzeichnis,
+  laufende zuerst.
+- Je Session: Zustand, Titel (`/rename`, KI-Titel oder letzter Prompt), Fensternummer und Zeit seit
+  der letzten Aktivität bzw. Wartezeit.
+- Titel in der Farbe aus Claudes **`/color`**.
+- **Eigene Gruppen** (📌) unabhängig vom Verzeichnis.
+- **Schnellwahl:** `Alt+1`–`9` gibt einer Session eine Nummer, `Ctrl+1`–`9` springt zu ihr.
+- Sessions **fortsetzen** (`--resume`), **löschen**, mehrere markiert oder nach Alter (älter als
+  1 Tag / 1 Woche / 1 Monat) löschen.
+- Neue Session mit **Verzeichnisauswahl**: Tab-Ergänzung und zuletzt genutzte Verzeichnisse.
+- Startet sofort aus einem Cache, neue Sessions werden im Hintergrund nachgelesen.
+
+**Zustände**
+
+- **working** (rot, animiert), **waiting for you** (gelb), **ready** (grau), gespeichert, **läuft
+  anderswo** (`◇ ext`), in der Liste und in der Fensterleiste.
+- Zustand kommt über **Hooks** direkt von Claude Code. Die eigene `~/.claude/settings.json` bleibt
+  dabei unverändert, und ohne Hook-Meldung greift eine Heuristik.
+- **Hinweis auf wartende Sessions:** Terminal-Glocke und Meldung, wenn eine Session außerhalb des
+  Fokus auf dich wartet. `Ctrl+A w` springt reihum zur nächsten wartenden.
+- Erkennt Sessions, die **außerhalb von claude-tui** laufen, und fragt vor dem Öffnen nach.
+  Hintergrund-Sessions (`claude --bg`) verbindet es per `claude attach`.
+- Sessionwechsel in Claude (`/resume`, `/clear`, `/branch`) übernehmen Fenster und Liste.
+
+**Bedienung**
+
+- Alle Befehle im **`Ctrl+A`-Menü**, das über dem Bereich mit dem Fokus erscheint.
+- **Hilfeseite** im Menü (`h`) mit allen Tasten, Zuständen und Menüpunkten.
+- **Maus:** Klick setzt den Fokus, Doppelklick öffnet eine Session, das Mausrad scrollt den Verlauf
+  (bis zu 10 000 Zeilen).
+- **Markieren und Kopieren:** Claudes eigene Markierung im Fullscreen-Modus oder die von claude-tui
+  (mit `Alt`), direkt in die Zwischenablage.
+- `Shift+Enter` fügt in Claude einen Zeilenumbruch ein.
+
+**Start und Wiederherstellen**
+
+- Beim Start kommen die Sessions des letzten Laufs in ihre Fenster zurück, samt Fokus, Layout,
+  Gruppen und Schnellwahl-Nummern.
+- Die Claude-Prozesse starten **nacheinander**, damit sie sich nicht gegenseitig ausbremsen.
+- Eigener Startbefehl möglich, z. B. `claude-tui "claude --model opus"`.
+- Zeitmessung für die Fehlersuche mit `CLAUDE_TUI_TRACE=1`.
+
+**Installation und Updates**
+
+- Eine einzelne Datei für Windows, Linux und macOS. `install` / `uninstall` tragen sie in den PATH
+  ein bzw. entfernen sie, ohne Adminrechte.
+- **Tägliche Update-Prüfung** auf GitHub. Updates werden nie ungefragt installiert (`Ctrl+A u`), die
+  heruntergeladene Datei wird per SHA-256 geprüft.
 
 ## Aufbau
 
