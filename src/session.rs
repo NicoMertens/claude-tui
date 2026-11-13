@@ -15,7 +15,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize,
 
 use crate::{
     hooks::{self, Report},
-    trace,
+    mouse, trace,
     windows::SessionId,
 };
 
@@ -255,6 +255,35 @@ impl Session {
     /// die Maus eingeschaltet, bekommt es stattdessen das Rad-Ereignis. `col`/`row` sind 0-basiert
     /// relativ zum Fensterinhalt.
     pub fn wheel(&mut self, up: bool, col: u16, row: u16) -> Result<()> {
+        if self.wants_mouse() {
+            return self.send_mouse(mouse::Report {
+                action: mouse::Action::Wheel { up },
+                col,
+                row,
+                modifiers: mouse::Modifiers::default(),
+            });
+        }
+        let mut parser = lock(&self.parser);
+        let offset = parser.screen().scrollback();
+        let next = if up {
+            offset + WHEEL_LINES
+        } else {
+            offset.saturating_sub(WHEEL_LINES)
+        };
+        parser.screen_mut().set_scrollback(next);
+        Ok(())
+    }
+
+    /// Hat das Programm in der Session die Maus eingeschaltet (z. B. Claude Code im
+    /// Fullscreen-Modus)?
+    pub fn wants_mouse(&self) -> bool {
+        self.child.is_some()
+            && self.status != Status::Exited
+            && self.screen().screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None
+    }
+
+    /// Mausereignis an das Programm, sofern es diese Art im aktuellen Modus angefordert hat.
+    pub fn send_mouse(&mut self, report: mouse::Report) -> Result<()> {
         let (mode, encoding) = {
             let parser = self.screen();
             let screen = parser.screen();
@@ -263,28 +292,15 @@ impl Session {
                 screen.mouse_protocol_encoding(),
             )
         };
-        if mode == vt100::MouseProtocolMode::None {
-            let mut parser = lock(&self.parser);
-            let offset = parser.screen().scrollback();
-            let next = if up {
-                offset + WHEEL_LINES
-            } else {
-                offset.saturating_sub(WHEEL_LINES)
-            };
-            parser.screen_mut().set_scrollback(next);
+        let Some(bytes) = mouse::encode(report, mode, encoding) else {
             return Ok(());
-        }
-        let button = if up { 64 } else { 65 };
-        let (x, y) = (col + 1, row + 1);
-        let bytes = match encoding {
-            vt100::MouseProtocolEncoding::Sgr => format!("\x1b[<{button};{x};{y}M").into_bytes(),
-            // Klassische Kodierung: Werte + 32 als einzelne Bytes (nur bis Spalte/Zeile 223).
-            _ => {
-                let byte = |v: u16| u8::try_from(v + 32).unwrap_or(u8::MAX);
-                vec![0x1b, b'[', b'M', byte(button), byte(x), byte(y)]
-            }
         };
-        self.write(&bytes)
+        // Nicht über `write`: Maus ist keine Eingabe — sie darf weder den Hook-Zustand auf die
+        // Heuristik zurückwerfen (`last_input`) noch eine wartende Session als beantwortet gelten
+        // lassen.
+        self.writer.write_all(&bytes)?;
+        self.writer.flush()?;
+        Ok(())
     }
 
     /// Wie weit der Verlauf hochgescrollt ist (0 = aktuelle Ansicht).

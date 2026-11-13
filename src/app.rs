@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Margin, Position, Rect};
 
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
     layout::{self, Direction},
     list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
     menu::{self, Action, Context, Menu, Outcome, Purpose},
-    recent,
+    mouse, recent,
     selection::{self, Cell, Selection},
     session::{self, Session, Status},
     state::{self, State},
@@ -102,6 +102,9 @@ pub struct App {
     /// Klick.
     pub selection: Option<Selection>,
     dragging: bool,
+    /// Laufender Klick/Zug, der an das Programm der Session geht (es hat die Maus eingeschaltet);
+    /// bleibt bis zum Loslassen an diese Session gebunden.
+    forwarding: Option<(SessionId, mouse::Button)>,
     last_click: Option<(Instant, SessionId, Cell)>,
     /// Letzter Klick in die Sessionliste (für Doppelklick = Enter).
     last_list_click: Option<(Instant, String)>,
@@ -176,6 +179,7 @@ impl App {
             notice_expiry: None,
             selection: None,
             dragging: false,
+            forwarding: None,
             last_click: None,
             last_list_click: None,
             list_hits: RefCell::new(ListHits::default()),
@@ -642,6 +646,9 @@ impl App {
         if self.on_overlay(position) && !matches!(mouse.kind, MouseEventKind::Up(_)) {
             return;
         }
+        if self.forward_mouse(mouse) {
+            return;
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let Some((_, id, cell)) = self.window_at(position) else {
@@ -708,6 +715,79 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Klick, Ziehen und Loslassen an das Programm der Session, wenn es die Maus eingeschaltet hat
+    /// — Claude Code markiert dann selbst (über den ganzen Verlauf) und kopiert in die
+    /// Zwischenablage. Mit Alt gedrückt bleibt es bei der eigenen Markierung. `true`, wenn das
+    /// Ereignis damit erledigt ist.
+    fn forward_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let position = Position::new(mouse.column, mouse.row);
+        let modifiers = mouse::Modifiers {
+            shift: mouse.modifiers.contains(KeyModifiers::SHIFT),
+            alt: mouse.modifiers.contains(KeyModifiers::ALT),
+            ctrl: mouse.modifiers.contains(KeyModifiers::CONTROL),
+        };
+        let (action, id, cell) = match mouse.kind {
+            MouseEventKind::Down(button) => {
+                if modifiers.alt || self.list_hits.borrow().at(position).is_some() {
+                    return false;
+                }
+                let Some((slot, id, cell)) = self.window_at(position) else {
+                    return false;
+                };
+                // Klick auf Rahmen oder Titel setzt nur den Fokus (eigener Weg unten).
+                let on_content = self
+                    .window_rect(slot)
+                    .is_some_and(|r| r.inner(Margin::new(1, 1)).contains(position));
+                if !on_content || !self.session(id).is_some_and(Session::wants_mouse) {
+                    return false;
+                }
+                self.menu = None;
+                self.dir_picker = None;
+                self.selection = None;
+                self.dragging = false;
+                self.set_focus(Focus::Window(slot));
+                let button = mouse_button(button);
+                self.forwarding = Some((id, button));
+                (mouse::Action::Press(button), id, cell)
+            }
+            MouseEventKind::Drag(_) | MouseEventKind::Up(_) => {
+                let Some((id, button)) = self.forwarding else {
+                    return false;
+                };
+                // Auch außerhalb des Fensters weiterziehen, aber auf dessen Inhalt begrenzt.
+                let Some(inner) = self
+                    .windows
+                    .window_of(id)
+                    .and_then(|slot| self.window_rect(slot))
+                    .map(|r| r.inner(Margin::new(1, 1)))
+                else {
+                    self.forwarding = None;
+                    return true;
+                };
+                let action = if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                    self.forwarding = None;
+                    mouse::Action::Release(button)
+                } else {
+                    mouse::Action::Drag(button)
+                };
+                (action, id, cell_in(inner, position))
+            }
+            _ => return false,
+        };
+        let report = mouse::Report {
+            action,
+            col: cell.col,
+            row: cell.row,
+            modifiers,
+        };
+        if let Some(session) = self.session_mut(id) {
+            if let Err(e) = session.send_mouse(report) {
+                self.notice = Some(format!("{e:#}"));
+            }
+        }
+        true
     }
 
     fn on_overlay(&self, position: Position) -> bool {
@@ -1417,6 +1497,14 @@ fn spawn_store_load() -> Option<Receiver<Store>> {
 }
 
 /// Zelle im Fensterinhalt `inner` unter der Mausposition, an den Rand geklemmt.
+fn mouse_button(button: MouseButton) -> mouse::Button {
+    match button {
+        MouseButton::Left => mouse::Button::Left,
+        MouseButton::Middle => mouse::Button::Middle,
+        MouseButton::Right => mouse::Button::Right,
+    }
+}
+
 fn cell_in(inner: Rect, position: Position) -> Cell {
     let col = position.x.clamp(inner.x, inner.right().saturating_sub(1)) - inner.x;
     let row = position.y.clamp(inner.y, inner.bottom().saturating_sub(1)) - inner.y;

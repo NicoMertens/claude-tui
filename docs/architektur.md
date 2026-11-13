@@ -44,7 +44,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), nächste wartende Session reihum für Menüpunkt `w`, `CLAUDE_TUI_NO_BELL` |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel, `Alt`/`Ctrl+Zahl` als Schnellwahl |
 | `ui.rs` | Zeichnen: Sessionliste (Menühinweis im unteren Rahmen; ausblendbar, dann Fenster in voller Breite), Fenster mit Nummer, Zustand und Fokusrahmen, Menü als blaues Overlay mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
-| `selection.rs` | Mausmarkierung im Fenster, Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |
+| `selection.rs` | eigene Mausmarkierung im Fenster (wenn das Programm die Maus nicht selbst will oder mit Alt), Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |
+| `mouse.rs` | Mausereignisse im xterm-Protokoll (SGR, UTF-8, klassisch) für Programme, die die Maus einschalten — Claude Code markiert und kopiert dann selbst |
 | `install.rs` | `install` / `uninstall`: Binary an festen Ort, Benutzer-PATH (Windows über PowerShell/Registry) |
 | `update.rs` | Update über GitHub-Releases: tägliche Prüfung im Hintergrund, SHA-256 (`sha2`), Austausch der laufenden Datei (`self-replace`; die neue Binary wird neben der laufenden unter Zufallsnamen abgelegt, nicht im gemeinsamen Temp-Ordner) |
 | `http.rs` | HTTPS-Abrufe ohne eigenen TLS-Stack: `curl` des Systems, Rückfall auf `ureq` mit System-TLS (nur Windows/macOS) |
@@ -190,5 +191,5 @@ Versionen) wird eine untätige externe Session nicht erkannt.
 ## Grenzen / nächste Schritte
 
 - Kein Scrollen in den Verlauf (der Parser hält 10 000 Zeilen, es fehlt nur die Bedienung).
-- Keine Mausunterstützung, keine frei teilbaren Fenster (feste Layouts für 1–4).
+- Keine frei teilbaren Fenster (feste Layouts für 1–4).
 - Sessions überleben das Beenden von claude-tui nicht (kein Detach wie bei herdr/tmux).
