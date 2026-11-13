@@ -34,6 +34,8 @@ pub enum Action {
     ToggleZoom,
     /// Zur nächsten Session springen, die auf dich wartet.
     NextWaiting,
+    /// Gruppen-Dialog für die Session mit Fokus bzw. die markierten Sessions öffnen.
+    SetGroup,
     /// Neuere Version von GitHub installieren.
     Update,
     Quit,
@@ -127,6 +129,12 @@ impl Menu {
             add('x', &label, Action::DeleteSession);
         } else if in_window || ctx.has_selection {
             add('x', "Delete session", Action::DeleteSession);
+        }
+        if !in_window && ctx.marked > 0 {
+            let label = format!("Group {} marked …", ctx.marked);
+            add('g', &label, Action::SetGroup);
+        } else if in_window || ctx.has_selection {
+            add('g', "Group …", Action::SetGroup);
         }
         // Betrifft die ganze Liste, nicht das Fenster – deshalb nur mit Fokus auf der Liste.
         if !in_window {
@@ -271,13 +279,7 @@ impl Menu {
             action,
         };
         // Lange Titel kürzen, damit die Frage selbst im Rahmen sichtbar bleibt.
-        const TITLE_MAX: usize = 30;
-        let title = if title.chars().count() > TITLE_MAX {
-            let keep: String = title.chars().take(TITLE_MAX - 1).collect();
-            format!("{keep}…")
-        } else {
-            title.to_string()
-        };
+        let title = shorten(title, 30);
         Self {
             title: format!("{title} runs elsewhere – open anyway?"),
             items: vec![
@@ -328,6 +330,15 @@ pub fn age_label(days: u64) -> String {
         30 => "1 month".to_string(),
         n => format!("{n} days"),
     }
+}
+
+/// Kürzt hinten mit „…“ auf höchstens `max` Zeichen.
+pub fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let keep: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{keep}…")
 }
 
 /// „1 session“ bzw. „N sessions“.
@@ -599,6 +610,42 @@ mod tests {
             label(Menu::commands(&ctx(Focus::Window(0)))).as_deref(),
             Some("Delete session")
         );
+    }
+
+    #[test]
+    fn group_item_in_window_and_list_with_marked_count() {
+        let windows = names(1);
+        let ctx = |focus, has_selection, marked| Context {
+            focus,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed: false,
+            waiting: false,
+            marked,
+        };
+        let label = |menu: Menu| {
+            menu.items
+                .into_iter()
+                .find(|i| i.action == Action::SetGroup)
+                .map(|i| format!("{} {}", i.hotkey, i.label))
+        };
+        assert_eq!(
+            label(Menu::commands(&ctx(Focus::Window(0), false, 2))).as_deref(),
+            Some("g Group …")
+        );
+        assert_eq!(
+            label(Menu::commands(&ctx(Focus::List, true, 0))).as_deref(),
+            Some("g Group …")
+        );
+        assert_eq!(
+            label(Menu::commands(&ctx(Focus::List, true, 2))).as_deref(),
+            Some("g Group 2 marked …")
+        );
+        assert_eq!(label(Menu::commands(&ctx(Focus::List, false, 0))), None);
     }
 
     #[test]

@@ -2,6 +2,8 @@ mod app;
 mod claude_store;
 mod dirpick;
 mod external;
+mod grouppick;
+mod groups;
 mod hook_server;
 mod hooks;
 mod http;
@@ -150,16 +152,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
                 break;
             }
             timeout = Duration::ZERO;
-            match event::read()? {
-                Event::Key(key) if key.kind != KeyEventKind::Release => app.on_key(key)?,
-                Event::Paste(text) => app.on_paste(&text)?,
-                // Reine Mausbewegung ändert nichts — das Terminal meldet sie ständig.
-                Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => continue,
-                Event::Mouse(mouse) => app.on_mouse(mouse),
-                Event::Resize(w, h) => app.resize(Rect::new(0, 0, w, h)),
-                _ => continue,
-            }
-            changed = true;
+            changed |= handle(&mut app, event::read()?)?;
             if app.should_quit {
                 break;
             }
@@ -168,6 +161,78 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
     app.save_cache();
     Ok(())
 }
+
+/// Verarbeitet ein Ereignis; `true`, wenn sich dadurch etwas geändert haben kann.
+fn handle(app: &mut app::App, event: Event) -> Result<bool> {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Release => return Ok(false),
+        Event::Key(key) if keys::pasted_char(&key).is_some() => {
+            if let Some(next) = on_typed(app, key)? {
+                handle(app, next)?;
+            }
+        }
+        Event::Key(key) => app.on_key(key)?,
+        Event::Paste(text) => app.on_paste(&text)?,
+        // Reine Mausbewegung ändert nichts — das Terminal meldet sie ständig.
+        Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => return Ok(false),
+        Event::Mouse(mouse) => app.on_mouse(mouse),
+        Event::Resize(w, h) => app.resize(Rect::new(0, 0, w, h)),
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// Windows-Konsolen kennen kein Bracketed Paste (crossterm lehnt es dort ab): Eingefügter Text kommt
+/// als Folge von Tastendrücken, jeder Zeilenumbruch als Enter — Claude schickte den Text dann schon
+/// nach der ersten Zeile ab. Deshalb alles sammeln, was ohne Pause ansteht, und es als eingefügten
+/// Text weitergeben, wenn [`keys::is_paste_burst`] zutrifft; sonst Taste für Taste wie gewohnt.
+/// Gibt das erste nicht dazugehörige Ereignis zurück.
+fn on_typed(app: &mut app::App, first: event::KeyEvent) -> Result<Option<Event>> {
+    let mut burst = vec![first];
+    let mut chars: Vec<char> = keys::pasted_char(&first).into_iter().collect();
+    let mut rest = None;
+    loop {
+        // Nach einem Enter kurz warten: Lange Texte liefert die Konsole stückweise.
+        let wait = if chars.len() > 1 && chars.last() == Some(&'\n') {
+            PASTE_GAP
+        } else {
+            Duration::ZERO
+        };
+        if !event::poll(wait)? {
+            break;
+        }
+        match event::read()? {
+            Event::Key(key)
+                if key.kind == KeyEventKind::Release
+                    || matches!(key.code, event::KeyCode::Modifier(_)) => {}
+            Event::Key(key) => match keys::pasted_char(&key) {
+                Some(c) => {
+                    burst.push(key);
+                    chars.push(c);
+                }
+                None => {
+                    rest = Some(Event::Key(key));
+                    break;
+                }
+            },
+            other => {
+                rest = Some(other);
+                break;
+            }
+        }
+    }
+    if keys::is_paste_burst(&chars) {
+        app.on_paste(&chars.into_iter().collect::<String>())?;
+    } else {
+        for key in burst {
+            app.on_key(key)?;
+        }
+    }
+    Ok(rest)
+}
+
+/// So lange darf nach einem Zeilenumbruch eingefügten Textes Pause sein, bevor der Rest kommt.
+const PASTE_GAP: Duration = Duration::from_millis(10);
 
 /// Höchstens so viele Ereignisse je Bild.
 const MAX_EVENTS_PER_FRAME: usize = 64;
