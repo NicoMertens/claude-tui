@@ -16,6 +16,7 @@ use crate::{
     external,
     grouppick::{GroupPicker, Outcome as GroupOutcome},
     groups::{self, Assignments},
+    help::{Help, Outcome as HelpOutcome},
     hooks,
     keys::{self, TagKey},
     layout::{self, Direction},
@@ -100,6 +101,8 @@ pub struct App {
     recent_groups: Vec<String>,
     /// Gruppen-Dialog (Ctrl+A g).
     pub group_picker: Option<GroupPicker>,
+    /// Hilfeseite (Ctrl+A h).
+    pub help: Option<Help>,
     pub menu: Option<Menu>,
     /// Verzeichnisauswahl vor dem Start einer neuen Session.
     pub dir_picker: Option<DirPicker>,
@@ -191,6 +194,7 @@ impl App {
             group_of: Assignments::new(),
             recent_groups: Vec::new(),
             group_picker: None,
+            help: None,
             menu: None,
             dir_picker: None,
             notice: None,
@@ -666,6 +670,12 @@ impl App {
             }
             return Ok(());
         }
+        if let Some(help) = self.help.as_mut() {
+            if help.on_key(&key) == HelpOutcome::Close {
+                self.help = None;
+            }
+            return Ok(());
+        }
         if let Some(menu) = self.menu.as_mut() {
             match menu.on_key(&key) {
                 Outcome::Stay => {}
@@ -705,6 +715,10 @@ impl App {
     }
 
     pub fn on_paste(&mut self, text: &str) -> Result<()> {
+        // Schnell Getipptes kann als Einfügen ankommen; es darf nicht in die Session dahinter.
+        if self.help.is_some() {
+            return Ok(());
+        }
         if let Some(picker) = self.dir_picker.as_mut() {
             picker.paste(text);
             return Ok(());
@@ -730,6 +744,14 @@ impl App {
         // Das Overlay ist nur per Tastatur bedienbar; Klicks und Rad darauf erreichen das Fenster
         // darunter nicht (keine Markierung, kein Scrollen hinter dem Menü).
         if self.on_overlay(position) && !matches!(mouse.kind, MouseEventKind::Up(_)) {
+            // Nur die Hilfe nutzt das Mausrad selbst: zum Scrollen.
+            if let Some(help) = self.help.as_mut() {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => help.wheel(true),
+                    MouseEventKind::ScrollDown => help.wheel(false),
+                    _ => {}
+                }
+            }
             return;
         }
         if self.forward_mouse(mouse) {
@@ -875,7 +897,10 @@ impl App {
     }
 
     fn on_overlay(&self, position: Position) -> bool {
-        let open = self.menu.is_some() || self.dir_picker.is_some() || self.group_picker.is_some();
+        let open = self.menu.is_some()
+            || self.dir_picker.is_some()
+            || self.group_picker.is_some()
+            || self.help.is_some();
         open && self.overlay.get().is_some_and(|r| r.contains(position))
     }
 
@@ -900,9 +925,10 @@ impl App {
         }
     }
 
-    /// Schließt Menü, Verzeichnisauswahl und Gruppen-Dialog.
+    /// Schließt Menü, Verzeichnisauswahl, Gruppen-Dialog und Hilfe.
     fn close_overlays(&mut self) {
         self.menu = None;
+        self.help = None;
         self.dir_picker = None;
         self.group_picker = None;
     }
@@ -1217,6 +1243,7 @@ impl App {
             }
             Action::NextWaiting => self.show_next_waiting()?,
             Action::SetGroup => self.open_group_picker(),
+            Action::Help => self.help = Some(Help::default()),
             Action::Quit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {
