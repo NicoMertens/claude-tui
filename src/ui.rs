@@ -236,7 +236,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     head(name, width.saturating_sub(4)),
                     Style::default()
-                        .fg(theme::MENU)
+                        .fg(theme::TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -244,7 +244,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
                 Span::raw(format!("{FOLDER_ICON} ")),
                 Span::styled(
                     tail(&cwd.display().to_string(), width.saturating_sub(4)),
-                    Style::default().fg(theme::MUTED),
+                    Style::default().fg(theme::TEXT),
                 ),
             ]),
         };
@@ -321,7 +321,7 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
         Span::styled(format!("{title}{padding}"), name_style),
         Span::styled(
             window,
-            Style::default().fg(if entry.external { color } else { theme::ACCENT }),
+            Style::default().fg(if entry.external { color } else { theme::TEXT }),
         ),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
     ]);
@@ -632,7 +632,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
         let tag = tag_label(app, &session.claude_id);
         let title = vec![
-            Span::styled(format!(" [{}] ", slot + 1), title_style),
+            Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
             Span::styled(tag, tag_style()),
             Span::styled(format!("{} ", app.title_of(id)), title_style),
         ];
