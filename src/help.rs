@@ -33,8 +33,12 @@ const OVERVIEW: &[Row] = &[
     Heading("Session list"),
     Text(
         "All saved Claude Code sessions. Your own groups (⚑) come first, sorted alphabetically, \
-         then the sessions by working directory (▸), most recent first. Running sessions lead \
-         each section.",
+         then the sessions by working directory (▾), most recent first. Running sessions lead \
+         each section. Each heading shows how many sessions it holds.",
+    ),
+    Text(
+        "Sections can be collapsed (directory ▸). A collapsed section shows the most urgent state \
+         of its running sessions in front of its heading.",
     ),
     Text(
         "Each row shows state, quick number (#3), title, window number ([1]) and the time since \
@@ -70,14 +74,19 @@ const KEYS: &[Row] = &[
     Key("Shift+Enter", "New line in Claude's input"),
     Key("Alt+← / →", "Jump by word in Claude's input"),
     Heading("Session list focused"),
-    Key("↑ / ↓", "Select a session"),
+    Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),
+    Key("← / →", "Collapse / expand the section of the selection"),
     Key(
         "Enter",
-        "Go to its window, or pick a window (a saved session resumes)",
+        "Go to its window, or pick a window (a saved session resumes); on a heading: collapse \
+         or expand the section",
     ),
     Key("1…4", "Put the session into this window"),
-    Key("Space", "Mark or unmark the session and move on"),
+    Key(
+        "Space",
+        "Mark or unmark the session and move on; on a heading: all its sessions",
+    ),
     Key("Esc", "Clear all marks"),
     Heading("Dialogs"),
     Key("Enter / Esc", "Confirm / cancel"),

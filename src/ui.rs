@@ -14,7 +14,7 @@ use crate::{
     grouppick::{Choice, GroupPicker},
     help::{self, Help},
     keys,
-    list::{Entry, Heading},
+    list::{self, Entry, Group, Heading, Row},
     menu::Menu,
     session::Status,
     tags,
@@ -24,8 +24,9 @@ use crate::{
 };
 
 const SIDEBAR_WIDTH: u16 = 42;
-/// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
+/// Kennzeichnen die Verzeichnis-Überschriften in der Sessionliste: eingeklappt bzw. ausgeklappt.
 const FOLDER_ICON: &str = "▸";
+const FOLDER_OPEN_ICON: &str = "▾";
 /// Kennzeichnet eigene Gruppen. Bewusst kein Emoji: die erscheinen unter Windows immer bunt.
 const GROUP_ICON: &str = "⚑";
 
@@ -224,49 +225,19 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
 
 fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let width = area.width as usize;
-    let mut items: Vec<ListItem> = Vec::new();
-    // Claude-ID je Listenzeile (Überschriften: `None`) — für Mausklicks in die Liste.
-    let mut rows: Vec<Option<String>> = Vec::new();
+    let selected = app.visible_cursor();
+    let rows = list::rows(&app.groups, &app.collapsed);
+    let mut items: Vec<ListItem> = Vec::with_capacity(rows.len());
     let mut selected_item = None;
-    for group in &app.groups {
-        // Beide Symbole sind eine Spalte breit. Gruppennamen hinten kürzen, Pfade vorne (der
-        // Ordnername am Ende ist der aussagekräftige Teil).
-        let (icon, label, style) = match &group.heading {
-            Heading::Group(name) => (
-                GROUP_ICON,
-                head(name, width.saturating_sub(3)),
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Heading::Dir(cwd) => (
-                FOLDER_ICON,
-                tail(&cwd.display().to_string(), width.saturating_sub(3)),
-                Style::default().fg(theme::TEXT),
-            ),
-        };
-        // Der Rest der Zeile wird mit einer Linie gefüllt, damit sich Überschriften abheben.
-        let rest = width.saturating_sub(2 + label.chars().count() + 1);
-        let rule = if rest > 0 {
-            format!(" {}", "─".repeat(rest))
-        } else {
-            String::new()
-        };
-        let line = Line::from(vec![
-            Span::raw(format!("{icon} ")),
-            Span::styled(label, style),
-            Span::styled(rule, Style::default().fg(theme::MUTED)),
-        ]);
-        items.push(ListItem::new(line));
-        rows.push(None);
-        for entry in &group.entries {
-            let selected = app.cursor.as_deref() == Some(entry.claude_id.as_str());
-            if selected {
-                selected_item = Some(items.len());
-            }
-            items.push(entry_item(app, entry, selected, width));
-            rows.push(Some(entry.claude_id.clone()));
+    for (i, row) in rows.iter().enumerate() {
+        let is_selected = selected.as_ref() == Some(&row.cursor());
+        if is_selected {
+            selected_item = Some(i);
         }
+        items.push(match row {
+            Row::Heading(group) => heading_item(app, group, is_selected, width),
+            Row::Entry(entry) => entry_item(app, entry, is_selected, width),
+        });
     }
     if app.loading() && items.is_empty() {
         items.push(ListItem::new(muted("loading sessions …")));
@@ -274,15 +245,105 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let mut state = ListState::default().with_selected(selected_item);
     f.render_stateful_widget(List::new(items), area, &mut state);
 
-    // Sichtbare Zeilen merken (jede Listenzeile ist eine Bildschirmzeile).
+    // Sichtbare Zeilen merken (jede Listenzeile ist eine Bildschirmzeile) — für Mausklicks.
     let hits = rows
-        .into_iter()
+        .iter()
         .skip(state.offset())
         .take(area.height as usize)
         .enumerate()
-        .filter_map(|(i, id)| id.map(|id| (area.y + i as u16, id)))
+        .map(|(i, row)| (area.y + i as u16, row.cursor()))
         .collect();
     app.list_hits.replace(ListHits { area, rows: hits });
+}
+
+/// Überschrift eines Abschnitts: `▸ Name (Anzahl) ─────`. Eingeklappt steht davor der
+/// dringlichste Zustand seiner laufenden Sessions, damit keine Rückfrage untergeht.
+fn heading_item(app: &App, group: &Group, selected: bool, width: usize) -> ListItem<'static> {
+    let collapsed = app.is_collapsed(group);
+    let status = if collapsed {
+        group_status(app, group)
+    } else {
+        None
+    };
+    let prefix = match status {
+        Some(status) => {
+            let (symbol, color) = theme::status_symbol(Some(status), clock());
+            Span::styled(format!("{symbol} "), Style::default().fg(color))
+        }
+        None => Span::raw(""),
+    };
+    let count = format!(" ({})", group.entries.len());
+    // Wie bei Sessions: Häkchen, wenn alle Sessions des Abschnitts markiert sind.
+    let all_marked = !group.entries.is_empty()
+        && group
+            .entries
+            .iter()
+            .all(|e| app.marked.contains(&e.claude_id));
+    let mark = if all_marked { "✓ " } else { "" };
+    // Symbol + Leerzeichen, davor ggf. Zustand + Leerzeichen bzw. Häkchen, dahinter Anzahl und
+    // Platz für die Linie. Alle Symbole sind eine Spalte breit.
+    let fixed =
+        2 + prefix.content.chars().count() + mark.chars().count() + count.chars().count() + 1;
+    let room = width.saturating_sub(fixed);
+    // Gruppennamen hinten kürzen, Pfade vorne (der Ordnername am Ende ist der aussagekräftige
+    // Teil).
+    let (icon, label, style) = match &group.heading {
+        Heading::Group(name) => (
+            GROUP_ICON,
+            head(name, room),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Heading::Dir(cwd) => (
+            if collapsed {
+                FOLDER_ICON
+            } else {
+                FOLDER_OPEN_ICON
+            },
+            tail(&cwd.display().to_string(), room),
+            Style::default().fg(theme::TEXT),
+        ),
+    };
+    // Der Rest der Zeile wird mit einer Linie gefüllt, damit sich Überschriften abheben.
+    let rest = room.saturating_sub(label.chars().count());
+    let rule = if rest > 0 {
+        format!(" {}", "─".repeat(rest))
+    } else {
+        String::new()
+    };
+    let line = Line::from(vec![
+        prefix,
+        Span::raw(format!("{icon} ")),
+        Span::styled(mark, Style::default().fg(theme::MENU)),
+        Span::styled(label, style),
+        Span::styled(count, Style::default().fg(theme::MUTED)),
+        Span::styled(rule, Style::default().fg(theme::MUTED)),
+    ]);
+    let item = ListItem::new(line);
+    if selected {
+        item.style(Style::default().bg(theme::SELECTED_BG))
+    } else {
+        item
+    }
+}
+
+/// Dringlichster Zustand der laufenden Sessions eines Abschnitts: wartet vor arbeitet vor bereit.
+fn group_status(app: &App, group: &Group) -> Option<Status> {
+    let urgency = |status: &Status| match status {
+        Status::Waiting => 4,
+        Status::Working => 3,
+        Status::Starting => 2,
+        Status::Idle => 1,
+        Status::Exited => 0,
+    };
+    group
+        .entries
+        .iter()
+        .filter_map(|e| e.running.and_then(|id| app.session(id)))
+        .map(|s| s.status)
+        .filter(|s| *s != Status::Exited)
+        .max_by_key(urgency)
 }
 
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.

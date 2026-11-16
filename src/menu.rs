@@ -36,6 +36,10 @@ pub enum Action {
     NextWaiting,
     /// Gruppen-Dialog für die Session mit Fokus bzw. die markierten Sessions öffnen.
     SetGroup,
+    /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
+    ToggleCollapsed,
+    /// Alle Abschnitte einklappen (`true`) bzw. ausklappen.
+    CollapseAll(bool),
     /// Neuere Version von GitHub installieren.
     Update,
     /// Hilfeseite öffnen.
@@ -96,6 +100,22 @@ pub const GROUP: Entry = entry(
     "Group …",
     "Put the session (in the list: all marked) into a group; None removes it",
 );
+pub const COLLAPSE: Entry = Entry {
+    hotkey: 'f',
+    keys: "f / ← →",
+    label: "Collapse group",
+    help: "List only: collapse or expand the group or directory of the selection",
+};
+pub const COLLAPSE_ALL: Entry = entry(
+    'a',
+    "Collapse all groups",
+    "List only: collapse all groups and directories",
+);
+pub const EXPAND_ALL: Entry = entry(
+    'e',
+    "Expand all groups",
+    "List only: expand all groups and directories",
+);
 pub const DELETE_OLDER: Entry = entry(
     'o',
     "Delete sessions older than …",
@@ -133,11 +153,14 @@ pub const HELP: Entry = entry('h', "Help", "Show this help");
 pub const QUIT: Entry = entry('q', "Quit claude-tui", "Quit claude-tui; all sessions end");
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 13] = [
+pub const ENTRIES: [&Entry; 16] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
     &GROUP,
+    &COLLAPSE,
+    &COLLAPSE_ALL,
+    &EXPAND_ALL,
     &DELETE_OLDER,
     &FOCUS,
     &NEXT_WAITING,
@@ -211,6 +234,12 @@ pub struct Context<'a> {
     pub waiting: bool,
     /// Anzahl der in der Liste markierten Sessions.
     pub marked: usize,
+    /// Abschnitt der Auswahl in der Liste ist eingeklappt (`None` = keine Auswahl).
+    pub collapsed: Option<bool>,
+    /// Mindestens ein Abschnitt ist ausgeklappt.
+    pub any_expanded: bool,
+    /// Mindestens ein Abschnitt ist eingeklappt.
+    pub any_collapsed: bool,
 }
 
 impl Menu {
@@ -241,6 +270,20 @@ impl Menu {
             add(&GROUP, &label, Action::SetGroup);
         } else if in_window || ctx.has_selection {
             add(&GROUP, GROUP.label, Action::SetGroup);
+        }
+        if let (false, Some(collapsed)) = (in_window, ctx.collapsed) {
+            let label = if collapsed {
+                "Expand group"
+            } else {
+                COLLAPSE.label
+            };
+            add(&COLLAPSE, label, Action::ToggleCollapsed);
+        }
+        if !in_window && ctx.any_expanded {
+            add(&COLLAPSE_ALL, COLLAPSE_ALL.label, Action::CollapseAll(true));
+        }
+        if !in_window && ctx.any_collapsed {
+            add(&EXPAND_ALL, EXPAND_ALL.label, Action::CollapseAll(false));
         }
         // Betrifft die ganze Liste, nicht das Fenster – deshalb nur mit Fokus auf der Liste.
         if !in_window {
@@ -492,6 +535,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -514,6 +560,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -532,6 +581,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
     }
@@ -549,6 +601,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         menu.items
             .iter()
@@ -582,6 +637,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         menu.items
             .iter()
@@ -613,6 +671,9 @@ mod tests {
             zoomed,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         menu.items
             .iter()
@@ -645,6 +706,9 @@ mod tests {
                 zoomed: false,
                 waiting,
                 marked: 0,
+                collapsed: None,
+                any_expanded: false,
+                any_collapsed: false,
             })
             .items
             .iter()
@@ -706,6 +770,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 3,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         };
         let label = |menu: Menu| {
             menu.items
@@ -724,6 +791,56 @@ mod tests {
     }
 
     #[test]
+    fn collapse_items_follow_state_and_appear_in_list_only() {
+        let windows = names(1);
+        let ctx = |focus, collapsed, any_expanded, any_collapsed| Context {
+            focus,
+            windows: &windows,
+            selected_has_window: false,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            stacked: false,
+            zoomed: false,
+            waiting: false,
+            marked: 0,
+            collapsed,
+            any_expanded,
+            any_collapsed,
+        };
+        let items = |menu: Menu| {
+            menu.items
+                .into_iter()
+                .filter(|i| matches!(i.hotkey, 'f' | 'a' | 'e'))
+                .map(|i| (i.label, i.action))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            items(Menu::commands(&ctx(Focus::List, Some(false), true, false))),
+            [
+                ("Collapse group".to_string(), Action::ToggleCollapsed),
+                ("Collapse all groups".to_string(), Action::CollapseAll(true)),
+            ]
+        );
+        assert_eq!(
+            items(Menu::commands(&ctx(Focus::List, Some(true), true, true))),
+            [
+                ("Expand group".to_string(), Action::ToggleCollapsed),
+                ("Collapse all groups".to_string(), Action::CollapseAll(true)),
+                ("Expand all groups".to_string(), Action::CollapseAll(false)),
+            ]
+        );
+        assert!(items(Menu::commands(&ctx(Focus::List, None, false, false))).is_empty());
+        let in_window = ctx(Focus::Window(0), Some(false), true, true);
+        assert!(items(Menu::commands(&in_window)).is_empty());
+
+        // Ctrl+A schließt das Menü, auch wenn `a` (Collapse all) darin steht.
+        let mut menu = Menu::commands(&ctx(Focus::List, Some(false), true, false));
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(menu.on_key(&ctrl_a), Outcome::Close);
+    }
+
+    #[test]
     fn group_item_in_window_and_list_with_marked_count() {
         let windows = names(1);
         let ctx = |focus, has_selection, marked| Context {
@@ -737,6 +854,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         };
         let label = |menu: Menu| {
             menu.items
@@ -783,6 +903,9 @@ mod tests {
                 zoomed: flag,
                 waiting: true,
                 marked,
+                collapsed: None,
+                any_expanded: false,
+                any_collapsed: false,
             });
             for item in menu.items {
                 let known = item.hotkey.is_ascii_digit() || hotkeys.contains(&item.hotkey);
@@ -805,6 +928,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         });
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('h'))),
@@ -826,6 +952,9 @@ mod tests {
             zoomed: false,
             waiting: false,
             marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
         };
         let has_older = |menu: Menu| menu.items.iter().any(|i| i.action == Action::DeleteOlder);
         assert!(has_older(Menu::commands(&ctx(Focus::List))));

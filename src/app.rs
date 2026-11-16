@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::mpsc::Receiver,
     time::{Duration, Instant, SystemTime},
@@ -20,7 +20,7 @@ use crate::{
     hooks,
     keys::{self, TagKey},
     layout::{self, Direction},
-    list::{self, Entry, Group, Running, NEW_SESSION_TITLE},
+    list::{self, Cursor, Entry, Group, Row, Running, NEW_SESSION_TITLE},
     menu::{self, Action, Context, Menu, Outcome, Purpose},
     mouse, recent,
     selection::{self, Cell, Selection},
@@ -53,22 +53,22 @@ const GROUP_TITLE_MAX: usize = 30;
 const LIST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
-/// Claude-ID) je Session. Gruppenüberschriften fehlen absichtlich.
+/// Zeile als Cursor) je Session und Überschrift.
 #[derive(Debug, Default)]
 pub struct ListHits {
     pub area: Rect,
-    pub rows: Vec<(u16, String)>,
+    pub rows: Vec<(u16, Cursor)>,
 }
 
 impl ListHits {
-    fn at(&self, position: Position) -> Option<&str> {
+    fn at(&self, position: Position) -> Option<&Cursor> {
         if !self.area.contains(position) {
             return None;
         }
         self.rows
             .iter()
             .find(|(y, _)| *y == position.y)
-            .map(|(_, id)| id.as_str())
+            .map(|(_, cursor)| cursor)
     }
 }
 
@@ -89,8 +89,12 @@ pub struct App {
     pub windows: Windows,
     /// Sessionliste: gespeicherte und laufende Sessions, gruppiert nach Verzeichnis.
     pub groups: Vec<Group>,
-    /// Claude-ID der in der Liste ausgewählten Session.
-    pub cursor: Option<String>,
+    /// Auswahl in der Liste. Steht sie auf einer Session in einem eingeklappten Abschnitt, gilt
+    /// dessen Überschrift als ausgewählt (siehe [`Self::visible_cursor`]).
+    pub cursor: Option<Cursor>,
+    /// Eingeklappte Abschnitte (Schlüssel nach [`list::Heading::key`]); bleiben über
+    /// `state.json` erhalten.
+    pub collapsed: BTreeSet<String>,
     /// In der Liste markierte Sessions (Leertaste); `x` löscht sie gemeinsam.
     pub marked: HashSet<String>,
     /// Schnellwahl-Nummern (Alt+Zahl vergibt, Ctrl+Zahl zeigt); bleiben über `state.json` erhalten.
@@ -121,7 +125,9 @@ pub struct App {
     forwarding: Option<(SessionId, mouse::Button)>,
     last_click: Option<(Instant, SessionId, Cell)>,
     /// Letzter Klick in die Sessionliste (für Doppelklick = Enter).
-    last_list_click: Option<(Instant, String)>,
+    last_list_click: Option<(Instant, Cursor)>,
+    /// Letztes Ein-/Ausklappen per Klick; der zweite Klick eines Doppelklicks schaltet nicht zurück.
+    last_list_toggle: Option<Instant>,
     /// Beim Zeichnen gemerkt: welche Bildschirmzeile der Liste welche Session zeigt.
     pub list_hits: RefCell<ListHits>,
     /// Beim Zeichnen gemerkt: Fläche des Menü-Overlays (`None`, wenn keins offen ist).
@@ -189,6 +195,7 @@ impl App {
             windows: Windows::default(),
             groups: Vec::new(),
             cursor: None,
+            collapsed: BTreeSet::new(),
             marked: HashSet::new(),
             tags: Tags::new(),
             group_of: Assignments::new(),
@@ -204,6 +211,7 @@ impl App {
             forwarding: None,
             last_click: None,
             last_list_click: None,
+            last_list_toggle: None,
             list_hits: RefCell::new(ListHits::default()),
             overlay: std::cell::Cell::new(None),
             update: None,
@@ -239,6 +247,7 @@ impl App {
         app.group_of = std::mem::take(&mut saved.groups);
         app.recent_groups = std::mem::take(&mut saved.recent_groups);
         app.superseded = std::mem::take(&mut saved.superseded);
+        app.collapsed = std::mem::take(&mut saved.collapsed);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
@@ -385,9 +394,77 @@ impl App {
             .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone())
     }
 
+    /// Die ausgewählte Session, sofern sie sichtbar ist (nicht in einem eingeklappten Abschnitt).
     pub fn selected_entry(&self) -> Option<&Entry> {
-        let cursor = self.cursor.as_deref()?;
-        list::flatten(&self.groups).find(|e| e.claude_id == cursor)
+        match self.visible_cursor()? {
+            Cursor::Session(id) => list::flatten(&self.groups).find(|e| e.claude_id == id),
+            Cursor::Heading(_) => None,
+        }
+    }
+
+    /// Cursor, wie die Liste ihn zeigt: eine Session in einem eingeklappten Abschnitt wird durch
+    /// dessen Überschrift vertreten.
+    pub fn visible_cursor(&self) -> Option<Cursor> {
+        match self.cursor.as_ref()? {
+            Cursor::Session(id) => {
+                let key = list::group_with(&self.groups, id)?.heading.key();
+                Some(if self.collapsed.contains(&key) {
+                    Cursor::Heading(key)
+                } else {
+                    Cursor::Session(id.clone())
+                })
+            }
+            heading @ Cursor::Heading(_) => Some(heading.clone()),
+        }
+    }
+
+    /// Abschnitt der Auswahl: die gewählte Überschrift bzw. der Abschnitt der gewählten Session.
+    fn selected_group(&self) -> Option<&Group> {
+        match self.visible_cursor()? {
+            Cursor::Heading(key) => self.groups.iter().find(|g| g.heading.key() == key),
+            Cursor::Session(id) => list::group_with(&self.groups, &id),
+        }
+    }
+
+    pub fn is_collapsed(&self, group: &Group) -> bool {
+        self.collapsed.contains(&group.heading.key())
+    }
+
+    /// Klappt den Abschnitt ein oder aus. Eingeklappt rückt die Auswahl auf seine Überschrift.
+    fn set_collapsed(&mut self, key: String, collapsed: bool) {
+        if collapsed {
+            self.cursor = Some(Cursor::Heading(key.clone()));
+            self.collapsed.insert(key);
+        } else {
+            self.collapsed.remove(&key);
+        }
+        self.save_state();
+    }
+
+    /// Klappt alle Abschnitte ein oder aus; die Auswahl bleibt auf ihrem Abschnitt.
+    fn set_all_collapsed(&mut self, collapsed: bool) {
+        if collapsed {
+            self.cursor = self.visible_cursor().map(|c| match c {
+                Cursor::Session(id) => list::group_with(&self.groups, &id)
+                    .map_or(Cursor::Session(id), |g| Cursor::Heading(g.heading.key())),
+                heading => heading,
+            });
+            self.collapsed
+                .extend(self.groups.iter().map(|g| g.heading.key()));
+        } else {
+            self.collapsed.clear();
+        }
+        self.save_state();
+    }
+
+    /// Wählt die Session aus und klappt ihren Abschnitt dafür bei Bedarf aus.
+    fn reveal(&mut self, claude_id: &str) {
+        if let Some(key) = list::group_with(&self.groups, claude_id).map(|g| g.heading.key()) {
+            if self.collapsed.remove(&key) {
+                self.save_state();
+            }
+        }
+        self.cursor = Some(Cursor::Session(claude_id.to_string()));
     }
 
     fn selected_running(&self) -> Option<SessionId> {
@@ -577,8 +654,8 @@ impl App {
                 self.group_of.insert(new.clone(), group);
             }
         }
-        if self.cursor.as_deref() == Some(old.as_str()) {
-            self.cursor = Some(new);
+        if self.cursor == Some(Cursor::Session(old.clone())) {
+            self.cursor = Some(Cursor::Session(new));
         }
         // Das alte Protokoll wurde eben noch geschrieben; ohne diesen Eintrag sähe es kurz wie eine
         // anderswo laufende Session aus.
@@ -603,8 +680,8 @@ impl App {
             if let Some(group) = self.group_of.remove(&old) {
                 self.group_of.insert(new.clone(), group);
             }
-            if self.cursor.as_deref() == Some(old.as_str()) {
-                self.cursor = Some(new.clone());
+            if self.cursor == Some(Cursor::Session(old.clone())) {
+                self.cursor = Some(Cursor::Session(new.clone()));
             }
             if self.marked.remove(&old) {
                 self.marked.insert(new.clone());
@@ -658,22 +735,27 @@ impl App {
             .map(|e| e.claude_id.as_str())
             .collect();
         self.marked.retain(|id| listed.contains(id.as_str()));
-        if self.selected_entry().is_none() {
-            let still: HashSet<&str> = list::flatten(&self.groups)
-                .map(|e| e.claude_id.as_str())
-                .collect();
+        let valid = match &self.cursor {
+            Some(Cursor::Session(id)) => listed.contains(id.as_str()),
+            Some(Cursor::Heading(key)) => self.groups.iter().any(|g| g.heading.key() == *key),
+            None => false,
+        };
+        if !valid {
             let before: Vec<&str> = list::flatten(&old).map(|e| e.claude_id.as_str()).collect();
-            let successor = self
-                .cursor
-                .as_deref()
-                .and_then(|gone| list::successor(&before, gone, &still));
-            self.cursor = successor
-                .or_else(|| {
-                    list::flatten(&self.groups)
-                        .next()
-                        .map(|e| e.claude_id.as_str())
-                })
-                .map(str::to_string);
+            let successor = match &self.cursor {
+                Some(Cursor::Session(gone)) => list::successor(&before, gone, &listed),
+                _ => None,
+            };
+            // Ersatz: die erste sichtbare Session, erst wenn alles eingeklappt ist eine Überschrift.
+            let rows = list::rows(&self.groups, &self.collapsed);
+            let first = rows
+                .iter()
+                .find(|r| matches!(r, Row::Entry(_)))
+                .or(rows.first());
+            self.cursor = match successor {
+                Some(id) => Some(Cursor::Session(id.to_string())),
+                None => first.map(Row::cursor),
+            };
         }
         old != self.groups || self.cursor != cursor_before || self.marked.len() != marked_before
     }
@@ -819,9 +901,9 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                let list_hit = self.list_hits.borrow().at(position).map(str::to_string);
-                if let Some(claude_id) = list_hit {
-                    self.on_list_click(claude_id);
+                let list_hit = self.list_hits.borrow().at(position).cloned();
+                if let Some(cursor) = list_hit {
+                    self.on_list_click(cursor);
                     return;
                 }
                 let Some((slot, id, cell)) = self.window_at(position) else {
@@ -951,19 +1033,32 @@ impl App {
         open && self.overlay.get().is_some_and(|r| r.contains(position))
     }
 
-    /// Klick in die Sessionliste: Session auswählen und Fokus auf die Liste; ein zweiter Klick auf
-    /// dieselbe Session kurz danach wirkt wie Enter.
-    fn on_list_click(&mut self, claude_id: String) {
+    /// Klick in die Sessionliste: Zeile auswählen und Fokus auf die Liste. Ein zweiter Klick auf
+    /// dieselbe Session kurz danach wirkt wie Enter; ein Klick auf die schon gewählte Überschrift
+    /// klappt ihren Abschnitt ein bzw. aus.
+    fn on_list_click(&mut self, cursor: Cursor) {
         self.close_overlays();
         self.selection = None;
+        let heading_again = matches!(cursor, Cursor::Heading(_))
+            && self.windows.focus() == Focus::List
+            && self.visible_cursor().as_ref() == Some(&cursor)
+            && !self
+                .last_list_toggle
+                .is_some_and(|at| at.elapsed() < DOUBLE_CLICK);
         let double = self
             .last_list_click
             .as_ref()
-            .is_some_and(|(at, id)| at.elapsed() < DOUBLE_CLICK && *id == claude_id);
-        self.last_list_click = Some((Instant::now(), claude_id.clone()));
-        self.cursor = Some(claude_id);
+            .is_some_and(|(at, c)| at.elapsed() < DOUBLE_CLICK && *c == cursor);
+        self.last_list_click = Some((Instant::now(), cursor.clone()));
+        self.cursor = Some(cursor);
         self.set_focus(Focus::List);
-        if double {
+        if let (true, Some(Cursor::Heading(key))) = (heading_again, self.cursor.clone()) {
+            self.last_list_toggle = Some(Instant::now());
+            let collapsed = self.collapsed.contains(&key);
+            self.set_collapsed(key, !collapsed);
+            return;
+        }
+        if double && matches!(self.cursor, Some(Cursor::Session(_))) {
             self.last_list_click = None;
             let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
             if let Err(e) = self.on_list_key(enter) {
@@ -1072,7 +1167,7 @@ impl App {
             }
             return Ok(());
         };
-        self.cursor = Some(claude_id);
+        self.reveal(&claude_id);
         let focused_slot = match self.windows.focus() {
             Focus::Window(slot) => Some(slot),
             Focus::List => None,
@@ -1093,14 +1188,60 @@ impl App {
     }
 
     fn on_list_key(&mut self, key: KeyEvent) -> Result<()> {
+        let page = self.list_page();
+        match key.code {
+            KeyCode::Up => self.move_cursor(-1),
+            KeyCode::Down => self.move_cursor(1),
+            KeyCode::PageUp => self.move_cursor(-page),
+            KeyCode::PageDown => self.move_cursor(page),
+            KeyCode::Esc => self.marked.clear(),
+            // Wie in einem Dateibaum: ← klappt den Abschnitt der Auswahl ein, → klappt aus.
+            KeyCode::Left | KeyCode::Right => {
+                if let Some(heading) = self.selected_group().map(|g| g.heading.key()) {
+                    self.set_collapsed(heading, key.code == KeyCode::Left);
+                }
+            }
+            _ => match self.visible_cursor() {
+                Some(Cursor::Heading(heading)) => self.on_heading_key(key, heading),
+                _ => self.on_entry_key(key)?,
+            },
+        }
+        Ok(())
+    }
+
+    /// Enter klappt den Abschnitt ein bzw. aus, die Leertaste markiert alle seine Sessions (bzw.
+    /// hebt die Markierung auf, wenn schon alle markiert sind) und geht weiter.
+    fn on_heading_key(&mut self, key: KeyEvent, heading: String) {
+        match key.code {
+            KeyCode::Enter => {
+                let collapsed = self.collapsed.contains(&heading);
+                self.set_collapsed(heading, !collapsed);
+            }
+            KeyCode::Char(' ') => {
+                let ids: Vec<String> = self
+                    .groups
+                    .iter()
+                    .find(|g| g.heading.key() == heading)
+                    .map(|g| g.entries.iter().map(|e| e.claude_id.clone()).collect())
+                    .unwrap_or_default();
+                if ids.iter().all(|id| self.marked.contains(id)) {
+                    for id in &ids {
+                        self.marked.remove(id);
+                    }
+                } else {
+                    self.marked.extend(ids);
+                }
+                self.move_cursor(1);
+            }
+            _ => {}
+        }
+    }
+
+    fn on_entry_key(&mut self, key: KeyEvent) -> Result<()> {
         let Some(entry) = self.selected_entry().cloned() else {
             return Ok(());
         };
         match key.code {
-            KeyCode::Up => self.move_cursor(-1),
-            KeyCode::Down => self.move_cursor(1),
-            KeyCode::PageUp => self.move_cursor(-self.list_page()),
-            KeyCode::PageDown => self.move_cursor(self.list_page()),
             // Markieren und weiter zur nächsten Session, damit sich Folgen schnell markieren lassen.
             KeyCode::Char(' ') => {
                 if !self.marked.remove(&entry.claude_id) {
@@ -1108,7 +1249,6 @@ impl App {
                 }
                 self.move_cursor(1);
             }
-            KeyCode::Esc => self.marked.clear(),
             KeyCode::Enter => match entry.running {
                 Some(id) => match self.windows.window_of(id) {
                     Some(slot) => self.set_focus(Focus::Window(slot)),
@@ -1132,25 +1272,26 @@ impl App {
     }
 
     /// Sprungweite für Bild ↑/↓: eine Listenhöhe weniger eine Zeile, damit die Lage erkennbar
-    /// bleibt. Gezählt werden Sessions; Gruppen-Überschriften machen den Sprung etwas größer.
+    /// bleibt.
     fn list_page(&self) -> isize {
         let height = self.list_hits.borrow().area.height as isize;
         (height - 1).max(1)
     }
 
     fn move_cursor(&mut self, delta: isize) {
-        let ids: Vec<&str> = list::flatten(&self.groups)
-            .map(|e| e.claude_id.as_str())
+        let rows: Vec<Cursor> = list::rows(&self.groups, &self.collapsed)
+            .iter()
+            .map(Row::cursor)
             .collect();
-        let current = self
-            .cursor
-            .as_deref()
-            .and_then(|c| ids.iter().position(|&id| id == c))
+        let visible = self.visible_cursor();
+        let current = rows
+            .iter()
+            .position(|c| Some(c) == visible.as_ref())
             .unwrap_or(0);
         let next = current
             .saturating_add_signed(delta)
-            .min(ids.len().saturating_sub(1));
-        self.cursor = ids.get(next).map(|id| id.to_string());
+            .min(rows.len().saturating_sub(1));
+        self.cursor = rows.into_iter().nth(next);
     }
 
     /// Öffnet eine gespeicherte Session in `slot` (`None`: Fensterauswahl, ohne offenes Fenster
@@ -1299,6 +1440,13 @@ impl App {
             }
             Action::NextWaiting => self.show_next_waiting()?,
             Action::SetGroup => self.open_group_picker(),
+            Action::ToggleCollapsed => {
+                if let Some(group) = self.selected_group() {
+                    let (key, collapsed) = (group.heading.key(), self.is_collapsed(group));
+                    self.set_collapsed(key, !collapsed);
+                }
+            }
+            Action::CollapseAll(collapsed) => self.set_all_collapsed(collapsed),
             Action::Help => self.help = Some(Help::default()),
             Action::Quit => self.should_quit = true,
             Action::Update => {
@@ -1345,6 +1493,9 @@ impl App {
             zoomed: self.windows.zoomed().is_some(),
             waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
             marked: self.marked.len(),
+            collapsed: self.selected_group().map(|g| self.is_collapsed(g)),
+            any_expanded: self.groups.iter().any(|g| !self.is_collapsed(g)),
+            any_collapsed: self.groups.iter().any(|g| self.is_collapsed(g)),
         }));
     }
 
@@ -1410,8 +1561,8 @@ impl App {
         let Some(id) = waiting::next_waiting(&order, is_waiting, self.context_session()) else {
             return Ok(());
         };
-        if let Some(session) = self.session(id) {
-            self.cursor = Some(session.claude_id.clone());
+        if let Some(claude_id) = self.session(id).map(|s| s.claude_id.clone()) {
+            self.reveal(&claude_id);
         }
         let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
         self.on_list_key(enter)
@@ -1599,7 +1750,7 @@ impl App {
     fn sync_cursor(&mut self) {
         if let Some(id) = self.windows.focused_session() {
             if let Some(session) = self.session(id) {
-                self.cursor = Some(session.claude_id.clone());
+                self.cursor = Some(Cursor::Session(session.claude_id.clone()));
             }
         }
     }
@@ -1646,6 +1797,7 @@ impl App {
             groups: self.group_of.clone(),
             recent_groups: self.recent_groups.clone(),
             superseded: self.superseded.clone(),
+            collapsed: self.collapsed.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);
@@ -1760,13 +1912,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_click_finds_session_row_but_not_headers_or_outside() {
+    fn list_click_finds_rows_but_nothing_outside() {
         let hits = ListHits {
             area: Rect::new(1, 1, 40, 10),
-            rows: vec![(2, "a".into()), (3, "b".into())],
+            rows: vec![
+                (1, Cursor::Heading("dir:/x".into())),
+                (2, Cursor::Session("a".into())),
+                (3, Cursor::Session("b".into())),
+            ],
         };
-        assert_eq!(hits.at(Position::new(5, 3)), Some("b"));
-        assert_eq!(hits.at(Position::new(5, 1)), None, "Überschrift");
+        assert_eq!(
+            hits.at(Position::new(5, 3)),
+            Some(&Cursor::Session("b".into()))
+        );
+        assert_eq!(
+            hits.at(Position::new(5, 1)),
+            Some(&Cursor::Heading("dir:/x".into()))
+        );
+        assert_eq!(hits.at(Position::new(5, 6)), None, "unter der Liste");
         assert_eq!(
             hits.at(Position::new(45, 3)),
             None,

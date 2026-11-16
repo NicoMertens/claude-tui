@@ -2,7 +2,10 @@
 //! der Fokus war, dazu die Schnellwahl-Nummern und die eigenen Gruppen. Gespeichert als `state.json` im
 //! Konfigurationsordner.
 
-use std::{collections::BTreeMap, fs};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -36,6 +39,9 @@ pub struct State {
     /// alte wird in der Liste nicht mehr gezeigt.
     #[serde(default)]
     pub superseded: BTreeMap<String, String>,
+    /// Eingeklappte Abschnitte der Sessionliste (Schlüssel nach `list::Heading::key`).
+    #[serde(default)]
+    pub collapsed: BTreeSet<String>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -68,6 +74,7 @@ mod tests {
             groups: Assignments::from([("a".to_string(), "G".to_string())]),
             recent_groups: vec!["G".into()],
             superseded: BTreeMap::from([("alt".to_string(), "b".to_string())]),
+            collapsed: BTreeSet::from(["dir:/x".to_string()]),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);

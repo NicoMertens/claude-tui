@@ -28,6 +28,8 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
   der letzten Aktivität bzw. Wartezeit.
 - Titel in der Farbe aus Claudes **`/color`**.
 - **Eigene Gruppen** (⚑) unabhängig vom Verzeichnis.
+- Abschnitte mit **Anzahl** der Sessions, **einklappbar** (`←`/`→`, Menü); eingeklappt zeigt die
+  Überschrift den dringlichsten Zustand.
 - **Schnellwahl:** `Alt+1`–`9` gibt einer Session eine Nummer, `Ctrl+1`–`9` springt zu ihr.
 - Sessions **fortsetzen** (`--resume`), **löschen**, mehrere markiert oder nach Alter (älter als
   1 Tag / 1 Woche / 1 Monat) löschen.

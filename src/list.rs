@@ -2,7 +2,7 @@
 //! (alphabetisch), darunter nach Verzeichnis.
 
 use std::{
-    collections::{hash_map::Entry as MapEntry, HashMap, HashSet},
+    collections::{hash_map::Entry as MapEntry, BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -38,6 +38,41 @@ pub enum Heading {
     Group(String),
     /// Arbeitsverzeichnis der nicht gruppierten Sessions.
     Dir(PathBuf),
+}
+
+impl Heading {
+    /// Dauerhafter Schlüssel (eingeklappte Abschnitte in `state.json`, Cursor auf der Überschrift).
+    pub fn key(&self) -> String {
+        match self {
+            Self::Group(name) => format!("group:{name}"),
+            Self::Dir(path) => format!("dir:{}", dir_key(path).display()),
+        }
+    }
+}
+
+/// Position des Cursors in der Liste: auf einer Session oder einer Überschrift.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Cursor {
+    /// Claude-ID der Session.
+    Session(String),
+    /// Schlüssel der Überschrift (siehe [`Heading::key`]).
+    Heading(String),
+}
+
+/// Eine sichtbare Zeile der Liste.
+#[derive(Clone, Copy, Debug)]
+pub enum Row<'a> {
+    Heading(&'a Group),
+    Entry(&'a Entry),
+}
+
+impl Row<'_> {
+    pub fn cursor(&self) -> Cursor {
+        match self {
+            Self::Heading(group) => Cursor::Heading(group.heading.key()),
+            Self::Entry(entry) => Cursor::Session(entry.claude_id.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +172,26 @@ fn dir_key(path: &Path) -> PathBuf {
     } else {
         path.to_path_buf()
     }
+}
+
+/// Sichtbare Zeilen: jede Überschrift, darunter ihre Sessions, sofern der Abschnitt nicht
+/// eingeklappt ist (`collapsed`: Schlüssel nach [`Heading::key`]).
+pub fn rows<'a>(groups: &'a [Group], collapsed: &BTreeSet<String>) -> Vec<Row<'a>> {
+    let mut rows = Vec::new();
+    for group in groups {
+        rows.push(Row::Heading(group));
+        if !collapsed.contains(&group.heading.key()) {
+            rows.extend(group.entries.iter().map(Row::Entry));
+        }
+    }
+    rows
+}
+
+/// Abschnitt, in dem die Session steht.
+pub fn group_with<'a>(groups: &'a [Group], claude_id: &str) -> Option<&'a Group> {
+    groups
+        .iter()
+        .find(|g| g.entries.iter().any(|e| e.claude_id == claude_id))
 }
 
 /// Alle Einträge in Anzeigereihenfolge (ohne Gruppenüberschriften).
@@ -269,6 +324,38 @@ mod tests {
         );
         let ids: Vec<_> = flatten(&groups).map(|e| e.claude_id.as_str()).collect();
         assert_eq!(ids, ["d", "c", "b", "a"]);
+    }
+
+    #[test]
+    fn collapsed_sections_show_only_their_heading() {
+        let groups = build(
+            vec![stored("a", "/x", 50), stored("b", "/y", 10)],
+            &[],
+            &HashSet::new(),
+            &Assignments::new(),
+        );
+        let collapsed = BTreeSet::from([dir("/y").key()]);
+        let cursors: Vec<_> = rows(&groups, &collapsed).iter().map(Row::cursor).collect();
+        assert_eq!(
+            cursors,
+            [
+                Cursor::Heading(dir("/y").key()),
+                Cursor::Heading(dir("/x").key()),
+                Cursor::Session("a".into()),
+            ]
+        );
+        assert_eq!(
+            group_with(&groups, "b").map(|g| &g.heading),
+            Some(&dir("/y"))
+        );
+    }
+
+    #[test]
+    fn heading_keys_separate_groups_from_directories() {
+        assert_ne!(Heading::Group("x".into()).key(), dir("x").key());
+        if cfg!(windows) {
+            assert_eq!(dir(r"C:\Dev").key(), dir(r"c:\dev").key());
+        }
     }
 
     #[test]

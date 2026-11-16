@@ -73,12 +73,19 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Oben
 stehen die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
-nach Arbeitsverzeichnis (▸) — Verzeichnisse mit der jüngsten Aktivität oben. In jedem Abschnitt
+nach Arbeitsverzeichnis (▾) — Verzeichnisse mit der jüngsten Aktivität oben. Jede Überschrift zeigt
+die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
 stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
 [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
+
+**Einklappen:** Jeder Abschnitt lässt sich einklappen; dann steht nur noch seine Überschrift da
+(Verzeichnisse zeigen `▸` statt `▾`). Läuft darin eine Session, steht ihr Zustandssymbol vor der
+Überschrift — bei mehreren das dringlichste (waiting vor working vor ready). Eingeklappte Abschnitte
+bleiben über einen Neustart erhalten. Springt man per [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)
+oder `w` zu einer Session darin, klappt ihr Abschnitt auf.
 
 Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, yellow, green, cyan,
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
@@ -153,8 +160,11 @@ einen Zeilenumbruch ein.
 
 | Taste | Wirkung |
 |---|---|
-| `↑` / `↓` | Session auswählen |
+| `↑` / `↓` | Session oder Überschrift auswählen |
 | `PgUp` / `PgDn` | Auswahl seitenweise verschieben |
+| `←` / `→` | Abschnitt der Auswahl einklappen (die Auswahl springt auf die Überschrift) / ausklappen |
+| `Enter` auf einer Überschrift | Abschnitt ein- bzw. ausklappen |
+| `Leertaste` auf einer Überschrift | alle Sessions des Abschnitts markieren; sind schon alle markiert, Markierung aufheben |
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
 
@@ -185,6 +195,9 @@ vom Fokus ab:
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen |
 | `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen |
+| `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
+| `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
+| `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
 | `o` | gespeicherte Sessions älter als 1 Tag / 1 Woche / 1 Monat löschen | — |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
@@ -298,6 +311,8 @@ Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereigni
 **Auswählen per Klick:** Ein Klick in ein Fenster (auch auf Rahmen oder Titel) gibt ihm den Fokus.
 Ein Klick auf eine Session in der Sessionliste wählt sie aus und gibt der Liste den Fokus; ein
 **Doppelklick** darauf wirkt wie `Enter` (ins Fenster der Session springen bzw. Fensterauswahl).
+Ein Klick auf eine Überschrift wählt sie aus; ein weiterer Klick auf die gewählte Überschrift klappt
+ihren Abschnitt ein bzw. aus.
 
 **Offenes Menü:** Ein Klick außerhalb des Menü-Overlays schließt es und wirkt wie oben beschrieben.
 Klicks und Mausrad auf dem Overlay selbst tun nichts (das Menü wird per Tastatur bedient) und
