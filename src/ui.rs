@@ -16,6 +16,7 @@ use crate::{
     keys,
     list::{Entry, Heading},
     menu::Menu,
+    session::Status,
     tags,
     term_view::TermView,
     theme, update,
@@ -24,9 +25,9 @@ use crate::{
 
 const SIDEBAR_WIDTH: u16 = 42;
 /// Kennzeichnet die Verzeichnis-Überschriften in der Sessionliste.
-const FOLDER_ICON: &str = "📁";
-/// Kennzeichnet eigene Gruppen; wie das Ordner-Emoji ohne Variantenzeichen zwei Spalten breit.
-const GROUP_ICON: &str = "📌";
+const FOLDER_ICON: &str = "▸";
+/// Kennzeichnet eigene Gruppen. Bewusst kein Emoji: die erscheinen unter Windows immer bunt.
+const GROUP_ICON: &str = "⚑";
 
 /// Teilt den Bildschirm in Sessionliste und Fensterfläche; bei ausgeblendeter Liste bekommen die
 /// Fenster die volle Breite (die Liste ist dann leer).
@@ -228,26 +229,34 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let mut rows: Vec<Option<String>> = Vec::new();
     let mut selected_item = None;
     for group in &app.groups {
-        // Beide Emojis sind zwei Spalten breit. Gruppennamen hinten kürzen, Pfade vorne (der
+        // Beide Symbole sind eine Spalte breit. Gruppennamen hinten kürzen, Pfade vorne (der
         // Ordnername am Ende ist der aussagekräftige Teil).
-        let line = match &group.heading {
-            Heading::Group(name) => Line::from(vec![
-                Span::raw(format!("{GROUP_ICON} ")),
-                Span::styled(
-                    head(name, width.saturating_sub(4)),
-                    Style::default()
-                        .fg(theme::TEXT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Heading::Dir(cwd) => Line::from(vec![
-                Span::raw(format!("{FOLDER_ICON} ")),
-                Span::styled(
-                    tail(&cwd.display().to_string(), width.saturating_sub(4)),
-                    Style::default().fg(theme::TEXT),
-                ),
-            ]),
+        let (icon, label, style) = match &group.heading {
+            Heading::Group(name) => (
+                GROUP_ICON,
+                head(name, width.saturating_sub(3)),
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Heading::Dir(cwd) => (
+                FOLDER_ICON,
+                tail(&cwd.display().to_string(), width.saturating_sub(3)),
+                Style::default().fg(theme::TEXT),
+            ),
         };
+        // Der Rest der Zeile wird mit einer Linie gefüllt, damit sich Überschriften abheben.
+        let rest = width.saturating_sub(2 + label.chars().count() + 1);
+        let rule = if rest > 0 {
+            format!(" {}", "─".repeat(rest))
+        } else {
+            String::new()
+        };
+        let line = Line::from(vec![
+            Span::raw(format!("{icon} ")),
+            Span::styled(label, style),
+            Span::styled(rule, Style::default().fg(theme::MUTED)),
+        ]);
         items.push(ListItem::new(line));
         rows.push(None);
         for entry in &group.entries {
@@ -279,16 +288,18 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
 fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
     let session = entry.running.and_then(|id| app.session(id));
-    let (symbol, color) = if entry.external {
-        theme::ELSEWHERE
-    } else {
-        theme::status_symbol(session.map(|s| s.status), clock())
+    // Nur laufende Sessions tragen ein Zustandssymbol; externe kennzeichnet ein Symbol in der
+    // Fensterspalte (unter der Ziffer von „ [1]“).
+    let status = session.map(|s| s.status).filter(|&s| s != Status::Exited);
+    let (symbol, color) = match status {
+        None => (" ", theme::MUTED),
+        status => theme::status_symbol(status, clock()),
     };
     let slot = entry.running.and_then(|id| app.windows.window_of(id));
-    let window = match slot {
-        Some(s) => format!(" [{}]", s + 1),
-        None if entry.external => theme::ELSEWHERE_LABEL.to_string(),
-        None => " ".repeat(4),
+    let (window, window_color) = match slot {
+        Some(s) => (format!(" [{}]", s + 1), theme::TEXT),
+        None if entry.external => (format!("  {} ", theme::ELSEWHERE.0), theme::ELSEWHERE.1),
+        None => (" ".repeat(4), theme::TEXT),
     };
     let since = match session {
         Some(s) => Some(s.last_output().elapsed()),
@@ -319,10 +330,7 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
         Span::styled(tag, tag_style()),
         Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(format!("{title}{padding}"), name_style),
-        Span::styled(
-            window,
-            Style::default().fg(if entry.external { color } else { theme::TEXT }),
-        ),
+        Span::styled(window, Style::default().fg(window_color)),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
     ]);
     let item = ListItem::new(line);

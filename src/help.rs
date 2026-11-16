@@ -32,8 +32,8 @@ const OVERVIEW: &[Row] = &[
     ),
     Heading("Session list"),
     Text(
-        "All saved Claude Code sessions. Your own groups (📌) come first, sorted alphabetically, \
-         then the sessions by working directory (📁), most recent first. Running sessions lead \
+        "All saved Claude Code sessions. Your own groups (⚑) come first, sorted alphabetically, \
+         then the sessions by working directory (▸), most recent first. Running sessions lead \
          each section.",
     ),
     Text(
@@ -49,8 +49,8 @@ const OVERVIEW: &[Row] = &[
     Key("✻ working", "Claude works on a prompt or uses a tool"),
     Key("▲ waiting", "Claude waits for your permission or input"),
     Key("● ready", "Claude is done and waits for the next prompt"),
-    Key("○ saved", "Not running; opening resumes it"),
-    Key("◇ ext", "Runs outside claude-tui; opening asks first"),
+    Key("no symbol", "Saved, not running; opening resumes it"),
+    Key("⇄ elsewhere", "Runs outside claude-tui; opening asks first"),
 ];
 
 const KEYS: &[Row] = &[

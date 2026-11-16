@@ -72,8 +72,8 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 ## Aufbau
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Oben
-stehen die [eigenen Gruppen](#gruppen) (📌, alphabetisch), darunter die übrigen Sessions gruppiert
-nach Arbeitsverzeichnis (📁) — Verzeichnisse mit der jüngsten Aktivität oben. In jedem Abschnitt
+stehen die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
+nach Arbeitsverzeichnis (▸) — Verzeichnisse mit der jüngsten Aktivität oben. In jedem Abschnitt
 stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
 [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
@@ -158,7 +158,7 @@ einen Zeilenumbruch ein.
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
 
-Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `◇ … ext`, siehe
+Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `⇄`, siehe
 [Zustände](#zustände-in-der-seitenleiste)), fragen `Enter`, Doppelklick und `1`–`4` erst nach:
 „<Titel> runs elsewhere – open anyway?“. `y` startet sie trotzdem ein zweites Mal (bei `Enter` folgt
 danach die Fensterauswahl), `n`, `Esc` und `Enter` brechen ab — die Vorauswahl ist „No“, denn zwei
@@ -332,8 +332,8 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | ✻ (animiert) | rot | working | Claude bearbeitet einen Prompt oder nutzt ein Tool. |
 | ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe. |
 | ● | grau | ready | Claude ist fertig und wartet auf den nächsten Prompt. |
-| ○ | grau | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
-| ◇ … `ext` | graublau | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach (Hintergrund-Sessions: `claude attach`, ohne Rückfrage). |
+| (keins) | grau (Titel) | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
+| ⇄ (statt Fensternummer) | orange | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach (Hintergrund-Sessions: `claude attach`, ohne Rückfrage). |
 
 Die Formen unterscheiden sich auch ohne Farbe.
 

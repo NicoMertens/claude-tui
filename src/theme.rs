@@ -55,9 +55,7 @@ pub fn status_label(status: Status) -> (&'static str, Color) {
 }
 
 /// Symbol und Farbe einer gespeicherten Session, die außerhalb von claude-tui läuft.
-pub const ELSEWHERE: (&str, Color) = ("◇", Color::Rgb(0x7A, 0x9C, 0xB0));
-/// Steht statt der Fensternummer bei einer Session, die außerhalb von claude-tui läuft.
-pub const ELSEWHERE_LABEL: &str = " ext";
+pub const ELSEWHERE: (&str, Color) = ("⇄", ACCENT);
 
 /// Sessionfarbe aus Claudes `/color` als Textfarbe; unbekannte Namen bleiben ungefärbt.
 pub fn session_color(name: &str) -> Option<Color> {

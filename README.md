@@ -27,7 +27,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 - Je Session: Zustand, Titel (`/rename`, KI-Titel oder letzter Prompt), Fensternummer und Zeit seit
   der letzten Aktivität bzw. Wartezeit.
 - Titel in der Farbe aus Claudes **`/color`**.
-- **Eigene Gruppen** (📌) unabhängig vom Verzeichnis.
+- **Eigene Gruppen** (⚑) unabhängig vom Verzeichnis.
 - **Schnellwahl:** `Alt+1`–`9` gibt einer Session eine Nummer, `Ctrl+1`–`9` springt zu ihr.
 - Sessions **fortsetzen** (`--resume`), **löschen**, mehrere markiert oder nach Alter (älter als
   1 Tag / 1 Woche / 1 Monat) löschen.
@@ -37,7 +37,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 **Zustände**
 
 - **working** (rot, animiert), **waiting for you** (gelb), **ready** (grau), gespeichert, **läuft
-  anderswo** (`◇ ext`), in der Liste und in der Fensterleiste.
+  anderswo** (`⇄`), in der Liste und in der Fensterleiste.
 - Zustand kommt über **Hooks** direkt von Claude Code. Die eigene `~/.claude/settings.json` bleibt
   dabei unverändert, und ohne Hook-Meldung greift eine Heuristik.
 - **Hinweis auf wartende Sessions:** Terminal-Glocke und Meldung, wenn eine Session außerhalb des
