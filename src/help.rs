@@ -71,6 +71,7 @@ const KEYS: &[Row] = &[
     Key("Alt+← / →", "Jump by word in Claude's input"),
     Heading("Session list focused"),
     Key("↑ / ↓", "Select a session"),
+    Key("PgUp / PgDn", "Move the selection by a page"),
     Key(
         "Enter",
         "Go to its window, or pick a window (a saved session resumes)",

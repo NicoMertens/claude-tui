@@ -154,6 +154,7 @@ einen Zeilenumbruch ein.
 | Taste | Wirkung |
 |---|---|
 | `↑` / `↓` | Session auswählen |
+| `PgUp` / `PgDn` | Auswahl seitenweise verschieben |
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
 

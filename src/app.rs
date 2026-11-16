@@ -1099,6 +1099,8 @@ impl App {
         match key.code {
             KeyCode::Up => self.move_cursor(-1),
             KeyCode::Down => self.move_cursor(1),
+            KeyCode::PageUp => self.move_cursor(-self.list_page()),
+            KeyCode::PageDown => self.move_cursor(self.list_page()),
             // Markieren und weiter zur nächsten Session, damit sich Folgen schnell markieren lassen.
             KeyCode::Char(' ') => {
                 if !self.marked.remove(&entry.claude_id) {
@@ -1127,6 +1129,13 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Sprungweite für Bild ↑/↓: eine Listenhöhe weniger eine Zeile, damit die Lage erkennbar
+    /// bleibt. Gezählt werden Sessions; Gruppen-Überschriften machen den Sprung etwas größer.
+    fn list_page(&self) -> isize {
+        let height = self.list_hits.borrow().area.height as isize;
+        (height - 1).max(1)
     }
 
     fn move_cursor(&mut self, delta: isize) {
