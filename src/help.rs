@@ -41,7 +41,7 @@ const OVERVIEW: &[Row] = &[
          of its running sessions in front of its heading.",
     ),
     Text(
-        "Each row shows state, quick number (#3), title, window number ([1]) and the time since \
+        "Each row shows state, title, quick number (#3), window number ([1]) and the time since \
          the last activity. A /color set in Claude colours the title.",
     ),
     Heading("Windows"),
@@ -77,6 +77,10 @@ const KEYS: &[Row] = &[
     Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),
     Key("← / →", "Collapse / expand the section of the selection"),
+    Key(
+        "Ctrl+↑ / ↓",
+        "Jump to the previous / next group or directory",
+    ),
     Key(
         "Enter",
         "Go to its window, or pick a window (a saved session resumes); on a heading: collapse \

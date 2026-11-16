@@ -226,6 +226,8 @@ fn dir_picker_lines(picker: &DirPicker, width: usize) -> Vec<Line<'static>> {
 fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let width = area.width as usize;
     let selected = app.visible_cursor();
+    // Blau mit dunkler Schrift nur, solange die Liste den Fokus hat; sonst dezent hinterlegt.
+    let focused = app.windows.focus() == Focus::List;
     let rows = list::rows(&app.groups, &app.collapsed);
     let mut items: Vec<ListItem> = Vec::with_capacity(rows.len());
     let mut selected_item = None;
@@ -234,9 +236,14 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
         if is_selected {
             selected_item = Some(i);
         }
-        items.push(match row {
-            Row::Heading(group) => heading_item(app, group, is_selected, width),
-            Row::Entry(entry) => entry_item(app, entry, is_selected, width),
+        let (line, bold) = match row {
+            Row::Heading(group) => (heading_line(app, group, width), false),
+            Row::Entry(entry) => (entry_line(app, entry, is_selected, width), true),
+        };
+        items.push(if is_selected {
+            selected_item_of(line, focused, bold)
+        } else {
+            ListItem::new(line)
         });
     }
     if app.loading() && items.is_empty() {
@@ -258,7 +265,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
 
 /// Überschrift eines Abschnitts: `▸ Name (Anzahl) ─────`. Eingeklappt steht davor der
 /// dringlichste Zustand seiner laufenden Sessions, damit keine Rückfrage untergeht.
-fn heading_item(app: &App, group: &Group, selected: bool, width: usize) -> ListItem<'static> {
+fn heading_line(app: &App, group: &Group, width: usize) -> Line<'static> {
     let collapsed = app.is_collapsed(group);
     let status = if collapsed {
         group_status(app, group)
@@ -312,20 +319,42 @@ fn heading_item(app: &App, group: &Group, selected: bool, width: usize) -> ListI
     } else {
         String::new()
     };
-    let line = Line::from(vec![
+    Line::from(vec![
         prefix,
         Span::raw(format!("{icon} ")),
         Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(label, style),
         Span::styled(count, Style::default().fg(theme::MUTED)),
         Span::styled(rule, Style::default().fg(theme::MUTED)),
-    ]);
-    let item = ListItem::new(line);
-    if selected {
-        item.style(Style::default().bg(theme::SELECTED_BG))
+    ])
+}
+
+/// Ausgewählte Zeile. Mit Fokus auf der Liste blau hinterlegt und alle Teile in dunkler Schrift
+/// (auch farbige Titel und Symbole, die auf dem Blau sonst schlecht lesbar wären); ohne Fokus
+/// dezent hinterlegt in den normalen Farben. Sessions zusätzlich fett.
+fn selected_item_of(line: Line<'static>, focused: bool, bold: bool) -> ListItem<'static> {
+    let mut row = Style::default().bg(if focused {
+        theme::SELECTED_BG
     } else {
-        item
+        theme::SELECTED_DIM_BG
+    });
+    if bold {
+        row = row.add_modifier(Modifier::BOLD);
     }
+    let line = if focused {
+        let style = Style::default()
+            .fg(theme::SELECTED_FG)
+            .bg(theme::SELECTED_BG);
+        Line::from(
+            line.spans
+                .into_iter()
+                .map(|span| span.patch_style(style))
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        line
+    };
+    ListItem::new(line).style(row)
 }
 
 /// Dringlichster Zustand der laufenden Sessions eines Abschnitts: wartet vor arbeitet vor bereit.
@@ -347,7 +376,7 @@ fn group_status(app: &App, group: &Group) -> Option<Status> {
 }
 
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
-fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListItem<'static> {
+fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'static> {
     let session = entry.running.and_then(|id| app.session(id));
     // Nur laufende Sessions tragen ein Zustandssymbol; externe kennzeichnet ein Symbol in der
     // Fensterspalte (unter der Ziffer von „ [1]“).
@@ -386,24 +415,19 @@ fn entry_item(app: &App, entry: &Entry, selected: bool, width: usize) -> ListIte
         None if session.is_some() || selected => Style::default().fg(theme::TEXT),
         None => Style::default().fg(theme::MUTED),
     };
-    let line = Line::from(vec![
+    // Die Schnellwahl-Nummer steht hinter dem Titel, vor der Fensternummer.
+    let tag = match tag.trim_end() {
+        "" => String::new(),
+        number => format!(" {number}"),
+    };
+    Line::from(vec![
         Span::styled(format!("{symbol} "), Style::default().fg(color)),
-        Span::styled(tag, tag_style()),
         Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(format!("{title}{padding}"), name_style),
+        Span::styled(tag, tag_style()),
         Span::styled(window, Style::default().fg(window_color)),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
-    ]);
-    let item = ListItem::new(line);
-    if selected {
-        item.style(
-            Style::default()
-                .bg(theme::SELECTED_BG)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        item
-    }
+    ])
 }
 
 /// Uhr für den Spinner; alle Spinner laufen damit im Gleichtakt.
@@ -700,10 +724,11 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let color = frame_color(focused);
         let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
         let tag = tag_label(app, &session.claude_id);
+        // Wie in der Liste: die Schnellwahl-Nummer hinter dem Titel.
         let title = vec![
             Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
-            Span::styled(tag, tag_style()),
             Span::styled(format!("{} ", app.title_of(id)), title_style),
+            Span::styled(tag, tag_style()),
         ];
         let (label, label_color) = theme::status_label(session.status);
         let (symbol, _) = theme::status_symbol(Some(session.status), clock());

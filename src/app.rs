@@ -426,6 +426,30 @@ impl App {
         }
     }
 
+    /// Springt zur Überschrift des vorigen (`delta` < 0) bzw. nächsten Abschnitts. Steht die
+    /// Auswahl auf einer Session, führt der Sprung nach oben zuerst auf ihre eigene Überschrift.
+    fn jump_section(&mut self, delta: isize) {
+        let keys: Vec<String> = self.groups.iter().map(|g| g.heading.key()).collect();
+        let Some(last) = keys.len().checked_sub(1) else {
+            return;
+        };
+        let (index, on_heading) = match self.visible_cursor() {
+            Some(Cursor::Heading(key)) => (keys.iter().position(|k| *k == key), true),
+            Some(Cursor::Session(id)) => (
+                list::group_with(&self.groups, &id)
+                    .and_then(|g| keys.iter().position(|k| *k == g.heading.key())),
+                false,
+            ),
+            None => (None, false),
+        };
+        let target = match index {
+            None => 0,
+            Some(i) if delta < 0 && !on_heading => i,
+            Some(i) => i.saturating_add_signed(delta).min(last),
+        };
+        self.cursor = Some(Cursor::Heading(keys[target].clone()));
+    }
+
     pub fn is_collapsed(&self, group: &Group) -> bool {
         self.collapsed.contains(&group.heading.key())
     }
@@ -1678,15 +1702,19 @@ impl App {
 
     fn move_focus(&mut self, direction: Direction) {
         match self.windows.focus() {
-            Focus::List => {
-                if direction == Direction::Right && self.windows.len() > 0 {
+            Focus::List => match direction {
+                Direction::Right if self.windows.len() > 0 => {
                     let slot = self
                         .selected_running()
                         .and_then(|id| self.windows.window_of(id))
                         .unwrap_or(0);
                     self.set_focus(Focus::Window(slot));
                 }
-            }
+                // In der Liste springen Ctrl+↑/↓ zwischen den Gruppen bzw. Verzeichnissen.
+                Direction::Up => self.jump_section(-1),
+                Direction::Down => self.jump_section(1),
+                _ => {}
+            },
             Focus::Window(slot) => {
                 // Gezoomt: erst aufheben, dann den Nachbarn im normalen Layout suchen.
                 if self.windows.zoomed().is_some() {

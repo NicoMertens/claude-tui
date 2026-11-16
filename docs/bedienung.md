@@ -75,9 +75,9 @@ Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/
 stehen die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾) — Verzeichnisse mit der jüngsten Aktivität oben. Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
-stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Schnellwahl-Nummer (`#3`, falls vergeben, siehe
-[Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Titel (eigener Name aus `/rename`, sonst der KI-Titel,
-sonst der letzte Prompt), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
+stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
+sonst der letzte Prompt), Schnellwahl-Nummer (`#3`, falls vergeben, siehe
+[Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
@@ -111,7 +111,7 @@ oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie das Menü), alle 
 grauen.
 
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
-you** (gelb), **ready** (grau) — z. B. `[1] #3 claude-tui-rust · ✻ working` (`#3` nur mit
+you** (gelb), **ready** (grau) — z. B. `[1] claude-tui-rust #3 · ✻ working` (`#3` nur mit
 Schnellwahl-Nummer) — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
 
 ## Tasten
@@ -120,7 +120,7 @@ Schnellwahl-Nummer) — mit demselben Symbol wie in der Sessionliste. Die Sessio
 
 | Taste | Wirkung |
 |---|---|
-| `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1) |
+| `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1). In der Liste springen `Ctrl+↑`/`Ctrl+↓` zur Überschrift der vorigen bzw. nächsten Gruppe oder des Verzeichnisses (von einer Session aus führt `Ctrl+↑` zuerst auf ihre eigene Überschrift) |
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `Alt+1`–`Alt+9` | Schnellwahl-Nummer für die Session mit Fokus vergeben bzw. mit derselben Zahl wieder entfernen |
 | `Ctrl+1`–`Ctrl+9` | Session mit dieser Schnellwahl-Nummer zeigen |
@@ -131,7 +131,7 @@ gehen über `Alt+←/→`.
 ### Schnellwahl (`Alt+Zahl` / `Ctrl+Zahl`)
 
 `Alt+Zahl` gibt der Session mit Fokus — der im Fenster mit Fokus bzw. der in der Liste gewählten —
-eine Nummer von 1 bis 9. Sie steht als `#3` vor dem Titel in der Sessionliste und in der
+eine Nummer von 1 bis 9. Sie steht als `#3` hinter dem Titel in der Sessionliste und in der
 Fensterleiste. Jede Nummer gehört höchstens einer Session: Vergibt man sie neu, verliert die
 bisherige Session sie. Eine Session hat höchstens eine Nummer; eine andere Zahl ersetzt sie.
 Dieselbe Zahl noch einmal entfernt die Nummer.

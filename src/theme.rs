@@ -17,8 +17,13 @@ pub const BG: Color = Color::Reset;
 pub const ON_ACCENT: Color = Color::Rgb(0x1A, 0x19, 0x18);
 /// Rand, Titel und Auswahl des Menüs (eigene Box unter der Sessionliste).
 pub const MENU: Color = Color::Rgb(0x00, 0x9F, 0xDA);
-/// Hintergrund der ausgewählten Zeile in der Sessionliste.
-pub const SELECTED_BG: Color = Color::Rgb(0x33, 0x2D, 0x29);
+/// Hintergrund der ausgewählten Zeile in der Sessionliste, solange sie den Fokus hat: dasselbe
+/// Blau wie der Fokusrahmen.
+pub const SELECTED_BG: Color = FOCUS;
+/// Hintergrund der ausgewählten Zeile, wenn ein Fenster den Fokus hat.
+pub const SELECTED_DIM_BG: Color = Color::Rgb(0x33, 0x2D, 0x29);
+/// Schrift der ausgewählten Zeile: dunkel, damit sie auf dem Blau lesbar bleibt.
+pub const SELECTED_FG: Color = ON_ACCENT;
 pub const TEXT: Color = Color::Rgb(0xEC, 0xE9, 0xE4);
 pub const MUTED: Color = Color::Rgb(0x8C, 0x88, 0x82);
 
