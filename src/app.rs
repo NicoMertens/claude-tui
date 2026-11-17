@@ -1484,7 +1484,19 @@ impl App {
             }
             Action::CollapseAll(collapsed) => self.set_all_collapsed(collapsed),
             Action::Help => self.help = Some(Help::default()),
-            Action::Quit => self.should_quit = true,
+            Action::Quit => {
+                let running = self
+                    .sessions
+                    .iter()
+                    .filter(|s| s.status != Status::Exited)
+                    .count();
+                if running == 0 {
+                    self.should_quit = true;
+                } else {
+                    self.menu = Some(Menu::confirm_quit(running));
+                }
+            }
+            Action::ConfirmQuit => self.should_quit = true,
             Action::Update => {
                 if let Some(available) = self.update.clone() {
                     self.notice = Some(format!("downloading v{} …", available.version));

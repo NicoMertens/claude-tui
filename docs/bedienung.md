@@ -207,7 +207,7 @@ vom Fokus ab:
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
 | `h` | [Hilfe](#hilfe) anzeigen | Hilfe anzeigen |
-| `q` | claude-tui beenden (alle Sessions enden) | claude-tui beenden |
+| `q` | claude-tui beenden (alle Sessions enden; laufen noch welche, fragt es nach, Enter = Nein) | claude-tui beenden |
 
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
 mindestens einem offenen Fenster; hatte die Liste den Fokus, geht er ins Fenster ihrer Session bzw.

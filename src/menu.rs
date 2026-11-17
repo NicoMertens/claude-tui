@@ -44,7 +44,10 @@ pub enum Action {
     Update,
     /// Hilfeseite öffnen.
     Help,
+    /// Beenden; fragt nach, solange Sessions laufen.
     Quit,
+    /// Bestätigung: beenden, obwohl Sessions laufen.
+    ConfirmQuit,
     /// Fensterauswahl: Ziel-Fensterindex.
     Place(usize),
 }
@@ -150,7 +153,11 @@ pub const UPDATE: Entry = entry(
     "Install a newer release (only when one is available)",
 );
 pub const HELP: Entry = entry('h', "Help", "Show this help");
-pub const QUIT: Entry = entry('q', "Quit claude-tui", "Quit claude-tui; all sessions end");
+pub const QUIT: Entry = entry(
+    'q',
+    "Quit claude-tui",
+    "Quit claude-tui; all sessions end (asks while any run)",
+);
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
 pub const ENTRIES: [&Entry; 16] = [
@@ -442,6 +449,26 @@ impl Menu {
             ],
             selected: 1,
             purpose: Some(Purpose::OpenElsewhere(claude_id, slot)),
+        }
+    }
+
+    /// Rückfrage vor dem Beenden, solange `running` Sessions laufen – sie enden mit claude-tui.
+    /// Enter wählt „No“: ein versehentliches Enter soll keine laufende Arbeit abbrechen.
+    pub fn confirm_quit(running: usize) -> Self {
+        let item = |c, label: &str, action| Item {
+            hotkey: c,
+            label: label.to_string(),
+            action,
+        };
+        let verb = if running == 1 { "is" } else { "are" };
+        Self {
+            title: format!("{} {verb} running – quit anyway?", sessions(running)),
+            items: vec![
+                item('y', "Yes, quit and end them", Action::ConfirmQuit),
+                item('n', "No", Action::Cancel),
+            ],
+            selected: 1,
+            purpose: None,
         }
     }
 
@@ -997,6 +1024,24 @@ mod tests {
             Outcome::Run(Action::ConfirmDelete)
         );
         assert_eq!(menu.on_key(&key(KeyCode::Esc)), Outcome::Close);
+    }
+
+    #[test]
+    fn quit_with_running_sessions_defaults_to_no() {
+        let mut menu = Menu::confirm_quit(2);
+        assert_eq!(menu.title, "2 sessions are running – quit anyway?");
+        assert_eq!(
+            Menu::confirm_quit(1).title,
+            "1 session is running – quit anyway?"
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Enter)),
+            Outcome::Run(Action::Cancel)
+        );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('y'))),
+            Outcome::Run(Action::ConfirmQuit)
+        );
     }
 
     #[test]
