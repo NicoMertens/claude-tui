@@ -148,7 +148,8 @@ Dieselbe Zahl noch einmal entfernt die Nummer.
 
 Eine gespeicherte Session wird dabei mit `--resume` fortgesetzt; läuft sie anderswo, kommt dieselbe
 Rückfrage wie in der Liste. Die Nummern bleiben über einen Neustart erhalten (`state.json`).
-Gelöschte Sessions verlieren ihre Nummer.
+Gelöschte Sessions verlieren ihre Nummer, auch wenn ihr Protokoll außerhalb von claude-tui
+gelöscht oder von Claude Code aufgeräumt wurde.
 
 Nur reines `Alt` bzw. `Ctrl` zählt: `Ctrl+Alt` ist unter Windows AltGr (`²`, `³`, `{`, `[` …) und
 geht weiter an die Session. Ob `Ctrl+Zahl` ankommt, hängt vom Terminal ab; unter Linux/macOS kommt
@@ -303,7 +304,7 @@ gewählte) oder — mit Fokus auf der Liste — für alle markierten Sessions:
 Groß-/Kleinschreibung trennt keine Gruppen: `backend` landet in einer vorhandenen Gruppe `Backend`.
 „None“ ist als Name reserviert. Eine Gruppe besteht, solange ihr eine Session angehört. Zuordnung
 und die 10 zuletzt verwendeten Gruppen bleiben über einen Neustart erhalten (`state.json`);
-gelöschte Sessions verlieren ihre Gruppe.
+gelöschte Sessions verlieren ihre Gruppe, auch außerhalb von claude-tui gelöschte.
 
 ## Maus
 

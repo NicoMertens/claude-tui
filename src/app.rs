@@ -764,7 +764,7 @@ impl App {
             .collect();
         self.ended.retain(|(_, at)| at.elapsed() < ENDED_GRACE);
         let mut stored = self.store.sessions();
-        self.prune_unread(&stored);
+        self.forget_deleted(&stored);
         // Das Protokoll vor der Verlegung ist eine überholte Kopie der laufenden Session.
         stored.retain(|s| !self.superseded.contains_key(&s.id));
         let own: HashSet<&str> = running
@@ -1874,10 +1874,10 @@ impl App {
         }
     }
 
-    /// Vergisst Ungelesen-Einträge zu Sessions, deren Protokoll es nicht mehr gibt (z. B.
-    /// außerhalb gelöscht oder von Claude Code aufgeräumt). Erst, wenn alle Protokolle eingelesen
-    /// sind — vorher fehlen noch welche.
-    fn prune_unread(&mut self, stored: &[claude_store::StoredSession]) {
+    /// Vergisst Nummern, Gruppen und Ungelesen-Einträge zu Sessions, deren Protokoll es nicht mehr
+    /// gibt (z. B. außerhalb gelöscht oder von Claude Code aufgeräumt). Erst, wenn alle Protokolle
+    /// eingelesen sind — vorher fehlen noch welche.
+    fn forget_deleted(&mut self, stored: &[claude_store::StoredSession]) {
         if self.store_load.is_some() {
             return;
         }
@@ -1885,7 +1885,12 @@ impl App {
             .iter()
             .map(|s| s.id.as_str())
             .chain(self.sessions.iter().map(|s| s.claude_id.as_str()));
-        if state::forget_unknown(&mut self.unread, known) {
+        let per_session = state::PerSession {
+            tags: &mut self.tags,
+            groups: &mut self.group_of,
+            unread: &mut self.unread,
+        };
+        if per_session.forget_unknown(known) {
             self.save_state();
         }
     }

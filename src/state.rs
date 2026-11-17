@@ -1,6 +1,7 @@
 //! Fensterlayout über einen Neustart hinweg: welche Claude-Session in welchem Fenster lag und wo
 //! der Fokus war, dazu die Schnellwahl-Nummern, die eigenen Gruppen und die ungelesenen Sessions.
-//! Gespeichert als `state.json` im Konfigurationsordner.
+//! Gespeichert als `state.json` im Konfigurationsordner. Einträge zu Sessions, deren Protokoll es
+//! nicht mehr gibt, fallen weg ([`PerSession::forget_unknown`]).
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -55,15 +56,24 @@ pub fn load() -> State {
         .unwrap_or_default()
 }
 
-/// Entfernt Claude-IDs, die nicht unter `known` sind; `true`, wenn sich etwas geändert hat.
-pub fn forget_unknown<'a>(
-    ids: &mut BTreeSet<String>,
-    known: impl Iterator<Item = &'a str>,
-) -> bool {
-    let known: HashSet<&str> = known.collect();
-    let before = ids.len();
-    ids.retain(|id| known.contains(id.as_str()));
-    ids.len() != before
+/// Was an einzelnen Claude-Sessions hängt: Schnellwahl-Nummern, Gruppen, ungelesene Antworten.
+pub struct PerSession<'a> {
+    pub tags: &'a mut Tags,
+    pub groups: &'a mut Assignments,
+    pub unread: &'a mut BTreeSet<String>,
+}
+
+impl PerSession<'_> {
+    /// Entfernt Einträge zu Claude-IDs, die nicht unter `known` sind; `true`, wenn sich etwas
+    /// geändert hat.
+    pub fn forget_unknown<'k>(self, known: impl Iterator<Item = &'k str>) -> bool {
+        let known: HashSet<&str> = known.collect();
+        let before = (self.tags.len(), self.groups.len(), self.unread.len());
+        self.tags.retain(|_, id| known.contains(id.as_str()));
+        self.groups.retain(|id, _| known.contains(id.as_str()));
+        self.unread.retain(|id| known.contains(id.as_str()));
+        (self.tags.len(), self.groups.len(), self.unread.len()) != before
+    }
 }
 
 pub fn save(state: &State) -> Result<()> {
@@ -97,10 +107,28 @@ mod tests {
 
     #[test]
     fn forget_unknown_drops_deleted_sessions() {
-        let mut ids = BTreeSet::from(["a".to_string(), "gone".to_string()]);
-        assert!(forget_unknown(&mut ids, ["a", "b"].into_iter()));
-        assert_eq!(ids, BTreeSet::from(["a".to_string()]));
-        assert!(!forget_unknown(&mut ids, ["a"].into_iter()));
+        let mut tags = Tags::from([(1, "a".to_string()), (2, "gone".to_string())]);
+        let mut groups = Assignments::from([
+            ("a".to_string(), "G".to_string()),
+            ("gone".to_string(), "G".to_string()),
+        ]);
+        let mut unread = BTreeSet::from(["a".to_string(), "gone".to_string()]);
+        let mut forget = |known: &[&str]| {
+            PerSession {
+                tags: &mut tags,
+                groups: &mut groups,
+                unread: &mut unread,
+            }
+            .forget_unknown(known.iter().copied())
+        };
+        assert!(forget(&["a", "b"]));
+        assert!(!forget(&["a"]));
+        assert_eq!(tags, Tags::from([(1, "a".to_string())]));
+        assert_eq!(
+            groups,
+            Assignments::from([("a".to_string(), "G".to_string())])
+        );
+        assert_eq!(unread, BTreeSet::from(["a".to_string()]));
     }
 
     #[test]
