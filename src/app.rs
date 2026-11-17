@@ -256,7 +256,7 @@ impl App {
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
-            app.restore(saved)?;
+            app.restore(saved);
         } else {
             trace::mark("app: restore waits for sessions");
             app.pending_restore = Some(saved);
@@ -267,20 +267,9 @@ impl App {
     }
 
     /// Stellt das Fensterlayout des letzten Laufs wieder her; jede Session darin wird fortgesetzt.
-    /// Gibt es nichts wiederherzustellen, startet eine Session im Startverzeichnis.
-    fn restore(&mut self, saved: State) -> Result<()> {
-        self.restore_layout(saved);
-        if self.windows.len() == 0 {
-            let start_dir = self.start_dir.clone();
-            let id = self.spawn(&start_dir, Launch::New)?;
-            self.place(id, 0);
-        }
-        Ok(())
-    }
-
-    /// Fenster anlegen; die Prozesse starten gestaffelt (siehe [`Self::advance_starts`]), das
-    /// Fenster mit Fokus zuerst.
-    fn restore_layout(&mut self, saved: State) {
+    /// Die Prozesse starten gestaffelt (siehe [`Self::advance_starts`]), das Fenster mit Fokus
+    /// zuerst. Gibt es nichts wiederherzustellen, bleibt es bei der Sessionliste.
+    fn restore(&mut self, saved: State) {
         trace::mark(format_args!("app: restore {} windows", saved.windows.len()));
         self.stacked = saved.stacked;
         let now = external::claimed_now(&saved.windows);
@@ -374,7 +363,7 @@ impl App {
         self.last_scan = Instant::now();
         self.last_cache_save = Instant::now();
         if let Some(saved) = self.pending_restore.take() {
-            self.restore(saved)?;
+            self.restore(saved);
         }
         Ok(())
     }

@@ -17,8 +17,8 @@ PATH-Auflösung und npm-Wrapper (`claude.cmd`) funktionieren.
 
 **Wiederherstellen:** claude-tui merkt sich, welche Session in welchem Fenster lag und wo der Fokus
 war (`state.json` im Konfigurationsordner). Beim nächsten Start werden genau diese Sessions mit
-`--resume` fortgesetzt und in ihre Fenster gelegt. Gibt es nichts wiederherzustellen, startet eine
-neue Session im aktuellen Verzeichnis.
+`--resume` fortgesetzt und in ihre Fenster gelegt. Gibt es nichts wiederherzustellen, startet keine
+neue Session; der Fokus liegt auf der Sessionliste.
 
 Die Fenster erscheinen sofort, die Claude-Prozesse starten aber **nacheinander**: zuerst das Fenster
 mit Fokus, dann die übrigen in Fensterreihenfolge — jeweils sobald die vorige Session etwas anzeigt,
@@ -261,8 +261,8 @@ welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fe
 | `Esc` | abbrechen |
 
 Die zuletzt genutzten Verzeichnisse (höchstens 10) stehen in `%APPDATA%\claude-tui\recent-dirs.txt`
-bzw. `~/.config/claude-tui/recent-dirs.txt`. Die erste Session beim Programmstart läuft ohne Auswahl
-im aktuellen Verzeichnis.
+bzw. `~/.config/claude-tui/recent-dirs.txt`. Ohne zuletzt genutztes Verzeichnis ist das Verzeichnis
+vorgewählt, in dem claude-tui gestartet wurde.
 
 **Fensterauswahl:** listet die belegten Fenster („Replace Window 1“, Nummer wie in der Fensterleiste)
 und, solange weniger als 4 offen sind, „New window“. Eine ersetzte Session läuft im Hintergrund
