@@ -394,6 +394,13 @@ impl App {
             .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone())
     }
 
+    /// Sessionfarbe aus `/color` einer laufenden Session, wie sie die Sessionliste zeigt.
+    pub fn color_of(&self, id: SessionId) -> Option<String> {
+        list::flatten(&self.groups)
+            .find(|e| e.running == Some(id))
+            .and_then(|e| e.color.clone())
+    }
+
     /// Claude-Code-Version einer Session laut ihrem Protokoll; `None`, solange noch nichts darin steht.
     pub fn version_of(&self, claude_id: &str) -> Option<String> {
         self.store.get(claude_id)?.version

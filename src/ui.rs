@@ -236,12 +236,12 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
         if is_selected {
             selected_item = Some(i);
         }
-        let (line, bold) = match row {
-            Row::Heading(group) => (heading_line(app, group, width), false),
-            Row::Entry(entry) => (entry_line(app, entry, is_selected, width), true),
+        let line = match row {
+            Row::Heading(group) => heading_line(app, group, width),
+            Row::Entry(entry) => entry_line(app, entry, is_selected, width),
         };
         items.push(if is_selected {
-            selected_item_of(line, focused, bold)
+            selected_item_of(line, focused)
         } else {
             ListItem::new(line)
         });
@@ -294,14 +294,8 @@ fn heading_line(app: &App, group: &Group, width: usize) -> Line<'static> {
     let room = width.saturating_sub(fixed);
     // Gruppennamen hinten kürzen, Pfade vorne (der Ordnername am Ende ist der aussagekräftige
     // Teil).
-    let (icon, label, style) = match &group.heading {
-        Heading::Group(name) => (
-            GROUP_ICON,
-            head(name, room),
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(Modifier::BOLD),
-        ),
+    let (icon, label) = match &group.heading {
+        Heading::Group(name) => (GROUP_ICON, head(name, room)),
         Heading::Dir(cwd) => (
             if collapsed {
                 FOLDER_ICON
@@ -309,9 +303,9 @@ fn heading_line(app: &App, group: &Group, width: usize) -> Line<'static> {
                 FOLDER_OPEN_ICON
             },
             tail(&cwd.display().to_string(), room),
-            Style::default().fg(theme::TEXT),
         ),
     };
+    let text = Style::default().fg(theme::MUTED);
     // Der Rest der Zeile wird mit einer Linie gefüllt, damit sich Überschriften abheben.
     let rest = room.saturating_sub(label.chars().count());
     let rule = if rest > 0 {
@@ -323,24 +317,21 @@ fn heading_line(app: &App, group: &Group, width: usize) -> Line<'static> {
         prefix,
         Span::raw(format!("{icon} ")),
         Span::styled(mark, Style::default().fg(theme::MENU)),
-        Span::styled(label, style),
-        Span::styled(count, Style::default().fg(theme::MUTED)),
+        Span::styled(label, text),
+        Span::styled(count, text),
         Span::styled(rule, Style::default().fg(theme::MUTED)),
     ])
 }
 
 /// Ausgewählte Zeile. Mit Fokus auf der Liste blau hinterlegt und alle Teile in dunkler Schrift
 /// (auch farbige Titel und Symbole, die auf dem Blau sonst schlecht lesbar wären); ohne Fokus
-/// dezent hinterlegt in den normalen Farben. Sessions zusätzlich fett.
-fn selected_item_of(line: Line<'static>, focused: bool, bold: bool) -> ListItem<'static> {
-    let mut row = Style::default().bg(if focused {
+/// dezent hinterlegt in den normalen Farben.
+fn selected_item_of(line: Line<'static>, focused: bool) -> ListItem<'static> {
+    let row = Style::default().bg(if focused {
         theme::SELECTED_BG
     } else {
         theme::SELECTED_DIM_BG
     });
-    if bold {
-        row = row.add_modifier(Modifier::BOLD);
-    }
     let line = if focused {
         let style = Style::default()
             .fg(theme::SELECTED_FG)
@@ -724,10 +715,15 @@ fn draw_windows(f: &mut Frame, app: &App) {
         let color = frame_color(focused);
         let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
         let tag = tag_label(app, &session.claude_id);
+        // Wie in der Liste trägt der Titel die Sessionfarbe aus `/color`.
+        let name_style = match app.color_of(id).as_deref().and_then(theme::session_color) {
+            Some(session_color) => title_style.fg(session_color),
+            None => title_style,
+        };
         // Wie in der Liste: die Schnellwahl-Nummer hinter dem Titel.
         let title = vec![
             Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
-            Span::styled(format!("{} ", app.title_of(id)), title_style),
+            Span::styled(format!("{} ", app.title_of(id)), name_style),
             Span::styled(tag, tag_style()),
         ];
         let (label, label_color) = theme::status_label(session.status);
