@@ -14,7 +14,7 @@ use crate::{
     grouppick::{Choice, GroupPicker},
     help::{self, Help},
     keys,
-    list::{self, Entry, Group, Heading, Row},
+    list::{self, Cursor, Entry, Group, Heading, Row},
     menu::Menu,
     session::Status,
     tags,
@@ -230,11 +230,18 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let focused = app.windows.focus() == Focus::List;
     let rows = list::rows(&app.groups, &app.collapsed);
     let mut items: Vec<ListItem> = Vec::with_capacity(rows.len());
+    // Je Bildschirmzeile die Listenzeile dahinter; `None` = Leerzeile zwischen Abschnitten.
+    let mut cursors: Vec<Option<Cursor>> = Vec::with_capacity(rows.len());
     let mut selected_item = None;
-    for (i, row) in rows.iter().enumerate() {
-        let is_selected = selected.as_ref() == Some(&row.cursor());
+    for row in &rows {
+        if matches!(row, Row::Heading(_)) && !items.is_empty() {
+            items.push(ListItem::new(Line::default()));
+            cursors.push(None);
+        }
+        let cursor = row.cursor();
+        let is_selected = selected.as_ref() == Some(&cursor);
         if is_selected {
-            selected_item = Some(i);
+            selected_item = Some(items.len());
         }
         let line = match row {
             Row::Heading(group) => heading_line(app, group, width),
@@ -245,6 +252,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
         } else {
             ListItem::new(line)
         });
+        cursors.push(Some(cursor));
     }
     if app.loading() && items.is_empty() {
         items.push(ListItem::new(muted("loading sessions …")));
@@ -252,13 +260,13 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let mut state = ListState::default().with_selected(selected_item);
     f.render_stateful_widget(List::new(items), area, &mut state);
 
-    // Sichtbare Zeilen merken (jede Listenzeile ist eine Bildschirmzeile) — für Mausklicks.
-    let hits = rows
-        .iter()
+    // Sichtbare Zeilen merken — für Mausklicks; Leerzeilen treffen nichts.
+    let hits = cursors
+        .into_iter()
         .skip(state.offset())
         .take(area.height as usize)
         .enumerate()
-        .map(|(i, row)| (area.y + i as u16, row.cursor()))
+        .filter_map(|(i, cursor)| cursor.map(|c| (area.y + i as u16, c)))
         .collect();
     app.list_hits.replace(ListHits { area, rows: hits });
 }
