@@ -10,6 +10,11 @@ pub fn is_prefix(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('a') && key.modifiers == KeyModifiers::CONTROL
 }
 
+/// Ctrl+Space setzt die Session mit Fokus auf gelesen bzw. ungelesen; erreicht Claude daher nie.
+pub fn is_toggle_unread(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL
+}
+
 /// Übersetzt einen Tastendruck in die Bytefolge, die ein xterm-kompatibles Terminal senden würde.
 pub fn to_bytes(key: &KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
     let mods = key.modifiers;

@@ -1,9 +1,9 @@
 //! Fensterlayout über einen Neustart hinweg: welche Claude-Session in welchem Fenster lag und wo
-//! der Fokus war, dazu die Schnellwahl-Nummern und die eigenen Gruppen. Gespeichert als `state.json` im
-//! Konfigurationsordner.
+//! der Fokus war, dazu die Schnellwahl-Nummern, die eigenen Gruppen und die ungelesenen Sessions.
+//! Gespeichert als `state.json` im Konfigurationsordner.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs,
 };
 
@@ -42,6 +42,9 @@ pub struct State {
     /// Eingeklappte Abschnitte der Sessionliste (Schlüssel nach `list::Heading::key`).
     #[serde(default)]
     pub collapsed: BTreeSet<String>,
+    /// Sessions mit ungelesener fertiger Antwort (Claude-IDs).
+    #[serde(default)]
+    pub unread: BTreeSet<String>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -50,6 +53,17 @@ pub fn load() -> State {
         .and_then(|d| fs::read_to_string(d.join(FILE_NAME)).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+/// Entfernt Claude-IDs, die nicht unter `known` sind; `true`, wenn sich etwas geändert hat.
+pub fn forget_unknown<'a>(
+    ids: &mut BTreeSet<String>,
+    known: impl Iterator<Item = &'a str>,
+) -> bool {
+    let known: HashSet<&str> = known.collect();
+    let before = ids.len();
+    ids.retain(|id| known.contains(id.as_str()));
+    ids.len() != before
 }
 
 pub fn save(state: &State) -> Result<()> {
@@ -75,9 +89,18 @@ mod tests {
             recent_groups: vec!["G".into()],
             superseded: BTreeMap::from([("alt".to_string(), "b".to_string())]),
             collapsed: BTreeSet::from(["dir:/x".to_string()]),
+            unread: BTreeSet::from(["a".to_string()]),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);
+    }
+
+    #[test]
+    fn forget_unknown_drops_deleted_sessions() {
+        let mut ids = BTreeSet::from(["a".to_string(), "gone".to_string()]);
+        assert!(forget_unknown(&mut ids, ["a", "b"].into_iter()));
+        assert_eq!(ids, BTreeSet::from(["a".to_string()]));
+        assert!(!forget_unknown(&mut ids, ["a"].into_iter()));
     }
 
     #[test]
@@ -86,6 +109,7 @@ mod tests {
         assert!(state.tags.is_empty());
         assert!(state.groups.is_empty());
         assert!(state.recent_groups.is_empty());
+        assert!(state.unread.is_empty());
         assert_eq!(state.windows, ["a"]);
     }
 }

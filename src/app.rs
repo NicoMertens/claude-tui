@@ -101,6 +101,9 @@ pub struct App {
     pub tags: Tags,
     /// Eigene Gruppen je Claude-ID; bleiben über `state.json` erhalten.
     pub group_of: Assignments,
+    /// Claude-IDs mit ungelesener fertiger Antwort; bleiben über `state.json` erhalten. Laufende
+    /// Sessions führen den Stand selbst, [`Self::sync_unread`] gleicht ab.
+    unread: BTreeSet<String>,
     /// Zuletzt verwendete Gruppennamen, neueste zuerst.
     recent_groups: Vec<String>,
     /// Gruppen-Dialog (Ctrl+A g).
@@ -199,6 +202,7 @@ impl App {
             marked: HashSet::new(),
             tags: Tags::new(),
             group_of: Assignments::new(),
+            unread: BTreeSet::new(),
             recent_groups: Vec::new(),
             group_picker: None,
             help: None,
@@ -248,6 +252,7 @@ impl App {
         app.recent_groups = std::mem::take(&mut saved.recent_groups);
         app.superseded = std::mem::take(&mut saved.superseded);
         app.collapsed = std::mem::take(&mut saved.collapsed);
+        app.unread = std::mem::take(&mut saved.unread);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
@@ -543,12 +548,20 @@ impl App {
             self.loading(),
         );
         let mut changes = Vec::new();
+        // Schon vorher ungelesen (z. B. nach einem Neustart wiederhergestellt): kein neuer Hinweis,
+        // auch wenn der Zustand zwischendurch auf „arbeitet“ sprang.
+        let mut already_unread = HashSet::new();
         for session in &mut self.sessions {
             let before = session.status;
+            if session.is_unread() {
+                already_unread.insert(session.id);
+            }
             session.refresh();
             changes.push((session.id, before, session.status));
         }
         let statuses_changed = changes.iter().any(|&(_, before, after)| before != after);
+        changes.retain(|(id, _, _)| !already_unread.contains(id));
+        self.sync_unread();
         let switches: Vec<(SessionId, hooks::Switch)> = self
             .sessions
             .iter()
@@ -690,6 +703,9 @@ impl App {
                 self.group_of.insert(new.clone(), group);
             }
         }
+        // Ungelesen gehört zum Gesprächsinhalt: Die alte behält ihren Stand, die geladene (bei
+        // `/clear` leer) bringt ihren eigenen mit.
+        session.set_unread(self.unread.contains(&new));
         if self.cursor == Some(Cursor::Session(old.clone())) {
             self.cursor = Some(Cursor::Session(new));
         }
@@ -715,6 +731,9 @@ impl App {
             }
             if let Some(group) = self.group_of.remove(&old) {
                 self.group_of.insert(new.clone(), group);
+            }
+            if self.unread.remove(&old) {
+                self.unread.insert(new.clone());
             }
             if self.cursor == Some(Cursor::Session(old.clone())) {
                 self.cursor = Some(Cursor::Session(new.clone()));
@@ -745,6 +764,7 @@ impl App {
             .collect();
         self.ended.retain(|(_, at)| at.elapsed() < ENDED_GRACE);
         let mut stored = self.store.sessions();
+        self.prune_unread(&stored);
         // Das Protokoll vor der Verlegung ist eine überholte Kopie der laufenden Session.
         stored.retain(|s| !self.superseded.contains_key(&s.id));
         let own: HashSet<&str> = running
@@ -865,6 +885,13 @@ impl App {
                 }
                 TagKey::Show(number) => self.show_tagged(number),
             };
+        }
+        if keys::is_toggle_unread(&key) {
+            if let Some(session) = self.context_session().and_then(|id| self.session_mut(id)) {
+                session.toggle_unread();
+            }
+            self.sync_unread();
+            return Ok(());
         }
         match self.windows.focused_session() {
             Some(id) => {
@@ -1660,7 +1687,8 @@ impl App {
         }
         let tagged = tags::remove_session(&mut self.tags, claude_id);
         let grouped = self.group_of.remove(claude_id).is_some();
-        if tagged || grouped {
+        let unread = self.unread.remove(claude_id);
+        if tagged || grouped || unread {
             self.save_state();
         }
         // Überholte Protokolle vor einer Verlegung gehören zur Session und gehen mit.
@@ -1831,6 +1859,37 @@ impl App {
         self.save_state();
     }
 
+    /// Übernimmt den Ungelesen-Stand der laufenden Sessions; speichert nur bei einer Änderung.
+    fn sync_unread(&mut self) {
+        let mut changed = false;
+        for session in &self.sessions {
+            changed |= if session.is_unread() {
+                self.unread.insert(session.claude_id.clone())
+            } else {
+                self.unread.remove(&session.claude_id)
+            };
+        }
+        if changed {
+            self.save_state();
+        }
+    }
+
+    /// Vergisst Ungelesen-Einträge zu Sessions, deren Protokoll es nicht mehr gibt (z. B.
+    /// außerhalb gelöscht oder von Claude Code aufgeräumt). Erst, wenn alle Protokolle eingelesen
+    /// sind — vorher fehlen noch welche.
+    fn prune_unread(&mut self, stored: &[claude_store::StoredSession]) {
+        if self.store_load.is_some() {
+            return;
+        }
+        let known = stored
+            .iter()
+            .map(|s| s.id.as_str())
+            .chain(self.sessions.iter().map(|s| s.claude_id.as_str()));
+        if state::forget_unknown(&mut self.unread, known) {
+            self.save_state();
+        }
+    }
+
     fn save_state(&self) {
         let state = State {
             windows: self
@@ -1850,6 +1909,7 @@ impl App {
             recent_groups: self.recent_groups.clone(),
             superseded: self.superseded.clone(),
             collapsed: self.collapsed.clone(),
+            unread: self.unread.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);
@@ -1910,7 +1970,8 @@ impl App {
         self.next_id += 1;
         let id = self.next_id;
         let inner = ui::windows_area(self.screen, self.list_hidden).inner(Margin::new(1, 1));
-        let session = Session::spawn(
+        let unread = self.unread.contains(&claude_id);
+        let mut session = Session::spawn(
             id,
             claude_id,
             &self.command,
@@ -1920,6 +1981,7 @@ impl App {
             inner.width.max(1),
             start_now,
         )?;
+        session.set_unread(unread);
         self.sessions.push(session);
         recent::remember(&mut self.recent, dir);
         // Die Liste ist Komfort: lässt sie sich nicht speichern, läuft die Session trotzdem.

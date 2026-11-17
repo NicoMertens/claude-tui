@@ -69,6 +69,8 @@ pub struct Session {
     first_content: Option<Instant>,
     /// Erste Hook-Meldung schon im Trace vermerkt.
     hook_traced: bool,
+    /// Fertige, noch nicht gelesene Antwort (siehe [`Unread`]).
+    unread: Unread,
 }
 
 impl Session {
@@ -153,6 +155,7 @@ impl Session {
             started: None,
             first_content: None,
             hook_traced: false,
+            unread: Unread::default(),
         };
         if start_now {
             session.start()?;
@@ -213,7 +216,33 @@ impl Session {
         hooks::take_switch(&self.hook_id)
     }
 
+    /// Zustand neu bestimmen. Eine fertige, ungelesene Antwort zeigt sich als „wartet“.
     pub fn refresh(&mut self) {
+        self.resolve_status();
+        let hook_working = self.hook.is_some_and(|r| r.status == Status::Working);
+        self.unread.track(self.status, hook_working);
+        self.status = self.unread.shown(self.status);
+    }
+
+    pub fn is_unread(&self) -> bool {
+        self.unread.unread
+    }
+
+    pub fn set_unread(&mut self, unread: bool) {
+        self.unread = Unread {
+            worked: false,
+            unread,
+        };
+    }
+
+    /// Ctrl+Space: ungelesen ↔ gelesen. Nur, solange Claude fertig ist — eine echte Rückfrage
+    /// und laufende Arbeit bleiben unberührt.
+    pub fn toggle_unread(&mut self) {
+        self.unread.toggle(self.status);
+        self.refresh();
+    }
+
+    fn resolve_status(&mut self) {
         if self.status == Status::Exited {
             return;
         }
@@ -372,6 +401,51 @@ impl Drop for Session {
     }
 }
 
+/// Merkt sich, dass Claude eine Antwort fertig hat, die man noch nicht gelesen hat. Sie bleibt
+/// ungelesen, bis Claude wieder arbeitet oder man sie mit Ctrl+Space als gelesen setzt.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Unread {
+    /// Claude arbeitet bzw. hat seit der letzten fertigen Antwort gearbeitet.
+    worked: bool,
+    unread: bool,
+}
+
+impl Unread {
+    /// Nur Arbeit, die ein Hook bestätigt, zählt: Ohne Hook hält die Heuristik schon das Echo
+    /// einer Eingabe für Arbeit. Das Ende zählt beim Übergang, nicht bei jeder neuen Meldung —
+    /// `idle_prompt` meldet „bereit“ später noch einmal.
+    fn track(&mut self, raw: Status, hook_working: bool) {
+        if raw == Status::Working && hook_working {
+            *self = Self {
+                worked: true,
+                unread: false,
+            };
+        } else if raw == Status::Idle && self.worked {
+            *self = Self {
+                worked: false,
+                unread: true,
+            };
+        }
+    }
+
+    fn shown(&self, raw: Status) -> Status {
+        if raw == Status::Idle && self.unread {
+            Status::Waiting
+        } else {
+            raw
+        }
+    }
+
+    /// `shown` = der angezeigte Zustand. Ungelesen wird nur, was als „bereit“ dasteht.
+    fn toggle(&mut self, shown: Status) {
+        let unread = !self.unread && shown == Status::Idle;
+        *self = Self {
+            worked: false,
+            unread,
+        };
+    }
+}
+
 /// „1234 ms“ seit `start` für den Trace.
 fn since(start: Option<Instant>) -> String {
     start.map_or_else(
@@ -500,6 +574,80 @@ mod tests {
 
     fn at(secs: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    /// Spielt rohe Zustände (mit „Hook meldet arbeitet“) ab und liefert den zuletzt gezeigten.
+    fn shown_after(unread: &mut Unread, steps: &[(Status, bool)]) -> Status {
+        let mut shown = Status::Starting;
+        for &(raw, hook_working) in steps {
+            unread.track(raw, hook_working);
+            shown = unread.shown(raw);
+        }
+        shown
+    }
+
+    #[test]
+    fn finished_answer_shows_as_waiting_until_marked_read() {
+        use Status::{Idle, Working};
+        let mut unread = Unread::default();
+        assert_eq!(
+            shown_after(&mut unread, &[(Working, true), (Idle, false)]),
+            Status::Waiting
+        );
+        // `idle_prompt` meldet später noch einmal „bereit“.
+        assert_eq!(shown_after(&mut unread, &[(Idle, false)]), Status::Waiting);
+        unread = Unread::default();
+        assert_eq!(shown_after(&mut unread, &[(Idle, false)]), Idle);
+    }
+
+    #[test]
+    fn toggle_switches_between_read_and_unread() {
+        use Status::{Idle, Waiting, Working};
+        let mut unread = Unread::default();
+        unread.toggle(Idle);
+        assert_eq!(unread.shown(Idle), Waiting);
+        unread.toggle(Waiting);
+        assert_eq!(unread.shown(Idle), Idle);
+        // Echte Rückfrage und laufende Arbeit: nichts wird ungelesen.
+        unread.toggle(Waiting);
+        assert!(!unread.unread);
+        unread.toggle(Working);
+        assert!(!unread.unread);
+    }
+
+    #[test]
+    fn working_again_clears_unread() {
+        use Status::{Idle, Working};
+        let mut unread = Unread::default();
+        shown_after(&mut unread, &[(Working, true), (Idle, false)]);
+        assert_eq!(shown_after(&mut unread, &[(Working, true)]), Working);
+    }
+
+    #[test]
+    fn start_and_echo_do_not_mark_unread() {
+        use Status::{Idle, Starting, Working};
+        let mut unread = Unread::default();
+        // Neue oder fortgesetzte Session; Tippen ohne Hook gilt der Heuristik als Arbeit.
+        let steps = [
+            (Starting, false),
+            (Idle, false),
+            (Working, false),
+            (Idle, false),
+        ];
+        assert_eq!(shown_after(&mut unread, &steps), Idle);
+    }
+
+    #[test]
+    fn answered_permission_prompt_still_ends_unread() {
+        use Status::{Idle, Waiting, Working};
+        let mut unread = Unread::default();
+        let steps = [
+            (Working, true),
+            (Waiting, false),
+            (Working, false),
+            (Idle, false),
+        ];
+        assert_eq!(shown_after(&mut unread, &steps), Waiting);
     }
 
     fn report(status: Status, secs: u64) -> Option<Report> {

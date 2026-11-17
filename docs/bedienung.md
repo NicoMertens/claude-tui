@@ -126,8 +126,9 @@ ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehal
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `Alt+1`–`Alt+9` | Schnellwahl-Nummer für die Session mit Fokus vergeben bzw. mit derselben Zahl wieder entfernen |
 | `Ctrl+1`–`Ctrl+9` | Session mit dieser Schnellwahl-Nummer zeigen |
+| `Ctrl+Space` | fertige Antwort der Session mit Fokus (bzw. der in der Liste gewählten) als gelesen setzen (aus **waiting for you** wird **ready**) bzw. wieder als ungelesen (siehe [Zustände](#zustände-in-der-seitenleiste)) |
 
-`Ctrl+Pfeil`, `Alt+Zahl` und `Ctrl+Zahl` erreichen Claude dadurch nie; Wortsprünge im Eingabefeld
+`Ctrl+Pfeil`, `Alt+Zahl`, `Ctrl+Zahl` und `Ctrl+Space` erreichen Claude dadurch nie; Wortsprünge im Eingabefeld
 gehen über `Alt+←/→`.
 
 ### Schnellwahl (`Alt+Zahl` / `Ctrl+Zahl`)
@@ -347,12 +348,24 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
 | ✻ (animiert) | rot | working | Claude bearbeitet einen Prompt oder nutzt ein Tool. |
-| ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe. |
-| ● | grau | ready | Claude ist fertig und wartet auf den nächsten Prompt. |
+| ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe — oder hat eine Antwort fertig, die noch nicht als gelesen gesetzt ist. |
+| ● | grau | ready | Claude ist fertig, die Antwort ist gelesen, es wartet auf den nächsten Prompt. |
 | (keins) | grau (Titel) | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 | ⇄ (statt Fensternummer) | orange | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach (Hintergrund-Sessions: `claude attach`, ohne Rückfrage). |
 
 Die Formen unterscheiden sich auch ohne Farbe.
+
+**Ungelesene Antworten:** Wird Claude mit einer Arbeit fertig (working → ready), steht die Session
+auf **waiting for you**, bis man die Antwort mit `Ctrl+Space` als gelesen setzt oder Claude wieder
+arbeitet — auch wenn die Session im Fenster mit Fokus liegt. `Ctrl+Space` auf einer Session im
+Zustand **ready** setzt sie wieder als ungelesen. Eine echte Rückfrage bleibt dagegen **waiting for
+you**, bis sie beantwortet ist; `Ctrl+Space` ändert daran nichts.
+
+Ungelesene Sessions stehen in `state.json` und bleiben so über einen Neustart erhalten, auch über das
+Schließen eines Fensters: Wird die Session wieder geöffnet, steht sie wieder auf **waiting for you**.
+Gespeicherte Sessions, die nicht laufen, zeigen kein Zustandssymbol, die Markierung also erst nach
+dem Öffnen. Gibt es das Protokoll einer Session nicht mehr (in claude-tui oder außerhalb gelöscht,
+von Claude Code aufgeräumt), verschwindet auch ihr Eintrag.
 
 Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
 [Architektur](architektur.md).

@@ -51,8 +51,15 @@ const OVERVIEW: &[Row] = &[
     ),
     Heading("States"),
     Key("✻ working", "Claude works on a prompt or uses a tool"),
-    Key("▲ waiting", "Claude waits for your permission or input"),
-    Key("● ready", "Claude is done and waits for the next prompt"),
+    Key(
+        "▲ waiting",
+        "Claude waits for your permission or input, or has finished an answer you haven't \
+         marked read yet (Ctrl+Space)",
+    ),
+    Key(
+        "● ready",
+        "Claude is done, you have read it, it waits for the next prompt",
+    ),
     Key("no symbol", "Saved, not running; opening resumes it"),
     Key("⇄ elsewhere", "Runs outside claude-tui; opening asks first"),
 ];
@@ -69,6 +76,10 @@ const KEYS: &[Row] = &[
         "Give the focused session a quick number; the same number again removes it",
     ),
     Key("Ctrl+1…9", "Show the session with this quick number"),
+    Key(
+        "Ctrl+Space",
+        "Mark the finished answer of the focused or selected session as read, or as unread again",
+    ),
     Heading("Window focused"),
     Key("Other keys", "Go to the session"),
     Key("Shift+Enter", "New line in Claude's input"),

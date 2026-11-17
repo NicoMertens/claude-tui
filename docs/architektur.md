@@ -37,7 +37,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |
 | `grouppick.rs` | Gruppen-Dialog (`Ctrl+A g`): Eingabe eines neuen Namens, Auswahl aus „None“ und vorhandenen bzw. zuletzt verwendeten Gruppen |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik), und Sessions, die Claude Code als Hintergrund-Job mit neuer ID weiterführt (`parkedJobId` → `jobId`); claude-tui übernimmt dann die neue ID samt Nummer und Gruppe und blendet das alte Protokoll aus (`state.json`, `superseded`) |
-| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte) als `state.json` für den Neustart |
+| `state.rs` | Fensterlayout (Claude-IDs je Fenster, Fokus, Sessionliste ausgeblendet, 2 Fenster übereinander, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte, ungelesene Sessions) als `state.json` für den Neustart |
 | `tags.rs` | Schnellwahl-Nummern 1–9 → Claude-ID: vergeben, umhängen, entfernen (`Alt+Zahl` / `Ctrl+Zahl`) |
 | `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
