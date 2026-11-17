@@ -233,6 +233,7 @@ mod tests {
             cwd: PathBuf::from(cwd),
             title: id.to_uppercase(),
             color: None,
+            version: None,
             modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 - age_secs),
         }
     }

@@ -750,6 +750,15 @@ fn draw_windows(f: &mut Frame, app: &App) {
             ));
         }
         let mut block = rounded(color).title(Line::from(spans));
+        if let Some(version) = app.version_of(&session.claude_id) {
+            block = block.title(
+                Line::from(Span::styled(
+                    format!(" v{version} "),
+                    Style::default().fg(theme::MUTED),
+                ))
+                .right_aligned(),
+            );
+        }
         // Ohne Sessionliste fehlt deren Hinweiszeile; der Hinweis steht dann unten im Fenster
         // mit Fokus.
         if let Some(notice) = app.notice.as_deref().filter(|_| app.list_hidden && focused) {

@@ -24,7 +24,7 @@ use crate::paths;
 
 const CACHE_FILE: &str = "sessions-cache.json";
 /// Bei einer Änderung am Format des Caches erhöhen; ein alter Cache wird dann verworfen.
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredSession {
@@ -33,6 +33,8 @@ pub struct StoredSession {
     pub title: String,
     /// Sessionfarbe aus `/color` (z. B. `orange`); `None` = keine bzw. zurückgesetzt.
     pub color: Option<String>,
+    /// Claude-Code-Version, mit der zuletzt in die Session geschrieben wurde (z. B. `2.1.326`).
+    pub version: Option<String>,
     pub modified: SystemTime,
 }
 
@@ -43,6 +45,7 @@ struct Info {
     ai_title: Option<String>,
     last_prompt: Option<String>,
     color: Option<String>,
+    version: Option<String>,
 }
 
 impl Info {
@@ -220,6 +223,7 @@ fn stored(file: &FileState) -> Option<StoredSession> {
         cwd: file.info.cwd.clone()?,
         title: one_line(file.info.title()?),
         color: file.info.color.clone(),
+        version: file.info.version.clone(),
         modified: file.modified,
     })
 }
@@ -300,6 +304,9 @@ fn apply(info: &mut Info, mut reader: impl BufRead) -> u64 {
         let Ok(text) = std::str::from_utf8(&raw[..raw.len() - 1]) else {
             continue;
         };
+        if let Some(version) = version_of(text) {
+            info.version = Some(version.to_string());
+        }
         // Billiger Vorfilter: die meisten Zeilen sind Nachrichten, die hier nichts beitragen.
         let wanted = (info.cwd.is_none() && text.contains("\"cwd\""))
             || text.contains("\"custom-title\"")
@@ -330,6 +337,22 @@ fn apply(info: &mut Info, mut reader: impl BufRead) -> u64 {
     }
 }
 
+/// Version aus dem Feld `"version"` einer Zeile, ohne die Zeile zu parsen: fast jede Zeile trägt
+/// es, ein serde-Durchlauf je Zeile wäre bei großen Protokollen zu teuer. Claude Code schreibt das
+/// Feld hinter den Nachrichteninhalt, das letzte Vorkommen ist also das der Zeile selbst.
+fn version_of(text: &str) -> Option<&str> {
+    const KEY: &str = "\"version\":\"";
+    let start = text.rfind(KEY)? + KEY.len();
+    let rest = &text[start..];
+    let version = &rest[..rest.find('"')?];
+    let plausible = version.starts_with(|c: char| c.is_ascii_digit())
+        && version.len() <= 32
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-+".contains(c));
+    plausible.then_some(version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +381,26 @@ mod tests {
             b"{\"type\":\"custom-title\",\"customTitle\":\"eigener Name\"}\n",
         );
         assert_eq!(info.title(), Some("eigener Name"));
+    }
+
+    #[test]
+    fn version_comes_from_the_line_itself_and_the_last_line_wins() {
+        let mut info = Info::default();
+        let text = concat!(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"version":"9.9.9"}}]},"#,
+            r#""sessionId":"abc","version":"2.1.300","gitBranch":"develop"}"#,
+            "
+",
+            r#"{"type":"user","sessionId":"abc","version":"2.1.326"}"#,
+            "
+",
+            r#"{"type":"last-prompt","lastPrompt":"ohne Version"}"#,
+            "
+",
+        );
+        apply_bytes(&mut info, text.as_bytes());
+        assert_eq!(info.version.as_deref(), Some("2.1.326"));
+        assert_eq!(version_of(r#"{"version":"not a version"}"#), None);
     }
 
     #[test]

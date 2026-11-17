@@ -113,6 +113,8 @@ grauen.
 Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
 you** (gelb), **ready** (grau) — z. B. `[1] claude-tui-rust #3 · ✻ working` (`#3` nur mit
 Schnellwahl-Nummer) — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
+Rechts in der Fensterleiste steht die Claude-Code-Version der Session (z. B. `v2.1.326`), gelesen aus
+ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehalten hat.
 
 ## Tasten
 

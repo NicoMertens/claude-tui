@@ -394,6 +394,11 @@ impl App {
             .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone())
     }
 
+    /// Claude-Code-Version einer Session laut ihrem Protokoll; `None`, solange noch nichts darin steht.
+    pub fn version_of(&self, claude_id: &str) -> Option<String> {
+        self.store.get(claude_id)?.version
+    }
+
     /// Die ausgewählte Session, sofern sie sichtbar ist (nicht in einem eingeklappten Abschnitt).
     pub fn selected_entry(&self) -> Option<&Entry> {
         match self.visible_cursor()? {
