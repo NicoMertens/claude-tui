@@ -179,8 +179,6 @@ pub struct App {
     /// Sessionliste ausgeblendet: die Fenster bekommen die volle Breite. Nur mit mindestens einem
     /// Fenster und nie bei Fokus auf der Liste.
     pub list_hidden: bool,
-    /// Zwei Fenster übereinander statt nebeneinander (gilt nur bei genau zwei Fenstern).
-    stacked: bool,
     next_id: SessionId,
 }
 
@@ -242,7 +240,6 @@ impl App {
             started: SystemTime::now(),
             screen,
             list_hidden: false,
-            stacked: false,
             next_id: 0,
         };
         let mut saved = state::load();
@@ -254,7 +251,11 @@ impl App {
         app.collapsed = std::mem::take(&mut saved.collapsed);
         app.unread = std::mem::take(&mut saved.unread);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
-        let known = saved.windows.iter().all(|id| app.store.get(id).is_some());
+        let known = saved
+            .windows
+            .iter()
+            .filter(|id| !id.is_empty())
+            .all(|id| app.store.get(id).is_some());
         if known || app.store_load.is_none() {
             app.restore(saved);
         } else {
@@ -271,10 +272,13 @@ impl App {
     /// zuerst. Gibt es nichts wiederherzustellen, bleibt es bei der Sessionliste.
     fn restore(&mut self, saved: State) {
         trace::mark(format_args!("app: restore {} windows", saved.windows.len()));
-        self.stacked = saved.stacked;
         let now = external::claimed_now(&saved.windows);
         let elsewhere = &now.claimed;
-        for claude_id in saved.windows {
+        // Fehlt eine Session, bleibt ihr Fenster leer; die übrigen behalten ihre Nummer.
+        for (slot, claude_id) in saved.windows.into_iter().enumerate().take(MAX_WINDOWS) {
+            if claude_id.is_empty() {
+                continue;
+            }
             // Inzwischen von Claude Code als Hintergrund-Job weitergeführt: den Job öffnen.
             let claude_id = match now.parked.get(&claude_id) {
                 Some(new) => {
@@ -298,18 +302,18 @@ impl App {
                 }
             };
             match self.spawn_with(&stored.cwd, launch, false) {
-                Ok(id) => self.place(id, self.windows.len()),
+                Ok(id) => self.place(id, slot),
                 Err(e) => self.notice = Some(format!("{e:#}")),
             }
         }
-        let focus = match saved.focus {
-            Some(slot) if slot < self.windows.len() => Focus::Window(slot),
-            _ if self.windows.len() > 0 => Focus::Window(0),
-            _ => Focus::List,
+        let focus = match (saved.focus, self.windows.first()) {
+            (Some(slot), _) if self.windows.session(slot).is_some() => Focus::Window(slot),
+            (_, Some(first)) => Focus::Window(first),
+            (_, None) => Focus::List,
         };
         self.set_focus(focus);
         self.set_list_hidden(saved.list_hidden);
-        let mut order: Vec<SessionId> = self.windows.slots().to_vec();
+        let mut order: Vec<SessionId> = self.windows.open().map(|(_, id)| id).collect();
         if let Some(first) = self.windows.focused_session() {
             order.retain(|&id| id != first);
             order.insert(0, first);
@@ -518,15 +522,11 @@ impl App {
     pub fn window_rects(&self) -> Vec<(usize, SessionId, Rect)> {
         layout::visible(
             ui::windows_area(self.screen, self.list_hidden),
-            self.windows.len(),
-            self.stacked,
+            self.windows.occupied(),
             self.windows.zoomed(),
         )
         .into_iter()
-        .filter_map(|(slot, rect)| {
-            let id = *self.windows.slots().get(slot)?;
-            Some((slot, id, rect))
-        })
+        .filter_map(|(slot, rect)| Some((slot, self.windows.session(slot)?, rect)))
         .collect()
     }
 
@@ -1313,18 +1313,16 @@ impl App {
             KeyCode::Enter => match entry.running {
                 Some(id) => match self.windows.window_of(id) {
                     Some(slot) => self.set_focus(Focus::Window(slot)),
-                    None if self.windows.len() == 0 => self.place(id, 0),
+                    None if self.windows.count() == 0 => self.place(id, 0),
                     None => self.open_pick(Purpose::Show(id)),
                 },
                 None => self.open_stored(&entry, None)?,
             },
             KeyCode::Char(d @ '1'..='4') => {
                 let slot = d as usize - '1' as usize;
-                if slot <= self.windows.len() && slot < MAX_WINDOWS {
-                    match entry.running {
-                        Some(id) => self.place(id, slot),
-                        None => self.open_stored(&entry, Some(slot))?,
-                    }
+                match entry.running {
+                    Some(id) => self.place(id, slot),
+                    None => self.open_stored(&entry, Some(slot))?,
                 }
             }
             _ => {}
@@ -1381,7 +1379,7 @@ impl App {
     fn open_confirmed(&mut self, claude_id: String, slot: Option<usize>) -> Result<()> {
         match slot {
             Some(slot) => self.resume_into(&claude_id, slot),
-            None if self.windows.len() == 0 => self.resume_into(&claude_id, 0),
+            None if self.windows.count() == 0 => self.resume_into(&claude_id, 0),
             None => {
                 self.open_pick(Purpose::Resume(claude_id));
                 Ok(())
@@ -1413,7 +1411,7 @@ impl App {
                 let id = self.spawn(&dir, Launch::New)?;
                 self.place(id, slot);
             }
-            Target::PickWindow if self.windows.len() == 0 => {
+            Target::PickWindow if self.windows.count() == 0 => {
                 let id = self.spawn(&dir, Launch::New)?;
                 self.place(id, 0);
             }
@@ -1489,11 +1487,6 @@ impl App {
             Action::Cancel => {}
             Action::Focus(focus) => self.set_focus(focus),
             Action::ToggleList => self.set_list_hidden(!self.list_hidden),
-            Action::ToggleStacked => {
-                self.windows.set_zoomed(false);
-                self.stacked = !self.stacked;
-                self.after_layout_change();
-            }
             Action::ToggleZoom => {
                 let zoom = self.windows.zoomed().is_none();
                 self.windows.set_zoomed(zoom);
@@ -1539,20 +1532,11 @@ impl App {
             .or_else(|| self.selected_running())
     }
 
-    fn window_names(&self) -> Vec<String> {
-        self.windows
-            .slots()
-            .iter()
-            .map(|&id| self.title_of(id))
-            .collect()
-    }
-
     fn open_commands(&mut self) {
-        let windows = self.window_names();
         let selected = self.selected_running();
         self.menu = Some(Menu::commands(&Context {
             focus: self.windows.focus(),
-            windows: &windows,
+            windows: self.windows.occupied(),
             selected_has_window: selected.is_some_and(|id| self.windows.window_of(id).is_some()),
             has_selection: self.selected_entry().is_some(),
             update: self
@@ -1561,7 +1545,6 @@ impl App {
                 .filter(|_| self.update_install.is_none())
                 .map(|u| u.version.as_str()),
             list_hidden: self.list_hidden,
-            stacked: self.stacked,
             zoomed: self.windows.zoomed().is_some(),
             marked: self.marked.len(),
             collapsed: self.selected_group().map(|g| self.is_collapsed(g)),
@@ -1721,22 +1704,20 @@ impl App {
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
             Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..) => return,
         };
-        self.menu = Some(Menu::pick_window(
-            purpose,
-            title,
-            self.windows.slots().len(),
-        ));
+        self.menu = Some(Menu::pick_window(purpose, title, self.windows.occupied()));
     }
 
     fn move_focus(&mut self, direction: Direction) {
         match self.windows.focus() {
             Focus::List => match direction {
-                Direction::Right if self.windows.len() > 0 => {
+                Direction::Right => {
                     let slot = self
                         .selected_running()
                         .and_then(|id| self.windows.window_of(id))
-                        .unwrap_or(0);
-                    self.set_focus(Focus::Window(slot));
+                        .or_else(|| self.windows.first());
+                    if let Some(slot) = slot {
+                        self.set_focus(Focus::Window(slot));
+                    }
                 }
                 // In der Liste springen Ctrl+↑/↓ zwischen den Gruppen bzw. Verzeichnissen.
                 Direction::Up => self.jump_section(-1),
@@ -1751,8 +1732,7 @@ impl App {
                 }
                 let rects = layout::windows(
                     ui::windows_area(self.screen, self.list_hidden),
-                    self.windows.len(),
-                    self.stacked,
+                    self.windows.occupied(),
                 );
                 match layout::neighbor(&rects, slot, direction) {
                     Some(next) => self.set_focus(Focus::Window(next)),
@@ -1777,17 +1757,20 @@ impl App {
     }
 
     /// Blendet die Sessionliste aus oder ein. Ausblenden geht nur mit einem offenen Fenster; hat
-    /// die Liste den Fokus, wandert er ins Fenster ihrer Session (sonst Fenster 1).
+    /// die Liste den Fokus, wandert er ins Fenster ihrer Session (sonst ins offene mit der
+    /// kleinsten Nummer).
     fn set_list_hidden(&mut self, hidden: bool) {
-        if hidden && self.windows.len() == 0 {
+        if hidden && self.windows.count() == 0 {
             return;
         }
         if hidden && self.windows.focus() == Focus::List {
-            let slot = self
+            if let Some(slot) = self
                 .selected_running()
                 .and_then(|id| self.windows.window_of(id))
-                .unwrap_or(0);
-            self.windows.set_focus(Focus::Window(slot));
+                .or_else(|| self.windows.first())
+            {
+                self.windows.set_focus(Focus::Window(slot));
+            }
             self.sync_cursor();
         }
         self.list_hidden = hidden;
@@ -1797,7 +1780,7 @@ impl App {
 
     /// Fokus auf der Liste oder kein Fenster mehr offen: die Liste muss sichtbar sein.
     fn keep_list_reachable(&mut self) {
-        if self.list_hidden && (self.windows.focus() == Focus::List || self.windows.len() == 0) {
+        if self.list_hidden && (self.windows.focus() == Focus::List || self.windows.count() == 0) {
             self.list_hidden = false;
             self.resize_windows();
         }
@@ -1893,14 +1876,17 @@ impl App {
                 .windows
                 .slots()
                 .iter()
-                .filter_map(|&id| self.session(id).map(|s| s.claude_id.clone()))
+                .map(|slot| {
+                    slot.and_then(|id| self.session(id))
+                        .map(|s| s.claude_id.clone())
+                        .unwrap_or_default()
+                })
                 .collect(),
             focus: match self.windows.focus() {
                 Focus::Window(slot) => Some(slot),
                 Focus::List => None,
             },
             list_hidden: self.list_hidden,
-            stacked: self.stacked,
             tags: self.tags.clone(),
             groups: self.group_of.clone(),
             recent_groups: self.recent_groups.clone(),

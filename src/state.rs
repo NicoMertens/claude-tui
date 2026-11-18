@@ -17,16 +17,14 @@ const FILE_NAME: &str = "state.json";
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
-    /// Claude-Session-IDs in Fensterreihenfolge.
+    /// Claude-Session-ID je Fensterplatz, `""` = Fenster nicht offen. Bewusst kein `null`: ältere
+    /// Versionen lesen die Datei sonst nicht mehr und verlieren beim nächsten Speichern alles.
     pub windows: Vec<String>,
     /// Fensterindex mit Fokus; `None` = Sessionliste.
     pub focus: Option<usize>,
     /// Sessionliste ausgeblendet (fehlt in älteren Dateien = eingeblendet).
     #[serde(default)]
     pub list_hidden: bool,
-    /// Zwei Fenster übereinander statt nebeneinander.
-    #[serde(default)]
-    pub stacked: bool,
     /// Schnellwahl-Nummer → Claude-Session-ID (Alt+Zahl / Ctrl+Zahl).
     #[serde(default)]
     pub tags: Tags,
@@ -90,10 +88,9 @@ mod tests {
     #[test]
     fn roundtrip() {
         let state = State {
-            windows: vec!["a".into(), "b".into()],
+            windows: vec!["".into(), "a".into(), "".into(), "b".into()],
             focus: Some(1),
             list_hidden: true,
-            stacked: true,
             tags: Tags::from([(3, "b".to_string())]),
             groups: Assignments::from([("a".to_string(), "G".to_string())]),
             recent_groups: vec!["G".into()],
@@ -129,6 +126,14 @@ mod tests {
             Assignments::from([("a".to_string(), "G".to_string())])
         );
         assert_eq!(unread, BTreeSet::from(["a".to_string()]));
+    }
+
+    #[test]
+    fn older_file_with_stacked_windows_still_loads() {
+        let text = r#"{"windows":["a","b"],"focus":1,"stacked":true}"#;
+        let state: State = serde_json::from_str(text).expect("json");
+        assert_eq!(state.windows, ["a", "b"]);
+        assert_eq!(state.focus, Some(1));
     }
 
     #[test]

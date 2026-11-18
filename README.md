@@ -13,8 +13,9 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 
 **Fenster und Layout**
 
-- Bis zu **4 Sessions gleichzeitig** in echten PTYs, automatisch angeordnet (1, 2, 3 oder 4 Fenster).
-- Zwei Fenster wahlweise **nebeneinander oder übereinander**.
+- Bis zu **4 Sessions gleichzeitig** in echten PTYs.
+- **Feste Fensterplätze**: 1 oben links, 2 oben rechts, 3 unten links, 4 unten rechts; fehlende
+  Fenster lassen keine Lücke (z. B. 1 und 3 übereinander, 2 allein über die ganze Fläche).
 - **Zoom** wie in tmux: ein Fenster bekommt die ganze Fläche, die übrigen Sessions laufen weiter.
 - **Sessionliste ausblendbar**, damit die Fenster die volle Breite bekommen.
 - Fokuswechsel mit `Ctrl+Pfeil`, Fokus erkennbar am blauen Rahmen.

@@ -28,8 +28,6 @@ pub enum Action {
     Focus(Focus),
     /// Sessionliste ein- bzw. ausblenden.
     ToggleList,
-    /// Zwei Fenster übereinander bzw. nebeneinander anordnen.
-    ToggleStacked,
     /// Fenster mit Fokus auf die ganze Fensterfläche zoomen bzw. den Zoom aufheben.
     ToggleZoom,
     /// Gruppen-Dialog für die Session mit Fokus bzw. die markierten Sessions öffnen.
@@ -130,11 +128,6 @@ pub const FOCUS: Entry = Entry {
     help: "Focus this window / the session list",
 };
 pub const TOGGLE_LIST: Entry = entry('s', "Hide session list", "Hide or show the session list");
-pub const TOGGLE_STACKED: Entry = entry(
-    'l',
-    "Stack windows",
-    "With exactly 2 windows: stack them or put them side by side",
-);
 pub const TOGGLE_ZOOM: Entry = entry(
     'z',
     "Zoom window",
@@ -153,7 +146,7 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 15] = [
+pub const ENTRIES: [&Entry; 14] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
@@ -164,7 +157,6 @@ pub const ENTRIES: [&Entry; 15] = [
     &DELETE_OLDER,
     &FOCUS,
     &TOGGLE_LIST,
-    &TOGGLE_STACKED,
     &TOGGLE_ZOOM,
     &UPDATE,
     &HELP,
@@ -215,8 +207,8 @@ pub enum Outcome {
 /// Was das Befehlsmenü über den aktuellen Zustand wissen muss.
 pub struct Context<'a> {
     pub focus: Focus,
-    /// Sessionname je Fenster, in Fensterreihenfolge.
-    pub windows: &'a [String],
+    /// Welche Fensterplätze belegt sind.
+    pub windows: [bool; MAX_WINDOWS],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
     /// In der Liste ist eine Session ausgewählt.
@@ -225,8 +217,6 @@ pub struct Context<'a> {
     pub update: Option<&'a str>,
     /// Die Sessionliste ist ausgeblendet.
     pub list_hidden: bool,
-    /// Zwei Fenster stehen übereinander.
-    pub stacked: bool,
     /// Das Fenster mit Fokus ist gezoomt.
     pub zoomed: bool,
     /// Anzahl der in der Liste markierten Sessions.
@@ -286,7 +276,8 @@ impl Menu {
         if !in_window {
             add(&DELETE_OLDER, DELETE_OLDER.label, Action::DeleteOlder);
         }
-        for i in 0..ctx.windows.len() {
+        let open = ctx.windows.iter().filter(|&&o| o).count();
+        for i in (0..MAX_WINDOWS).filter(|&i| ctx.windows[i]) {
             if ctx.focus != Focus::Window(i) {
                 let window = Entry {
                     hotkey: digit(i + 1),
@@ -302,22 +293,13 @@ impl Menu {
         // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
         if ctx.list_hidden {
             add(&TOGGLE_LIST, "Show session list", Action::ToggleList);
-        } else if !ctx.windows.is_empty() {
+        } else if open > 0 {
             add(&TOGGLE_LIST, TOGGLE_LIST.label, Action::ToggleList);
-        }
-        // Die Anordnung ist nur bei genau zwei Fenstern wählbar.
-        if ctx.windows.len() == 2 {
-            let label = if ctx.stacked {
-                "Windows side by side"
-            } else {
-                TOGGLE_STACKED.label
-            };
-            add(&TOGGLE_STACKED, label, Action::ToggleStacked);
         }
         // Zoomen lohnt erst ab zwei Fenstern; aufheben muss immer gehen.
         if ctx.zoomed {
             add(&TOGGLE_ZOOM, "Unzoom", Action::ToggleZoom);
-        } else if in_window && ctx.windows.len() >= 2 {
+        } else if in_window && open >= 2 {
             add(&TOGGLE_ZOOM, TOGGLE_ZOOM.label, Action::ToggleZoom);
         }
         if let Some(version) = ctx.update {
@@ -339,22 +321,19 @@ impl Menu {
         }
     }
 
-    /// Fensterauswahl: belegte Fenster ersetzen oder (bei < 4) ein neues öffnen.
-    pub fn pick_window(purpose: Purpose, title: String, open: usize) -> Self {
-        let mut items: Vec<Item> = (0..open)
+    /// Fensterauswahl: jedes der vier Fenster, belegte ersetzen, freie neu öffnen.
+    pub fn pick_window(purpose: Purpose, title: String, occupied: [bool; MAX_WINDOWS]) -> Self {
+        let items: Vec<Item> = (0..MAX_WINDOWS)
             .map(|i| Item {
                 hotkey: digit(i + 1),
-                label: format!("Replace Window {}", i + 1),
+                label: if occupied[i] {
+                    format!("Replace Window {}", i + 1)
+                } else {
+                    format!("New Window {}", i + 1)
+                },
                 action: Action::Place(i),
             })
             .collect();
-        if open < MAX_WINDOWS {
-            items.push(Item {
-                hotkey: digit(open + 1),
-                label: "New window".to_string(),
-                action: Action::Place(open),
-            });
-        }
         Self {
             title,
             items,
@@ -531,21 +510,21 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    fn names(n: usize) -> Vec<String> {
-        (1..=n).map(|i| format!("claude {i}")).collect()
+    /// Fenster 1 bis `n` offen.
+    fn open(n: usize) -> [bool; MAX_WINDOWS] {
+        std::array::from_fn(|i| i < n)
     }
 
     #[test]
     fn window_context_offers_close_and_list_focus() {
-        let windows = names(2);
+        let windows = open(2);
         let menu = Menu::commands(&Context {
             focus: Focus::Window(0),
-            windows: &windows,
+            windows,
             selected_has_window: true,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,
@@ -561,15 +540,14 @@ mod tests {
 
     #[test]
     fn window_context_title_names_menu_number() {
-        let windows = names(2);
+        let windows = open(2);
         let menu = Menu::commands(&Context {
             focus: Focus::Window(1),
-            windows: &windows,
+            windows,
             selected_has_window: true,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,
@@ -581,15 +559,14 @@ mod tests {
 
     #[test]
     fn list_context_hides_close_without_window() {
-        let windows = names(1);
+        let windows = open(1);
         let menu = Menu::commands(&Context {
             focus: Focus::List,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,
@@ -600,15 +577,14 @@ mod tests {
     }
 
     fn toggle_label(windows: usize, list_hidden: bool) -> Option<String> {
-        let windows = names(windows);
+        let windows = open(windows);
         let menu = Menu::commands(&Context {
             focus: Focus::List,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: true,
             update: None,
             list_hidden,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,
@@ -634,49 +610,15 @@ mod tests {
         assert_eq!(toggle_label(0, false), None);
     }
 
-    fn layout_label(windows: usize, stacked: bool) -> Option<String> {
-        let windows = names(windows);
-        let menu = Menu::commands(&Context {
-            focus: Focus::Window(0),
-            windows: &windows,
-            selected_has_window: true,
-            has_selection: true,
-            update: None,
-            list_hidden: false,
-            stacked,
-            zoomed: false,
-            marked: 0,
-            collapsed: None,
-            any_expanded: false,
-            any_collapsed: false,
-        });
-        menu.items
-            .iter()
-            .find(|i| i.action == Action::ToggleStacked)
-            .map(|i| format!("{} {}", i.hotkey, i.label))
-    }
-
-    #[test]
-    fn layout_toggle_only_with_two_windows() {
-        assert_eq!(layout_label(2, false).as_deref(), Some("l Stack windows"));
-        assert_eq!(
-            layout_label(2, true).as_deref(),
-            Some("l Windows side by side")
-        );
-        assert_eq!(layout_label(1, false), None);
-        assert_eq!(layout_label(3, false), None);
-    }
-
     fn zoom_label(focus: Focus, windows: usize, zoomed: bool) -> Option<String> {
-        let windows = names(windows);
+        let windows = open(windows);
         let menu = Menu::commands(&Context {
             focus,
-            windows: &windows,
+            windows,
             selected_has_window: true,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed,
             marked: 0,
             collapsed: None,
@@ -701,8 +643,12 @@ mod tests {
 
     #[test]
     fn hotkey_and_arrows_select_items() {
-        let mut menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 2);
-        assert_eq!(menu.items.len(), 3);
+        let mut menu = Menu::pick_window(
+            Purpose::NewSession(PathBuf::from(".")),
+            "Neu".into(),
+            open(2),
+        );
+        assert_eq!(menu.items.len(), 4);
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('3'))),
             Outcome::Run(Action::Place(2))
@@ -710,44 +656,76 @@ mod tests {
         assert_eq!(menu.on_key(&key(KeyCode::Up)), Outcome::Stay);
         assert_eq!(
             menu.on_key(&key(KeyCode::Enter)),
-            Outcome::Run(Action::Place(2))
+            Outcome::Run(Action::Place(3))
         );
         assert_eq!(menu.on_key(&key(KeyCode::Esc)), Outcome::Close);
     }
 
     #[test]
     fn prefix_again_closes_menu() {
-        let mut menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 1);
+        let mut menu = Menu::pick_window(
+            Purpose::NewSession(PathBuf::from(".")),
+            "Neu".into(),
+            open(1),
+        );
         let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
         assert_eq!(menu.on_key(&ctrl_a), Outcome::Close);
     }
 
     #[test]
-    fn pick_window_without_new_window_when_full() {
-        let menu = Menu::pick_window(Purpose::NewSession(PathBuf::from(".")), "Neu".into(), 4);
+    fn pick_window_offers_every_number() {
+        let occupied = [false, true, false, true];
+        let menu = Menu::pick_window(
+            Purpose::NewSession(PathBuf::from(".")),
+            "Neu".into(),
+            occupied,
+        );
         let labels: Vec<&str> = menu.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(
             labels,
             [
-                "Replace Window 1",
+                "New Window 1",
                 "Replace Window 2",
-                "Replace Window 3",
+                "New Window 3",
                 "Replace Window 4"
             ]
         );
     }
 
     #[test]
+    fn focus_items_follow_window_numbers() {
+        let menu = Menu::commands(&Context {
+            focus: Focus::Window(1),
+            windows: [false, true, false, true],
+            selected_has_window: true,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            zoomed: false,
+            marked: 0,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
+        });
+        let focus: Vec<String> = menu
+            .items
+            .iter()
+            .filter(|i| matches!(i.action, Action::Focus(Focus::Window(_))))
+            .map(|i| format!("{} {}", i.hotkey, i.label))
+            .collect();
+        assert_eq!(focus, ["4 Focus window 4"]);
+    }
+
+    #[test]
     fn marked_sessions_change_delete_in_list_only() {
-        let windows = names(1);
+        let windows = open(1);
         let ctx = |focus| Context {
             focus,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 3,
             collapsed: None,
@@ -772,15 +750,14 @@ mod tests {
 
     #[test]
     fn collapse_items_follow_state_and_appear_in_list_only() {
-        let windows = names(1);
+        let windows = open(1);
         let ctx = |focus, collapsed, any_expanded, any_collapsed| Context {
             focus,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: true,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed,
@@ -821,15 +798,14 @@ mod tests {
 
     #[test]
     fn group_item_in_window_and_list_with_marked_count() {
-        let windows = names(1);
+        let windows = open(1);
         let ctx = |focus, has_selection, marked| Context {
             focus,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked,
             collapsed: None,
@@ -864,7 +840,6 @@ mod tests {
         hotkeys.dedup();
         assert_eq!(hotkeys.len(), ENTRIES.len());
 
-        let windows = names(4);
         for (focus, marked, flag) in [
             (Focus::List, 0, false),
             (Focus::List, 2, true),
@@ -872,12 +847,11 @@ mod tests {
         ] {
             let menu = Menu::commands(&Context {
                 focus,
-                windows: &windows[..if flag { 2 } else { 4 }],
+                windows: open(if flag { 2 } else { 4 }),
                 selected_has_window: true,
                 has_selection: true,
                 update: Some("9.9.9"),
                 list_hidden: flag,
-                stacked: flag,
                 zoomed: flag,
                 marked,
                 collapsed: None,
@@ -893,15 +867,14 @@ mod tests {
 
     #[test]
     fn help_item_opens_help() {
-        let windows = names(1);
+        let windows = open(1);
         let mut menu = Menu::commands(&Context {
             focus: Focus::List,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: false,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,
@@ -916,15 +889,14 @@ mod tests {
 
     #[test]
     fn delete_older_only_in_session_list() {
-        let windows = names(1);
+        let windows = open(1);
         let ctx = |focus| Context {
             focus,
-            windows: &windows,
+            windows,
             selected_has_window: false,
             has_selection: false,
             update: None,
             list_hidden: false,
-            stacked: false,
             zoomed: false,
             marked: 0,
             collapsed: None,

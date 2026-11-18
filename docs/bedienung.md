@@ -91,22 +91,24 @@ Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, ye
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
 claude-tui liest dafür die letzte `agent-color`-Zeile aus dem Protokoll der Session.
 
-Rechts bis zu **4 Fenster**, nach Position nummeriert:
+Rechts bis zu **4 Fenster**. Jede Nummer hat einen **festen Platz**: 1 oben links, 2 oben rechts,
+3 unten links, 4 unten rechts. Jede Nummer lässt sich öffnen, auch wenn kleinere fehlen. Fehlende
+Fenster lassen keine Lücke: Die linke Spalte gehört 1 und 3, die rechte 2 und 4. Ist eine Spalte
+leer, nimmt die andere die ganze Breite; steht ein Fenster allein in seiner Spalte, bekommt es die
+ganze Höhe.
 
 ```
-1 Fenster    2 Fenster    3 Fenster    4 Fenster
-┌───────┐    ┌───┬───┐    ┌───┬───┐    ┌───┬───┐
-│   1   │    │ 1 │ 2 │    │   │ 2 │    │ 1 │ 2 │
-│       │    │   │   │    │ 1 ├───┤    ├───┼───┤
-│       │    │   │   │    │   │ 3 │    │ 3 │ 4 │
-└───────┘    └───┴───┘    └───┴───┘    └───┴───┘
+nur 2        1, 2         1, 3         1, 2, 3      1, 2, 4      1, 2, 3, 4
+┌───────┐    ┌───┬───┐    ┌───────┐    ┌───┬───┐    ┌───┬───┐    ┌───┬───┐
+│   2   │    │ 1 │ 2 │    │   1   │    │ 1 │   │    │   │ 2 │    │ 1 │ 2 │
+│       │    │   │   │    ├───────┤    ├───┤ 2 │    │ 1 ├───┤    ├───┼───┤
+│       │    │   │   │    │   3   │    │ 3 │   │    │   │ 4 │    │ 3 │ 4 │
+└───────┘    └───┴───┘    └───────┘    └───┴───┘    └───┴───┘    └───┴───┘
 ```
 
-Zwei Fenster lassen sich mit `l` im Menü auch **übereinander** anordnen (1 oben, 2 unten) und mit
-`l` wieder nebeneinander; die Wahl bleibt über einen Neustart erhalten (`state.json`) und gilt,
-sobald wieder genau zwei Fenster offen sind.
-
-Wird ein Fenster geschlossen, rücken die übrigen nach. Der Bereich mit dem **Fokus** (ein Fenster
+Wird ein Fenster geschlossen, behalten die übrigen ihre Nummer und ihren Platz; die Fläche wird
+nach derselben Regel neu aufgeteilt. Welche Session in welchem Fenster liegt, bleibt über einen
+Neustart erhalten (`state.json`). Der Bereich mit dem **Fokus** (ein Fenster
 oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie das Menü), alle anderen einen
 grauen.
 
@@ -122,7 +124,7 @@ ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehal
 
 | Taste | Wirkung |
 |---|---|
-| `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst Fenster 1). In der Liste springen `Ctrl+↑`/`Ctrl+↓` zur Überschrift der vorigen bzw. nächsten Gruppe oder des Verzeichnisses (von einer Session aus führt `Ctrl+↑` zuerst auf ihre eigene Überschrift) |
+| `Ctrl+←/→/↑/↓` | Fokus zum Nachbarfenster in Pfeilrichtung; `Ctrl+←` aus einem linken Fenster geht in die Sessionliste, `Ctrl+→` aus der Liste ins Fenster der gewählten Session (sonst ins offene Fenster mit der kleinsten Nummer). In der Liste springen `Ctrl+↑`/`Ctrl+↓` zur Überschrift der vorigen bzw. nächsten Gruppe oder des Verzeichnisses (von einer Session aus führt `Ctrl+↑` zuerst auf ihre eigene Überschrift) |
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `Alt+1`–`Alt+9` | Schnellwahl-Nummer für die Session mit Fokus vergeben bzw. mit derselben Zahl wieder entfernen |
 | `Ctrl+1`–`Ctrl+9` | Session mit dieser Schnellwahl-Nummer zeigen |
@@ -170,7 +172,7 @@ einen Zeilenumbruch ein.
 | `Enter` auf einer Überschrift | Abschnitt ein- bzw. ausklappen |
 | `Leertaste` auf einer Überschrift | alle Sessions des Abschnitts markieren; sind schon alle markiert, Markierung aufheben |
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
-| `1`–`4` | Session in dieses Fenster legen (eine sichtbare Session tauscht den Platz) |
+| `1`–`4` | Session in dieses Fenster legen, auch wenn es noch nicht offen ist (eine sichtbare Session tauscht den Platz bzw. wandert ins freie Fenster) |
 
 Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `⇄`, siehe
 [Zustände](#zustände-in-der-seitenleiste)), fragen `Enter`, Doppelklick und `1`–`4` erst nach:
@@ -205,14 +207,13 @@ vom Fokus ab:
 | `o` | gespeicherte Sessions älter als 1 Tag / 1 Woche / 1 Monat löschen | — |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
-| `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
 | `h` | [Hilfe](#hilfe) anzeigen | Hilfe anzeigen |
 | `q` | claude-tui beenden (alle Sessions enden; laufen noch welche, fragt es nach, Enter = Nein) | claude-tui beenden |
 
 `s` blendet die Sessionliste aus, damit die Fenster die volle Breite bekommen (nur mit
 mindestens einem offenen Fenster; hatte die Liste den Fokus, geht er ins Fenster ihrer Session bzw.
-Fenster 1). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. Die Liste erscheint auch
+ins offene Fenster mit der kleinsten Nummer). Bei ausgeblendeter Liste heißt der Punkt „Show session list“. Die Liste erscheint auch
 von selbst wieder, sobald sie den Fokus bekommt (`Ctrl+←`, `0`) oder das letzte Fenster schließt.
 Hinweise, die sonst unten in der Liste stehen, zeigt dann der untere Rahmen des Fensters mit Fokus.
 Der Zustand bleibt über einen Neustart erhalten (`state.json`).
@@ -258,9 +259,8 @@ Die zuletzt genutzten Verzeichnisse (höchstens 10) stehen in `%APPDATA%\claude-
 bzw. `~/.config/claude-tui/recent-dirs.txt`. Ohne zuletzt genutztes Verzeichnis ist das Verzeichnis
 vorgewählt, in dem claude-tui gestartet wurde.
 
-**Fensterauswahl:** listet die belegten Fenster („Replace Window 1“, Nummer wie in der Fensterleiste)
-und, solange weniger als 4 offen sind, „New window“. Eine ersetzte Session läuft im Hintergrund
-weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
+**Fensterauswahl:** listet alle vier Fenster mit ihrer Nummer als Taste, belegte als „Replace
+Window n“, freie als „New Window n“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
 
 ### Hilfe
 

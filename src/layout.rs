@@ -1,6 +1,8 @@
-//! Geometrie der Fenster: Anordnung für 0–4 Fenster und Nachbarsuche für Ctrl+Pfeil.
+//! Geometrie der Fenster: Anordnung der festen Fensterplätze 1–4 und Nachbarsuche für Ctrl+Pfeil.
 
 use ratatui::layout::{Constraint, Layout, Rect};
+
+use crate::windows::MAX_WINDOWS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -10,46 +12,49 @@ pub enum Direction {
     Down,
 }
 
-/// Rechtecke der Fenster in Nummernreihenfolge (Index 0 = Fenster 1).
+/// Fensterplätze je Spalte: links 1 und 3, rechts 2 und 4.
+const COLUMNS: [[usize; 2]; 2] = [[0, 2], [1, 3]];
+
+/// Rechtecke der offenen Fenster als (Fensterindex, Rechteck) in Nummernreihenfolge.
 ///
-/// - 1: ganze Fläche
-/// - 2: nebeneinander, mit `stacked` übereinander (1 oben)
-/// - 3: Fenster 1 links, 2 und 3 rechts übereinander
-/// - 4: 2 × 2 (1 oben links, 2 oben rechts, 3 unten links, 4 unten rechts)
-pub fn windows(area: Rect, count: usize, stacked: bool) -> Vec<Rect> {
-    match count {
-        0 => Vec::new(),
-        1 => vec![area],
-        2 if stacked => halves_vertical(area).to_vec(),
+/// Jedes Fenster hat einen festen Platz im 2 × 2-Raster (1 oben links, 2 oben rechts, 3 unten
+/// links, 4 unten rechts). Fehlende Fenster lassen keine Lücke: Ist eine Spalte leer, nimmt die
+/// andere die ganze Breite; ein Fenster ohne Partner in seiner Spalte die ganze Höhe.
+pub fn windows(area: Rect, occupied: [bool; MAX_WINDOWS]) -> Vec<(usize, Rect)> {
+    let columns: Vec<Vec<usize>> = COLUMNS
+        .iter()
+        .map(|slots| slots.iter().copied().filter(|&i| occupied[i]).collect())
+        .filter(|slots: &Vec<usize>| !slots.is_empty())
+        .collect();
+    let column_areas = match columns.len() {
         2 => halves_horizontal(area).to_vec(),
-        3 => {
-            let [left, right] = halves_horizontal(area);
-            let [top, bottom] = halves_vertical(right);
-            vec![left, top, bottom]
-        }
-        _ => {
-            let [top, bottom] = halves_vertical(area);
-            let [a, b] = halves_horizontal(top);
-            let [c, d] = halves_horizontal(bottom);
-            vec![a, b, c, d]
-        }
-    }
+        _ => vec![area],
+    };
+    let mut rects: Vec<(usize, Rect)> = columns
+        .iter()
+        .zip(column_areas)
+        .flat_map(|(slots, column)| {
+            let parts = match slots.len() {
+                2 => halves_vertical(column).to_vec(),
+                _ => vec![column],
+            };
+            slots.iter().copied().zip(parts).collect::<Vec<_>>()
+        })
+        .collect();
+    rects.sort_by_key(|&(slot, _)| slot);
+    rects
 }
 
 /// Sichtbare Fenster als (Fensterindex, Rechteck). Gezoomt bekommt nur `zoomed` die ganze
 /// Fläche, die übrigen Fenster fehlen.
 pub fn visible(
     area: Rect,
-    count: usize,
-    stacked: bool,
+    occupied: [bool; MAX_WINDOWS],
     zoomed: Option<usize>,
 ) -> Vec<(usize, Rect)> {
     match zoomed {
-        Some(slot) if slot < count => vec![(slot, area)],
-        _ => windows(area, count, stacked)
-            .into_iter()
-            .enumerate()
-            .collect(),
+        Some(slot) if occupied.get(slot) == Some(&true) => vec![(slot, area)],
+        _ => windows(area, occupied),
     }
 }
 
@@ -61,22 +66,21 @@ fn halves_vertical(area: Rect) -> [Rect; 2] {
     Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(area)
 }
 
-/// Nächstes Fenster in `direction` von `current` aus.
+/// Nächstes Fenster in `direction` vom Fenster `current` aus; `rects` wie aus [`windows`].
 ///
 /// In Frage kommen Fenster, die vollständig in Pfeilrichtung liegen und sich quer dazu mit dem
 /// aktuellen überlappen. Davon gewinnt das nächstgelegene, bei Gleichstand die kleinere Nummer.
-pub fn neighbor(rects: &[Rect], current: usize, direction: Direction) -> Option<usize> {
-    let cur = *rects.get(current)?;
+pub fn neighbor(rects: &[(usize, Rect)], current: usize, direction: Direction) -> Option<usize> {
+    let cur = rects.iter().find(|&&(i, _)| i == current)?.1;
     rects
         .iter()
-        .enumerate()
-        .filter(|&(i, _)| i != current)
-        .filter_map(|(i, r)| {
+        .filter(|&&(i, _)| i != current)
+        .filter_map(|&(i, r)| {
             let (distance, overlap) = match direction {
-                Direction::Right if r.x >= cur.right() => (r.x - cur.right(), overlap_y(cur, *r)),
-                Direction::Left if r.right() <= cur.x => (cur.x - r.right(), overlap_y(cur, *r)),
-                Direction::Down if r.y >= cur.bottom() => (r.y - cur.bottom(), overlap_x(cur, *r)),
-                Direction::Up if r.bottom() <= cur.y => (cur.y - r.bottom(), overlap_x(cur, *r)),
+                Direction::Right if r.x >= cur.right() => (r.x - cur.right(), overlap_y(cur, r)),
+                Direction::Left if r.right() <= cur.x => (cur.x - r.right(), overlap_y(cur, r)),
+                Direction::Down if r.y >= cur.bottom() => (r.y - cur.bottom(), overlap_x(cur, r)),
+                Direction::Up if r.bottom() <= cur.y => (cur.y - r.bottom(), overlap_x(cur, r)),
                 _ => return None,
             };
             (overlap > 0).then_some((distance, i))
@@ -100,41 +104,107 @@ mod tests {
 
     const AREA: Rect = Rect::new(28, 0, 100, 41);
 
+    fn open(slots: &[usize]) -> [bool; MAX_WINDOWS] {
+        let mut occupied = [false; MAX_WINDOWS];
+        for &i in slots {
+            occupied[i] = true;
+        }
+        occupied
+    }
+
+    /// Rechteck je Fensterplatz; `None` für nicht offene Fenster.
+    fn layout(slots: &[usize]) -> [Option<Rect>; MAX_WINDOWS] {
+        let mut out = [None; MAX_WINDOWS];
+        for (i, r) in windows(AREA, open(slots)) {
+            out[i] = Some(r);
+        }
+        out
+    }
+
     #[test]
-    fn layouts_cover_area_without_overlap() {
-        for stacked in [false, true] {
-            for count in 1..=4 {
-                let rects = windows(AREA, count, stacked);
-                assert_eq!(rects.len(), count);
-                let total: u32 = rects.iter().map(|r| r.area()).sum();
-                assert_eq!(total, AREA.area(), "{count} Fenster");
+    fn every_combination_covers_area_without_overlap() {
+        for bits in 1u8..16 {
+            let occupied: [bool; MAX_WINDOWS] = std::array::from_fn(|i| bits & (1 << i) != 0);
+            let rects = windows(AREA, occupied);
+            let slots: Vec<usize> = rects.iter().map(|&(i, _)| i).collect();
+            let expected: Vec<usize> = (0..MAX_WINDOWS).filter(|&i| occupied[i]).collect();
+            assert_eq!(slots, expected, "{occupied:?}");
+            let total: u32 = rects.iter().map(|(_, r)| r.area()).sum();
+            assert_eq!(total, AREA.area(), "{occupied:?}");
+            for (a, (_, ra)) in rects.iter().enumerate() {
+                for (_, rb) in &rects[a + 1..] {
+                    assert!(ra.intersection(*rb).is_empty(), "{occupied:?}");
+                }
             }
+        }
+        assert!(windows(AREA, [false; MAX_WINDOWS]).is_empty());
+    }
+
+    #[test]
+    fn single_window_gets_whole_area_whatever_its_number() {
+        for slot in 0..MAX_WINDOWS {
+            assert_eq!(windows(AREA, open(&[slot])), [(slot, AREA)]);
         }
     }
 
     #[test]
-    fn zoomed_window_alone_gets_whole_area() {
-        assert_eq!(visible(AREA, 3, false, Some(1)), [(1, AREA)]);
-        let normal: Vec<(usize, Rect)> = windows(AREA, 3, false).into_iter().enumerate().collect();
-        assert_eq!(visible(AREA, 3, false, None), normal);
-        assert_eq!(
-            visible(AREA, 2, false, Some(5)).len(),
-            2,
-            "ungültiger Index"
-        );
+    fn one_and_two_side_by_side() {
+        let [Some(a), Some(b), None, None] = layout(&[0, 1]) else {
+            panic!("1 und 2");
+        };
+        assert_eq!(a.height, AREA.height);
+        assert_eq!(a.right(), b.x);
     }
 
     #[test]
-    fn three_windows_have_one_large_left() {
-        let r = windows(AREA, 3, false);
-        assert_eq!(r[0].height, AREA.height);
-        assert_eq!(r[1].x, r[2].x);
-        assert!(r[1].y < r[2].y);
+    fn three_goes_below_one_and_two_spans_the_height() {
+        let [Some(a), Some(b), Some(c), None] = layout(&[0, 1, 2]) else {
+            panic!("1, 2 und 3");
+        };
+        assert_eq!(b.height, AREA.height);
+        assert_eq!((a.x, a.bottom()), (c.x, c.y));
+        assert!(a.right() <= b.x);
+    }
+
+    #[test]
+    fn four_without_three_goes_bottom_right() {
+        let [Some(a), Some(b), None, Some(d)] = layout(&[0, 1, 3]) else {
+            panic!("1, 2 und 4");
+        };
+        assert_eq!(a.height, AREA.height);
+        assert_eq!((b.x, b.bottom()), (d.x, d.y));
+    }
+
+    #[test]
+    fn one_and_three_stacked_full_width() {
+        let [Some(a), None, Some(c), None] = layout(&[0, 2]) else {
+            panic!("1 und 3");
+        };
+        assert_eq!(a.width, AREA.width);
+        assert_eq!(a.bottom(), c.y);
+    }
+
+    #[test]
+    fn four_windows_form_a_grid() {
+        let [Some(a), Some(b), Some(c), Some(d)] = layout(&[0, 1, 2, 3]) else {
+            panic!("alle vier");
+        };
+        assert_eq!((a.y, a.right()), (b.y, b.x));
+        assert_eq!((c.y, c.right()), (d.y, d.x));
+        assert_eq!(a.bottom(), c.y);
+    }
+
+    #[test]
+    fn zoomed_window_alone_gets_whole_area() {
+        let occupied = open(&[0, 1, 2]);
+        assert_eq!(visible(AREA, occupied, Some(1)), [(1, AREA)]);
+        assert_eq!(visible(AREA, occupied, None), windows(AREA, occupied));
+        assert_eq!(visible(AREA, occupied, Some(3)).len(), 3, "nicht offen");
     }
 
     #[test]
     fn neighbors_with_two_windows() {
-        let r = windows(AREA, 2, false);
+        let r = windows(AREA, open(&[0, 1]));
         assert_eq!(neighbor(&r, 0, Right), Some(1));
         assert_eq!(neighbor(&r, 1, Left), Some(0));
         assert_eq!(neighbor(&r, 0, Left), None);
@@ -142,30 +212,32 @@ mod tests {
     }
 
     #[test]
-    fn two_stacked_windows_are_above_each_other() {
-        let r = windows(AREA, 2, true);
-        assert_eq!(r[0].width, AREA.width);
-        assert_eq!(r[0].bottom(), r[1].y);
-        assert_eq!(neighbor(&r, 0, Down), Some(1));
-        assert_eq!(neighbor(&r, 1, Up), Some(0));
+    fn neighbors_with_one_and_three() {
+        let r = windows(AREA, open(&[0, 2]));
+        assert_eq!(neighbor(&r, 0, Down), Some(2));
+        assert_eq!(neighbor(&r, 2, Up), Some(0));
         // Beide liegen ganz links: Ctrl+← führt aus jedem in die Sessionliste.
-        assert_eq!(neighbor(&r, 1, Left), None);
+        assert_eq!(neighbor(&r, 2, Left), None);
     }
 
     #[test]
-    fn neighbors_with_three_windows_prefer_lower_number() {
-        let r = windows(AREA, 3, false);
+    fn neighbors_with_three_windows() {
+        let r = windows(AREA, open(&[0, 1, 2]));
+        assert_eq!(
+            neighbor(&r, 1, Left),
+            Some(0),
+            "Gleichstand: kleinere Nummer"
+        );
         assert_eq!(neighbor(&r, 0, Right), Some(1));
-        assert_eq!(neighbor(&r, 1, Left), Some(0));
-        assert_eq!(neighbor(&r, 2, Left), Some(0));
-        assert_eq!(neighbor(&r, 1, Down), Some(2));
-        assert_eq!(neighbor(&r, 2, Up), Some(1));
-        assert_eq!(neighbor(&r, 0, Up), None);
+        assert_eq!(neighbor(&r, 2, Right), Some(1));
+        assert_eq!(neighbor(&r, 0, Down), Some(2));
+        assert_eq!(neighbor(&r, 2, Up), Some(0));
+        assert_eq!(neighbor(&r, 1, Down), None);
     }
 
     #[test]
     fn neighbors_with_four_windows() {
-        let r = windows(AREA, 4, false);
+        let r = windows(AREA, open(&[0, 1, 2, 3]));
         assert_eq!(neighbor(&r, 0, Right), Some(1));
         assert_eq!(neighbor(&r, 0, Down), Some(2));
         assert_eq!(neighbor(&r, 3, Left), Some(2));

@@ -46,8 +46,10 @@ const OVERVIEW: &[Row] = &[
     ),
     Heading("Windows"),
     Text(
-        "Numbered by position. The window bar shows number, title and state. The session of a \
-         closed or replaced window keeps running in the background and stays in the list.",
+        "Each number has a fixed place: 1 top left, 2 top right, 3 bottom left, 4 bottom right. \
+         Missing windows leave no gap: a window alone in its column gets the full height, a \
+         column alone the full width. The window bar shows number, title and state. The session \
+         of a closed or replaced window keeps running in the background and stays in the list.",
     ),
     Heading("States"),
     Key("✻ working", "Claude works on a prompt or uses a tool"),
