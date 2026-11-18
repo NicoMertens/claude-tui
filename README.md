@@ -45,7 +45,10 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 - Zustand kommt über **Hooks** direkt von Claude Code. Die eigene `~/.claude/settings.json` bleibt
   dabei unverändert, und ohne Hook-Meldung greift eine Heuristik.
 - **Hinweis auf wartende Sessions:** Terminal-Glocke und Meldung, wenn eine Session außerhalb des
-  Fokus auf dich wartet. `Ctrl+A w` springt reihum zur nächsten wartenden.
+  Fokus auf dich wartet.
+- **Ungelesene Antworten:** Eine fertige Antwort bleibt **waiting for you**, bis du sie mit
+  `Ctrl+Space` als gelesen setzt (oder wieder als ungelesen); gilt auch für gespeicherte Sessions
+  und über einen Neustart hinweg.
 - Erkennt Sessions, die **außerhalb von claude-tui** laufen, und fragt vor dem Öffnen nach.
   Hintergrund-Sessions (`claude --bg`) verbindet es per `claude attach`.
 - Sessionwechsel in Claude (`/resume`, `/clear`, `/branch`) übernehmen Fenster und Liste.
