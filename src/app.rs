@@ -22,7 +22,9 @@ use crate::{
     layout::{self, Direction},
     list::{self, Cursor, Entry, Group, Row, Running, NEW_SESSION_TITLE},
     menu::{self, Action, Context, Menu, Outcome, Purpose},
-    mouse, recent,
+    mouse,
+    noteedit::{NoteEditor, Outcome as NoteOutcome},
+    recent,
     selection::{self, Cell, Selection},
     session::{self, Session, Status},
     state::{self, State},
@@ -106,8 +108,12 @@ pub struct App {
     unread: BTreeSet<String>,
     /// Zuletzt verwendete Gruppennamen, neueste zuerst.
     recent_groups: Vec<String>,
+    /// Notiz je Claude-ID (Ctrl+A t); bleibt über `state.json` erhalten.
+    pub notes: BTreeMap<String, String>,
     /// Gruppen-Dialog (Ctrl+A g).
     pub group_picker: Option<GroupPicker>,
+    /// Notiz-Editor (Ctrl+A t).
+    pub note_editor: Option<NoteEditor>,
     /// Hilfeseite (Ctrl+A h).
     pub help: Option<Help>,
     pub menu: Option<Menu>,
@@ -202,7 +208,9 @@ impl App {
             group_of: Assignments::new(),
             unread: BTreeSet::new(),
             recent_groups: Vec::new(),
+            notes: BTreeMap::new(),
             group_picker: None,
+            note_editor: None,
             help: None,
             menu: None,
             dir_picker: None,
@@ -250,6 +258,7 @@ impl App {
         app.superseded = std::mem::take(&mut saved.superseded);
         app.collapsed = std::mem::take(&mut saved.collapsed);
         app.unread = std::mem::take(&mut saved.unread);
+        app.notes = std::mem::take(&mut saved.notes);
         // Fehlt eine der Sessions im Cache (erster Start, neue Session), erst nach dem Einlesen.
         let known = saved
             .windows
@@ -538,6 +547,29 @@ impl App {
             .map(|(_, _, rect)| rect)
     }
 
+    /// Notiz der Claude-Session, falls sie eine hat.
+    pub fn note_of(&self, claude_id: &str) -> Option<&str> {
+        self.notes.get(claude_id).map(String::as_str)
+    }
+
+    /// Terminalfläche und Notizzeilen der Session `id` im Fensterrechteck `rect`.
+    pub fn window_content(&self, id: SessionId, rect: Rect) -> (Rect, Option<Rect>) {
+        let note_lines = self
+            .session(id)
+            .and_then(|s| self.note_of(&s.claude_id))
+            .map_or(0, |note| note.lines().count());
+        layout::window_content(rect, note_lines)
+    }
+
+    /// Terminalfläche von Fenster `slot`, falls es sichtbar ist.
+    fn term_rect(&self, slot: usize) -> Option<Rect> {
+        let (_, id, rect) = self
+            .window_rects()
+            .into_iter()
+            .find(|&(s, _, _)| s == slot)?;
+        Some(self.window_content(id, rect).0)
+    }
+
     /// Hintergrundarbeit je Durchlauf der Hauptschleife. Liefert, ob sich etwas Sichtbares geändert
     /// hat (Zustände, Hinweise, Liste, Update) — dann muss neu gezeichnet werden. Ausgabe der
     /// Sessions zählt hier nicht, die prüft die Hauptschleife über [`Self::latest_output`].
@@ -703,6 +735,12 @@ impl App {
             if let Some(group) = self.group_of.remove(&old) {
                 self.group_of.insert(new.clone(), group);
             }
+            if let Some(note) = self.notes.remove(&old) {
+                self.notes.insert(new.clone(), note);
+            }
+            if let Some(editor) = self.note_editor.as_mut().filter(|e| e.target == old) {
+                editor.target.clone_from(&new);
+            }
         }
         // Ungelesen gehört zum Gesprächsinhalt: Die alte behält ihren Stand, die geladene (bei
         // `/clear` leer) bringt ihren eigenen mit.
@@ -715,6 +753,8 @@ impl App {
         self.ended.push((old, Instant::now()));
         self.list_dirty = true;
         self.save_state();
+        // Mit oder ohne Notiz ändert sich die Höhe des Terminals.
+        self.resize_windows();
     }
 
     fn follow_parked(&mut self, parked: &HashMap<String, String>) {
@@ -736,6 +776,12 @@ impl App {
             if self.unread.remove(&old) {
                 self.unread.insert(new.clone());
             }
+            if let Some(note) = self.notes.remove(&old) {
+                self.notes.insert(new.clone(), note);
+            }
+            if let Some(editor) = self.note_editor.as_mut().filter(|e| e.target == old) {
+                editor.target.clone_from(new);
+            }
             if self.cursor == Some(Cursor::Session(old.clone())) {
                 self.cursor = Some(Cursor::Session(new.clone()));
             }
@@ -748,6 +794,7 @@ impl App {
         if changed {
             self.list_dirty = true;
             self.save_state();
+            self.resize_windows();
         }
     }
 
@@ -856,6 +903,18 @@ impl App {
             }
             return Ok(());
         }
+        if let Some(editor) = self.note_editor.as_mut() {
+            match editor.on_key(&key) {
+                NoteOutcome::Stay => {}
+                NoteOutcome::Cancel => self.note_editor = None,
+                NoteOutcome::Save(note) => {
+                    let target = std::mem::take(&mut editor.target);
+                    self.note_editor = None;
+                    self.apply_note(target, note);
+                }
+            }
+            return Ok(());
+        }
         if let Some(help) = self.help.as_mut() {
             if help.on_key(&key) == HelpOutcome::Close {
                 self.help = None;
@@ -915,6 +974,10 @@ impl App {
         }
         if let Some(picker) = self.group_picker.as_mut() {
             picker.paste(text);
+            return Ok(());
+        }
+        if let Some(editor) = self.note_editor.as_mut() {
+            editor.paste(text);
             return Ok(());
         }
         if let Some(id) = self.windows.focused_session() {
@@ -996,8 +1059,7 @@ impl App {
                 let inner = self
                     .windows
                     .window_of(session)
-                    .and_then(|slot| self.window_rect(slot))
-                    .map(|r| r.inner(Margin::new(1, 1)));
+                    .and_then(|slot| self.term_rect(slot));
                 if let (Some(inner), Some(selection)) = (inner, self.selection.as_mut()) {
                     selection.head = cell_in(inner, position);
                 }
@@ -1034,9 +1096,7 @@ impl App {
                     return false;
                 };
                 // Klick auf Rahmen oder Titel setzt nur den Fokus (eigener Weg unten).
-                let on_content = self
-                    .window_rect(slot)
-                    .is_some_and(|r| r.inner(Margin::new(1, 1)).contains(position));
+                let on_content = self.term_rect(slot).is_some_and(|r| r.contains(position));
                 if !on_content || !self.session(id).is_some_and(Session::wants_mouse) {
                     return false;
                 }
@@ -1056,8 +1116,7 @@ impl App {
                 let Some(inner) = self
                     .windows
                     .window_of(id)
-                    .and_then(|slot| self.window_rect(slot))
-                    .map(|r| r.inner(Margin::new(1, 1)))
+                    .and_then(|slot| self.term_rect(slot))
                 else {
                     self.forwarding = None;
                     return true;
@@ -1090,6 +1149,7 @@ impl App {
         let open = self.menu.is_some()
             || self.dir_picker.is_some()
             || self.group_picker.is_some()
+            || self.note_editor.is_some()
             || self.help.is_some();
         open && self.overlay.get().is_some_and(|r| r.contains(position))
     }
@@ -1128,12 +1188,13 @@ impl App {
         }
     }
 
-    /// Schließt Menü, Verzeichnisauswahl, Gruppen-Dialog und Hilfe.
+    /// Schließt Menü, Verzeichnisauswahl, Gruppen-Dialog, Notiz-Editor und Hilfe.
     fn close_overlays(&mut self) {
         self.menu = None;
         self.help = None;
         self.dir_picker = None;
         self.group_picker = None;
+        self.note_editor = None;
     }
 
     /// Fenster unter der Mausposition: Fensterindex, Session und Zelle im Fensterinhalt.
@@ -1141,7 +1202,10 @@ impl App {
         self.window_rects()
             .into_iter()
             .find(|(_, _, rect)| rect.contains(position))
-            .map(|(slot, id, rect)| (slot, id, cell_in(rect.inner(Margin::new(1, 1)), position)))
+            .map(|(slot, id, rect)| {
+                let (term, _) = self.window_content(id, rect);
+                (slot, id, cell_in(term, position))
+            })
     }
 
     fn copy_selection(&mut self) {
@@ -1493,6 +1557,7 @@ impl App {
                 self.resize_windows();
             }
             Action::SetGroup => self.open_group_picker(),
+            Action::EditNote => self.open_note_editor(),
             Action::ToggleCollapsed => {
                 if let Some(group) = self.selected_group() {
                     let (key, collapsed) = (group.heading.key(), self.is_collapsed(group));
@@ -1580,6 +1645,34 @@ impl App {
         self.group_picker = Some(GroupPicker::new(title, targets, choices, offer_none));
     }
 
+    /// Notiz-Editor für die Session mit Fokus bzw. die in der Liste gewählte.
+    fn open_note_editor(&mut self) {
+        let Some(target) = self.focused_claude_id() else {
+            return;
+        };
+        let name = list::flatten(&self.groups)
+            .find(|e| e.claude_id == target)
+            .map_or(NEW_SESSION_TITLE, |e| e.title.as_str());
+        let title = format!("Note for {}", menu::shorten(name, GROUP_TITLE_MAX));
+        let text = self.note_of(&target).unwrap_or_default();
+        self.note_editor = Some(NoteEditor::new(title, target.clone(), text));
+    }
+
+    /// Speichert die Notiz der Session (`None` = entfernen).
+    fn apply_note(&mut self, target: String, note: Option<String>) {
+        let message = match note {
+            Some(note) => {
+                self.notes.insert(target, note);
+                "note saved"
+            }
+            None if self.notes.remove(&target).is_some() => "note removed",
+            None => return,
+        };
+        self.flash_notice(message.to_string());
+        self.save_state();
+        self.resize_windows();
+    }
+
     /// Ordnet die Sessions der gewählten Gruppe zu (`None` = aus der Gruppe nehmen).
     fn apply_group(&mut self, targets: &[String], group: Option<String>) {
         let known = groups::choices(&self.group_of, &self.recent_groups);
@@ -1647,7 +1740,8 @@ impl App {
         let tagged = tags::remove_session(&mut self.tags, claude_id);
         let grouped = self.group_of.remove(claude_id).is_some();
         let unread = self.unread.remove(claude_id);
-        if tagged || grouped || unread {
+        let noted = self.notes.remove(claude_id).is_some();
+        if tagged || grouped || unread || noted {
             self.save_state();
         }
         // Überholte Protokolle vor einer Verlegung gehören zur Session und gehen mit.
@@ -1864,6 +1958,7 @@ impl App {
             tags: &mut self.tags,
             groups: &mut self.group_of,
             unread: &mut self.unread,
+            notes: &mut self.notes,
         };
         if per_session.forget_unknown(known) {
             self.save_state();
@@ -1893,6 +1988,7 @@ impl App {
             superseded: self.superseded.clone(),
             collapsed: self.collapsed.clone(),
             unread: self.unread.clone(),
+            notes: self.notes.clone(),
         };
         // Komfortfunktion: lässt sich der Zustand nicht speichern, läuft alles andere weiter.
         let _ = state::save(&state);
@@ -1902,7 +1998,7 @@ impl App {
     /// beim Zoom verdeckte Fenster behalten ihre letzte Größe.
     fn resize_windows(&mut self) {
         for (_, id, rect) in self.window_rects() {
-            let inner = rect.inner(Margin::new(1, 1));
+            let (inner, _) = self.window_content(id, rect);
             if let Some(session) = self.session_mut(id) {
                 session.resize(inner.height.max(1), inner.width.max(1));
             }

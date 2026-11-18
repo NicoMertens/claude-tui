@@ -201,6 +201,7 @@ vom Fokus ab:
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
 | `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen |
 | `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen |
+| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen |
 | `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
 | `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
@@ -300,6 +301,29 @@ Groß-/Kleinschreibung trennt keine Gruppen: `backend` landet in einer vorhanden
 und die 10 zuletzt verwendeten Gruppen bleiben über einen Neustart erhalten (`state.json`);
 gelöschte Sessions verlieren ihre Gruppe, auch außerhalb von claude-tui gelöschte.
 
+### Notizen
+
+Jede Session kann eine Notiz tragen, z. B. worauf sie wartet oder was als Nächstes ansteht. Sie
+steht orange unten im Fenster (`✎ …`), mehrzeilig bis zu 5 Zeilen und höchstens ein Drittel der
+Fensterhöhe; was nicht passt, zählt `(+N)` am Ende. Das Terminal der Session wird dafür
+entsprechend niedriger. In der Sessionliste
+kennzeichnet ein `✎` hinter dem Titel Sessions mit Notiz, auch gespeicherte, die gerade nicht laufen.
+
+`t` im Menü öffnet den Notiz-Editor für die Session mit Fokus (im Fenster bzw. die in der Liste
+gewählte), mit der vorhandenen Notiz vorbelegt:
+
+| Taste | Wirkung |
+|---|---|
+| Tippen / Einfügen | Text eingeben; Eingefügtes behält seine Zeilenumbrüche |
+| `Shift+Enter` / `Ctrl+J` | neue Zeile |
+| `←` `→` `↑` `↓` `Pos1` `Ende` | Cursor bewegen |
+| `Enter` | speichern; leerer Text entfernt die Notiz |
+| `Ctrl+D` | Notiz entfernen |
+| `Esc` | abbrechen |
+
+Notizen bleiben über einen Neustart erhalten (`state.json`) und gehen wie die Gruppe bei `/clear`
+auf die neue Session über. Gelöschte Sessions verlieren ihre Notiz.
+
 ## Maus
 
 Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen);
@@ -375,7 +399,7 @@ Hintergrund-Session öffnet es dagegen mit `claude attach`.
 
 **Sessionwechsel in Claude:** Lädt man in einem Fenster mit `/resume` eine andere Session oder
 beginnt mit `/clear` eine neue, zeigen Fensterleiste und Sessionliste kurz danach die neue Session; die vorherige steht weiter als gespeicherte Session in
-der Liste. Schnellwahl-Nummer und Gruppe gehen bei `/clear` auf die neue Session über, bei
+der Liste. Schnellwahl-Nummer, Gruppe und Notiz gehen bei `/clear` auf die neue Session über, bei
 `/resume` bleiben sie bei der vorherigen. Dafür schaltet claude-tui in den Sessions, die es startet,
 Claudes Agent View ab (`disableAgentView`): `/resume` wechselt dann im selben Prozess, statt die
 Session in den Hintergrund zu verlegen, und `←` am leeren Prompt öffnet keine Agent View.

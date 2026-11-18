@@ -14,6 +14,7 @@ mod layout;
 mod list;
 mod menu;
 mod mouse;
+mod noteedit;
 mod paths;
 mod recent;
 mod selection;

@@ -1,5 +1,6 @@
 //! Fensterlayout über einen Neustart hinweg: welche Claude-Session in welchem Fenster lag und wo
-//! der Fokus war, dazu die Schnellwahl-Nummern, die eigenen Gruppen und die ungelesenen Sessions.
+//! der Fokus war, dazu die Schnellwahl-Nummern, die eigenen Gruppen, die ungelesenen Sessions und
+//! die Notizen.
 //! Gespeichert als `state.json` im Konfigurationsordner. Einträge zu Sessions, deren Protokoll es
 //! nicht mehr gibt, fallen weg ([`PerSession::forget_unknown`]).
 
@@ -44,6 +45,9 @@ pub struct State {
     /// Sessions mit ungelesener fertiger Antwort (Claude-IDs).
     #[serde(default)]
     pub unread: BTreeSet<String>,
+    /// Claude-Session-ID → Notiz (Ctrl+A t).
+    #[serde(default)]
+    pub notes: BTreeMap<String, String>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -54,11 +58,13 @@ pub fn load() -> State {
         .unwrap_or_default()
 }
 
-/// Was an einzelnen Claude-Sessions hängt: Schnellwahl-Nummern, Gruppen, ungelesene Antworten.
+/// Was an einzelnen Claude-Sessions hängt: Schnellwahl-Nummern, Gruppen, ungelesene Antworten,
+/// Notizen.
 pub struct PerSession<'a> {
     pub tags: &'a mut Tags,
     pub groups: &'a mut Assignments,
     pub unread: &'a mut BTreeSet<String>,
+    pub notes: &'a mut BTreeMap<String, String>,
 }
 
 impl PerSession<'_> {
@@ -66,11 +72,13 @@ impl PerSession<'_> {
     /// geändert hat.
     pub fn forget_unknown<'k>(self, known: impl Iterator<Item = &'k str>) -> bool {
         let known: HashSet<&str> = known.collect();
-        let before = (self.tags.len(), self.groups.len(), self.unread.len());
+        let counts = |s: &Self| (s.tags.len(), s.groups.len(), s.unread.len(), s.notes.len());
+        let before = counts(&self);
         self.tags.retain(|_, id| known.contains(id.as_str()));
         self.groups.retain(|id, _| known.contains(id.as_str()));
         self.unread.retain(|id| known.contains(id.as_str()));
-        (self.tags.len(), self.groups.len(), self.unread.len()) != before
+        self.notes.retain(|id, _| known.contains(id.as_str()));
+        counts(&self) != before
     }
 }
 
@@ -97,6 +105,12 @@ mod tests {
             superseded: BTreeMap::from([("alt".to_string(), "b".to_string())]),
             collapsed: BTreeSet::from(["dir:/x".to_string()]),
             unread: BTreeSet::from(["a".to_string()]),
+            notes: BTreeMap::from([(
+                "b".to_string(),
+                "x
+y"
+                .to_string(),
+            )]),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);
@@ -110,11 +124,13 @@ mod tests {
             ("gone".to_string(), "G".to_string()),
         ]);
         let mut unread = BTreeSet::from(["a".to_string(), "gone".to_string()]);
+        let mut notes = BTreeMap::from([("gone".to_string(), "n".to_string())]);
         let mut forget = |known: &[&str]| {
             PerSession {
                 tags: &mut tags,
                 groups: &mut groups,
                 unread: &mut unread,
+                notes: &mut notes,
             }
             .forget_unknown(known.iter().copied())
         };
@@ -126,6 +142,7 @@ mod tests {
             Assignments::from([("a".to_string(), "G".to_string())])
         );
         assert_eq!(unread, BTreeSet::from(["a".to_string()]));
+        assert!(notes.is_empty());
     }
 
     #[test]
@@ -143,6 +160,7 @@ mod tests {
         assert!(state.groups.is_empty());
         assert!(state.recent_groups.is_empty());
         assert!(state.unread.is_empty());
+        assert!(state.notes.is_empty());
         assert_eq!(state.windows, ["a"]);
     }
 }

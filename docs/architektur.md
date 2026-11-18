@@ -27,7 +27,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild). Gezeichnet wird nur nach Ereignissen, neuer Ausgabe oder geändertem Zustand (`App::tick` meldet das), sonst alle 120 ms bei Spinnern bzw. jede Sekunde; die Sessionliste baut `App::tick` nur nach Änderungen bzw. sekündlich neu |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
 | `windows.rs` | welche Session in welchem Fenster liegt (4 feste Plätze, auch mit Lücken; Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
-| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil` |
+| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil`; Innenfläche eines Fensters, aufgeteilt in Terminal und Notizzeilen (bis 5, höchstens ein Drittel der Höhe; `window_content` — einzige Quelle für Zeichnen, PTY-Größe und Mauszellen) |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter. `ENTRIES` ist die gemeinsame Tabelle der Menüpunkte (Taste, Beschriftung, Hilfetext) für Menü und Hilfe |
 | `help.rs` | Hilfeseite (`Ctrl+A h`): Aufbau, Zustände, alle Tasten, Menüpunkte aus `menu::ENTRIES`, Maus; Umbruch nach Anzeigebreite und Scrollen |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
@@ -36,8 +36,9 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis; sichtbare Zeilen (Überschriften und, sofern nicht eingeklappt, Sessions) und der Listen-Cursor, der auf einer Session oder einer Überschrift steht |
 | `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |
 | `grouppick.rs` | Gruppen-Dialog (`Ctrl+A g`): Eingabe eines neuen Namens, Auswahl aus „None“ und vorhandenen bzw. zuletzt verwendeten Gruppen |
-| `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik), und Sessions, die Claude Code als Hintergrund-Job mit neuer ID weiterführt (`parkedJobId` → `jobId`); claude-tui übernimmt dann die neue ID samt Nummer und Gruppe und blendet das alte Protokoll aus (`state.json`, `superseded`) |
-| `state.rs` | Fensterlayout (Claude-ID je Fensterplatz, Fokus, Sessionliste ausgeblendet, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte, ungelesene Sessions) als `state.json` für den Neustart |
+| `noteedit.rs` | Notiz-Editor (`Ctrl+A t`): mehrzeiliger Text mit Cursor; Enter speichert, leerer Text oder `Ctrl+D` entfernt die Notiz |
+| `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik), und Sessions, die Claude Code als Hintergrund-Job mit neuer ID weiterführt (`parkedJobId` → `jobId`); claude-tui übernimmt dann die neue ID samt Nummer, Gruppe und Notiz und blendet das alte Protokoll aus (`state.json`, `superseded`) |
+| `state.rs` | Fensterlayout (Claude-ID je Fensterplatz, Fokus, Sessionliste ausgeblendet, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte, ungelesene Sessions, Notizen) als `state.json` für den Neustart |
 | `tags.rs` | Schnellwahl-Nummern 1–9 → Claude-ID: vergeben, umhängen, entfernen (`Alt+Zahl` / `Ctrl+Zahl`) |
 | `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
@@ -164,7 +165,7 @@ nächste Event mit anderer (gültiger) `session_id` als Wechsel.
 Ohne vorheriges `SessionEnd` zählt eine andere ID nicht: Auch die Hooks einer von Claude in den
 Hintergrund verlegten Session (siehe [Extern laufende Sessions](#extern-laufende-sessions)) kommen
 unter der Start-ID an. `App::follow_switch` führt Fenster und Liste dann unter der neuen ID; die
-alte bleibt als gespeicherte Session in der Liste. Schnellwahl-Nummer und Gruppe wandern nur bei
+alte bleibt als gespeicherte Session in der Liste. Schnellwahl-Nummer, Gruppe und Notiz wandern nur bei
 `/clear` mit (dieselbe Arbeit), bei `/resume` bleiben sie bei der alten Session. Das nächste Event ist in der Regel der
 weitergeleitete `SessionStart` des Wechsels selbst. Läuft die neue Session schon in einem anderen Fenster von claude-tui, wird der
 Wechsel ignoriert.

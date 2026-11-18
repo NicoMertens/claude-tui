@@ -27,6 +27,11 @@ pub const SELECTED_FG: Color = ON_ACCENT;
 pub const TEXT: Color = Color::Rgb(0xEC, 0xE9, 0xE4);
 pub const MUTED: Color = Color::Rgb(0x8C, 0x88, 0x82);
 
+/// Notizen: Zeile unten im Fenster und ✎ in der Sessionliste.
+pub const NOTE: Color = Color::Rgb(0xFF, 0x8C, 0x00);
+/// Kennzeichnet Sessions mit Notiz. Einfach breit und unter Windows kein Emoji (anders als ✏).
+pub const NOTE_ICON: &str = "✎";
+
 pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 /// Rot für „arbeitet“ (Fensterleiste und Sessionliste).
 const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);

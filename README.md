@@ -29,6 +29,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
   der letzten Aktivität bzw. Wartezeit.
 - Titel in der Farbe aus Claudes **`/color`**.
 - **Eigene Gruppen** (⚑) unabhängig vom Verzeichnis.
+- **Notizen** je Session (`Ctrl+A t`): mehrzeilig unten im Fenster, `✎` in der Liste.
 - Abschnitte mit **Anzahl** der Sessions, **einklappbar** (`←`/`→`, Menü); eingeklappt zeigt die
   Überschrift den dringlichsten Zustand.
 - **Schnellwahl:** `Alt+1`–`9` gibt einer Session eine Nummer, `Ctrl+1`–`9` springt zu ihr.
@@ -62,7 +63,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 **Start und Wiederherstellen**
 
 - Beim Start kommen die Sessions des letzten Laufs in ihre Fenster zurück, samt Fokus, Layout,
-  Gruppen und Schnellwahl-Nummern.
+  Gruppen, Notizen und Schnellwahl-Nummern.
 - Die Claude-Prozesse starten **nacheinander**, damit sie sich nicht gegenseitig ausbremsen.
 - Eigener Startbefehl möglich, z. B. `claude-tui "claude --model opus"`.
 - Zeitmessung für die Fehlersuche mit `CLAUDE_TUI_TRACE=1`.

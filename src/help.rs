@@ -41,7 +41,7 @@ const OVERVIEW: &[Row] = &[
          of its running sessions in front of its heading.",
     ),
     Text(
-        "Each row shows state, title, quick number (#3), window number ([1]) and the time since \
+        "Each row shows state, title, a ✎ if it has a note, quick number (#3), window number          ([1]) and the time since \
          the last activity. A /color set in Claude colours the title.",
     ),
     Heading("Windows"),
@@ -67,6 +67,10 @@ const OVERVIEW: &[Row] = &[
         "Saved, not running; opening resumes it (▲ if its answer is unread)",
     ),
     Key("⇄ elsewhere", "Runs outside claude-tui; opening asks first"),
+    Key(
+        "✎ note",
+        "The session has a note (Ctrl+A t); a window shows it at the bottom (up to 5 lines)",
+    ),
 ];
 
 const KEYS: &[Row] = &[
@@ -124,6 +128,10 @@ const KEYS: &[Row] = &[
         "Window picker: replace this window, or open a new one",
     ),
     Key("d / w / m", "Delete older than a day / week / month"),
+    Key(
+        "Note editor",
+        "Enter saves, Shift+Enter or Ctrl+J starts a new line, Ctrl+D or saving empty text          removes the note",
+    ),
     Key(
         "Typing",
         "Directory or group name; in groups it also filters",

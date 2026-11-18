@@ -1,6 +1,6 @@
 //! Geometrie der Fenster: Anordnung der festen Fensterplätze 1–4 und Nachbarsuche für Ctrl+Pfeil.
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 
 use crate::windows::MAX_WINDOWS;
 
@@ -56,6 +56,33 @@ pub fn visible(
         Some(slot) if occupied.get(slot) == Some(&true) => vec![(slot, area)],
         _ => windows(area, occupied),
     }
+}
+
+/// Höchstens so viele Notizzeilen stehen unten im Fenster.
+pub const NOTE_MAX_ROWS: usize = 5;
+
+/// Innenfläche eines Fensters: der Teil für das Terminal der Session und darunter `note_lines`
+/// Notizzeilen — höchstens [`NOTE_MAX_ROWS`] und höchstens ein Drittel der Höhe, damit Claude
+/// genug Platz behält. Bleibt keine Zeile übrig, entfällt die Notiz.
+pub fn window_content(rect: Rect, note_lines: usize) -> (Rect, Option<Rect>) {
+    let inner = rect.inner(Margin::new(1, 1));
+    let rows = note_lines
+        .min(NOTE_MAX_ROWS)
+        .min(usize::from(inner.height) / 3);
+    let rows = u16::try_from(rows).unwrap_or(0);
+    if rows == 0 {
+        return (inner, None);
+    }
+    let term = Rect {
+        height: inner.height - rows,
+        ..inner
+    };
+    let note = Rect {
+        y: term.bottom(),
+        height: rows,
+        ..inner
+    };
+    (term, Some(note))
 }
 
 fn halves_horizontal(area: Rect) -> [Rect; 2] {
@@ -200,6 +227,21 @@ mod tests {
         assert_eq!(visible(AREA, occupied, Some(1)), [(1, AREA)]);
         assert_eq!(visible(AREA, occupied, None), windows(AREA, occupied));
         assert_eq!(visible(AREA, occupied, Some(3)).len(), 3, "nicht offen");
+    }
+
+    #[test]
+    fn note_takes_the_last_inner_rows() {
+        let rect = Rect::new(10, 5, 30, 12);
+        let inner = Rect::new(11, 6, 28, 10);
+        assert_eq!(window_content(rect, 0), (inner, None));
+        let (term, note) = window_content(rect, 2);
+        assert_eq!(term, Rect::new(11, 6, 28, 8));
+        assert_eq!(note, Some(Rect::new(11, 14, 28, 2)));
+        let height = |rect, lines| window_content(rect, lines).1.map(|r| r.height);
+        assert_eq!(height(rect, 9), Some(3), "höchstens ein Drittel");
+        let tall = Rect::new(0, 0, 30, 50);
+        assert_eq!(height(tall, 9), Some(NOTE_MAX_ROWS as u16));
+        assert_eq!(height(Rect::new(0, 0, 30, 4), 1), None, "zu niedrig");
     }
 
     #[test]

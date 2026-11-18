@@ -16,6 +16,7 @@ use crate::{
     keys,
     list::{self, Cursor, Entry, Group, Heading, Row},
     menu::Menu,
+    noteedit::NoteEditor,
     session::Status,
     tags,
     term_view::TermView,
@@ -397,8 +398,13 @@ fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'s
     let marked = app.marked.contains(&entry.claude_id);
     let mark = if marked { "✓ " } else { "" };
     let tag = tag_label(app, &entry.claude_id);
-    // Symbol + Leerzeichen, Häkchen, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
-    let title_width = width.saturating_sub(2 + mark.chars().count() + tag.chars().count() + 4 + 6);
+    let note = match app.note_of(&entry.claude_id) {
+        Some(_) => format!(" {}", theme::NOTE_ICON),
+        None => String::new(),
+    };
+    // Symbol + Leerzeichen, Häkchen, Notiz, Fensterspalte, Leerzeichen + Zeit (max. 5 Zeichen).
+    let fixed = 2 + mark.chars().count() + note.chars().count() + tag.chars().count() + 4 + 6;
+    let title_width = width.saturating_sub(fixed);
     let title = head(&entry.title, title_width);
     let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
 
@@ -419,6 +425,7 @@ fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'s
         Span::styled(format!("{symbol} "), Style::default().fg(color)),
         Span::styled(mark, Style::default().fg(theme::MENU)),
         Span::styled(format!("{title}{padding}"), name_style),
+        Span::styled(note, Style::default().fg(theme::NOTE)),
         Span::styled(tag, tag_style()),
         Span::styled(window, Style::default().fg(window_color)),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
@@ -472,19 +479,32 @@ fn draw_overlay(f: &mut Frame, app: &App) {
         draw_help(f, app, help);
         return;
     }
-    let (title, rows, content_width) = match (&app.dir_picker, &app.group_picker, &app.menu) {
-        (Some(picker), _, _) => (
+    let overlays = (
+        &app.dir_picker,
+        &app.group_picker,
+        &app.note_editor,
+        &app.menu,
+    );
+    let (title, rows, content_width) = match overlays {
+        (Some(picker), ..) => (
             "Directory".to_string(),
             dir_picker_rows(picker),
             dir_picker_width(picker),
         ),
-        (None, Some(picker), _) => (
+        (None, Some(picker), ..) => (
             picker.title.clone(),
             group_picker_lines(picker, 0).len(),
             group_picker_width(picker),
         ),
-        (None, None, Some(menu)) => (menu.title.clone(), menu.items.len() + 1, menu_width(menu)),
-        (None, None, None) => {
+        (None, None, Some(editor), _) => (
+            editor.title.clone(),
+            note_editor_rows(editor),
+            note_editor_width(editor),
+        ),
+        (None, None, None, Some(menu)) => {
+            (menu.title.clone(), menu.items.len() + 1, menu_width(menu))
+        }
+        (None, None, None, None) => {
             app.overlay.set(None);
             return;
         }
@@ -508,11 +528,12 @@ fn draw_overlay(f: &mut Frame, app: &App) {
         u16::try_from(height).unwrap_or(u16::MAX),
     );
     let inner_width = area.width.saturating_sub(2) as usize;
-    let lines = match (&app.dir_picker, &app.group_picker, &app.menu) {
-        (Some(picker), _, _) => dir_picker_lines(picker, inner_width),
-        (None, Some(picker), _) => group_picker_lines(picker, inner_width),
-        (None, None, Some(menu)) => menu_lines(menu, inner_width),
-        (None, None, None) => Vec::new(),
+    let lines = match overlays {
+        (Some(picker), ..) => dir_picker_lines(picker, inner_width),
+        (None, Some(picker), ..) => group_picker_lines(picker, inner_width),
+        (None, None, Some(editor), _) => note_editor_lines(editor, inner_width),
+        (None, None, None, Some(menu)) => menu_lines(menu, inner_width),
+        (None, None, None, None) => Vec::new(),
     };
     f.render_widget(Clear, area);
     draw_panel(f, &title, lines, area);
@@ -685,6 +706,87 @@ fn group_picker_width(picker: &GroupPicker) -> usize {
         .max(GROUP_PICKER_MIN_WIDTH)
 }
 
+/// Zwei Zeilen, damit der Hinweis auch über der Sessionliste ganz zu sehen ist.
+const NOTE_EDITOR_HINT: [&str; 2] = [
+    "Enter save · Shift+Enter new line",
+    "Ctrl+D remove · Esc cancel",
+];
+/// Höhe des Textfelds: mindestens so viele Zeilen, höchstens so viele sichtbar; längere Notizen
+/// scrollen mit dem Cursor.
+const NOTE_EDITOR_MIN_ROWS: usize = 6;
+const NOTE_EDITOR_MAX_ROWS: usize = 12;
+/// Gewünschte Breite des Textfelds; schmaler, wenn der Platz fehlt.
+const NOTE_EDITOR_MIN_WIDTH: usize = 64;
+
+fn note_editor_text_rows(editor: &NoteEditor) -> usize {
+    editor
+        .lines()
+        .len()
+        .clamp(NOTE_EDITOR_MIN_ROWS, NOTE_EDITOR_MAX_ROWS)
+}
+
+/// Leerzeile, Textfeld, Leerzeile, Hinweis, Leerzeile.
+fn note_editor_rows(editor: &NoteEditor) -> usize {
+    note_editor_text_rows(editor) + NOTE_EDITOR_HINT.len() + 3
+}
+
+/// Textfeld samt Cursorzelle und je einer Spalte Abstand links und rechts.
+fn note_editor_width(editor: &NoteEditor) -> usize {
+    let longest = editor
+        .lines()
+        .iter()
+        .map(|l| l.chars().count() + 1)
+        .max()
+        .unwrap_or(0);
+    longest.max(NOTE_EDITOR_MIN_WIDTH) + 2
+}
+
+/// Inhalt des Notiz-Editors mit einer Zeile bzw. Spalte Abstand zum Rahmen.
+fn note_editor_lines(editor: &NoteEditor, width: usize) -> Vec<Line<'static>> {
+    let width = width.saturating_sub(2).max(1);
+    let (row, col) = editor.cursor_position();
+    let rows = note_editor_text_rows(editor);
+    let first = (row + 1).saturating_sub(rows);
+    let text = editor.lines();
+    let mut lines = vec![Line::default()];
+    lines.extend((first..first + rows).map(|i| {
+        let line = text.get(i).copied().unwrap_or_default();
+        let mut spans = vec![Span::raw(" ")];
+        spans.extend(note_editor_spans(line, (i == row).then_some(col), width));
+        Line::from(spans)
+    }));
+    lines.push(Line::default());
+    lines.extend(NOTE_EDITOR_HINT.map(|hint| muted(&format!(" {hint}"))));
+    lines.push(Line::default());
+    lines
+}
+
+/// Eine Zeile des Textfelds; `cursor` = Spalte des Cursors (invertierte Zelle), falls er in dieser
+/// Zeile steht. Die Cursorzeile wird so weit nach links geschoben, dass der Cursor sichtbar bleibt;
+/// die übrigen Zeilen werden rechts gekürzt.
+fn note_editor_spans(text: &str, cursor: Option<usize>, width: usize) -> Vec<Span<'static>> {
+    let text_style = Style::default().fg(theme::TEXT);
+    let Some(col) = cursor else {
+        return vec![Span::styled(head(text, width), text_style)];
+    };
+    let chars: Vec<char> = text.chars().collect();
+    let start = (col + 1).saturating_sub(width);
+    let before: String = chars[start..col].iter().collect();
+    let at = chars
+        .get(col)
+        .map_or_else(|| " ".to_string(), char::to_string);
+    let after: String = chars
+        .iter()
+        .skip(col + 1)
+        .take(width.saturating_sub(col - start + 1))
+        .collect();
+    vec![
+        Span::styled(before, text_style),
+        Span::styled(at, Style::default().fg(theme::ON_ACCENT).bg(theme::ACCENT)),
+        Span::styled(after, text_style),
+    ]
+}
+
 /// Schnellwahl-Nummer vor dem Titel (`#3 `), leer ohne Nummer.
 fn tag_label(app: &App, claude_id: &str) -> String {
     tags::number_of(&app.tags, claude_id).map_or_else(String::new, |n| format!("#{n} "))
@@ -694,6 +796,37 @@ fn tag_style() -> Style {
     Style::default()
         .fg(theme::MENU)
         .add_modifier(Modifier::BOLD)
+}
+
+/// Notizzeilen unten im Fenster: `✎` vor der ersten, die übrigen eingerückt. Passt die Notiz
+/// nicht in `rows`, trägt die letzte Zeile die Zahl der fehlenden.
+fn note_lines(note: &str, width: usize, rows: usize) -> Vec<Line<'static>> {
+    let lines: Vec<&str> = note.lines().collect();
+    let hidden = lines.len().saturating_sub(rows);
+    let style = Style::default().fg(theme::NOTE);
+    lines
+        .iter()
+        .take(rows)
+        .enumerate()
+        .map(|(i, text)| {
+            let prefix = if i == 0 {
+                format!("{} ", theme::NOTE_ICON)
+            } else {
+                "  ".to_string()
+            };
+            let more = if hidden > 0 && i + 1 == rows {
+                format!(" (+{hidden})")
+            } else {
+                String::new()
+            };
+            let text_width = width.saturating_sub(prefix.chars().count() + more.chars().count());
+            Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(head(text, text_width), style),
+                Span::styled(more, Style::default().fg(theme::MUTED)),
+            ])
+        })
+        .collect()
 }
 
 fn draw_windows(f: &mut Frame, app: &App) {
@@ -768,8 +901,12 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 Style::default().fg(theme::WAITING),
             )));
         }
-        let inner = block.inner(rect);
         f.render_widget(block, rect);
+        let (inner, note_row) = app.window_content(id, rect);
+        if let (Some(area), Some(note)) = (note_row, app.note_of(&session.claude_id)) {
+            let lines = note_lines(note, area.width as usize, area.height as usize);
+            f.render_widget(Paragraph::new(lines), area);
+        }
         // Bis Claude etwas anzeigt, steht im Fenster, worauf es wartet — sonst wirkt es hängend.
         let waiting_text = if session.is_pending() {
             Some("queued – starts after the previous window".to_string())
@@ -808,6 +945,13 @@ mod tests {
     use super::*;
 
     const WINDOWS: Rect = Rect::new(42, 0, 100, 40);
+
+    #[test]
+    fn note_editor_fits_over_the_session_list() {
+        // Rahmen und je eine Spalte Abstand links und rechts.
+        let inner = SIDEBAR_WIDTH as usize - 2 - 2;
+        assert!(NOTE_EDITOR_HINT.iter().all(|h| h.chars().count() <= inner));
+    }
 
     #[test]
     fn overlay_is_centered_in_target() {

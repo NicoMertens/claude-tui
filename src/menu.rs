@@ -32,6 +32,8 @@ pub enum Action {
     ToggleZoom,
     /// Gruppen-Dialog für die Session mit Fokus bzw. die markierten Sessions öffnen.
     SetGroup,
+    /// Notiz-Editor für die Session mit Fokus bzw. die in der Liste gewählte öffnen.
+    EditNote,
     /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
     ToggleCollapsed,
     /// Alle Abschnitte einklappen (`true`) bzw. ausklappen.
@@ -99,6 +101,11 @@ pub const GROUP: Entry = entry(
     "Group …",
     "Put the session (in the list: all marked) into a group; None removes it",
 );
+pub const NOTE: Entry = entry(
+    't',
+    "Note …",
+    "Write, edit or remove the note of the session; it shows at the bottom of its window and as ✎ in the list",
+);
 pub const COLLAPSE: Entry = Entry {
     hotkey: 'f',
     keys: "f / ← →",
@@ -146,11 +153,12 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 14] = [
+pub const ENTRIES: [&Entry; 15] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
     &GROUP,
+    &NOTE,
     &COLLAPSE,
     &COLLAPSE_ALL,
     &EXPAND_ALL,
@@ -257,6 +265,10 @@ impl Menu {
             add(&GROUP, &label, Action::SetGroup);
         } else if in_window || ctx.has_selection {
             add(&GROUP, GROUP.label, Action::SetGroup);
+        }
+        // Gilt immer der einen Session mit Fokus bzw. Auswahl, nie den markierten.
+        if in_window || ctx.has_selection {
+            add(&NOTE, NOTE.label, Action::EditNote);
         }
         if let (false, Some(collapsed)) = (in_window, ctx.collapsed) {
             let label = if collapsed {
