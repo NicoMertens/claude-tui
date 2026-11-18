@@ -27,7 +27,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 **Sessionliste**
 
 - Alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`), gruppiert nach Arbeitsverzeichnis,
-  laufende zuerst.
+  laufende zuerst (in Startreihenfolge, springen also nicht).
 - Je Session: Zustand, Titel (`/rename`, KI-Titel oder letzter Prompt), Fensternummer und Zeit seit
   der letzten Aktivität bzw. Wartezeit.
 - Titel in der Farbe aus Claudes **`/color`**.

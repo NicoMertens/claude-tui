@@ -86,8 +86,8 @@ pub struct Group {
 pub const NEW_SESSION_TITLE: &str = "new session";
 
 /// Baut die Abschnitte. Reihenfolge: eigene Gruppen (`assigned`) alphabetisch, danach die
-/// Verzeichnisse alphabetisch; darin laufende Sessions zuerst, dann nach letzter Aktivität. `external`: Claude-IDs, die außerhalb von claude-tui
-/// laufen.
+/// Verzeichnisse alphabetisch; darin laufende Sessions zuerst (in Startreihenfolge), dann nach
+/// letzter Aktivität. `external`: Claude-IDs, die außerhalb von claude-tui laufen.
 pub fn build(
     stored: Vec<StoredSession>,
     running: &[Running],
@@ -147,7 +147,7 @@ pub fn build(
         }
     }
     for group in &mut groups {
-        group.entries.sort_by_key(|e| std::cmp::Reverse(rank(e)));
+        group.entries.sort_by(order);
     }
     groups.sort_by(|a, b| match (&a.heading, &b.heading) {
         (Heading::Group(x), Heading::Group(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
@@ -158,9 +158,15 @@ pub fn build(
     groups
 }
 
-/// Sortierschlüssel: laufend vor gespeichert, dann jüngste Aktivität zuerst.
-fn rank(entry: &Entry) -> (bool, Option<SystemTime>) {
-    (entry.running.is_some(), entry.modified)
+/// Reihenfolge im Abschnitt: laufende zuerst, untereinander in Startreihenfolge (stabil, sonst
+/// springen sie bei jeder Ausgabe); danach gespeicherte, jüngste Aktivität zuerst.
+fn order(a: &Entry, b: &Entry) -> std::cmp::Ordering {
+    match (a.running, b.running) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.modified.cmp(&a.modified),
+    }
 }
 
 /// Vergleichsschlüssel eines Verzeichnisses; unter Windows ohne Groß-/Kleinschreibung.
@@ -256,6 +262,40 @@ mod tests {
         assert_eq!(dirs, [dir("/x"), dir("/y")]);
         let ids: Vec<_> = flatten(&groups).map(|e| e.claude_id.as_str()).collect();
         assert_eq!(ids, ["b", "c", "a"]);
+    }
+
+    #[test]
+    fn running_sessions_keep_start_order_regardless_of_activity() {
+        let running = [
+            Running {
+                id: 1,
+                claude_id: "alt".into(),
+                cwd: "/x".into(),
+            },
+            Running {
+                id: 2,
+                claude_id: "jung".into(),
+                cwd: "/x".into(),
+            },
+        ];
+        let ids = |alt_age, jung_age| {
+            let groups = build(
+                vec![
+                    stored("alt", "/x", alt_age),
+                    stored("jung", "/x", jung_age),
+                    stored("ruht", "/x", 0),
+                ],
+                &running,
+                &HashSet::new(),
+                &Assignments::new(),
+            );
+            flatten(&groups)
+                .map(|e| e.claude_id.clone())
+                .collect::<Vec<_>>()
+        };
+        // Wer zuletzt geschrieben hat, ändert nichts an der Reihenfolge der laufenden.
+        assert_eq!(ids(5, 50), ["alt", "jung", "ruht"]);
+        assert_eq!(ids(50, 5), ["alt", "jung", "ruht"]);
     }
 
     #[test]

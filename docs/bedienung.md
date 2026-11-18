@@ -75,7 +75,8 @@ Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/
 oben steht der [Notizblock](#notizblock) (`✎ Notepad (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾, alphabetisch). Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
-stehen laufende Sessions zuerst, danach die übrigen nach letzter Aktivität. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
+stehen laufende Sessions zuerst (in der Reihenfolge, in der sie gestartet wurden, damit sie
+nicht bei jeder Ausgabe springen), danach die übrigen nach letzter Aktivität. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
 sonst der letzte Prompt), Schnellwahl-Nummer (`#3`, falls vergeben, siehe
 [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)), Fensternummer (`[1]`, falls sichtbar) und die Zeit seit der letzten
 Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wartezeit. Laufende Sessions ohne Fenster
