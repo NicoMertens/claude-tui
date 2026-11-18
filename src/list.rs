@@ -1,5 +1,5 @@
 //! Sessionliste: gespeicherte Claude-Sessions und laufende Prozesse, oben eigene Gruppen
-//! (alphabetisch), darunter nach Verzeichnis.
+//! (alphabetisch), darunter nach Verzeichnis (ebenfalls alphabetisch).
 
 use std::{
     collections::{hash_map::Entry as MapEntry, BTreeSet, HashMap, HashSet},
@@ -86,8 +86,7 @@ pub struct Group {
 pub const NEW_SESSION_TITLE: &str = "new session";
 
 /// Baut die Abschnitte. Reihenfolge: eigene Gruppen (`assigned`) alphabetisch, danach die
-/// Verzeichnisse nach jüngster Aktivität (laufend zählt als jetzt); darin laufende Sessions
-/// zuerst, dann nach letzter Aktivität. `external`: Claude-IDs, die außerhalb von claude-tui
+/// Verzeichnisse alphabetisch; darin laufende Sessions zuerst, dann nach letzter Aktivität. `external`: Claude-IDs, die außerhalb von claude-tui
 /// laufen.
 pub fn build(
     stored: Vec<StoredSession>,
@@ -154,10 +153,7 @@ pub fn build(
         (Heading::Group(x), Heading::Group(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
         (Heading::Group(_), Heading::Dir(_)) => std::cmp::Ordering::Less,
         (Heading::Dir(_), Heading::Group(_)) => std::cmp::Ordering::Greater,
-        (Heading::Dir(_), Heading::Dir(_)) => {
-            let newest = |g: &Group| g.entries.first().map(rank);
-            newest(b).cmp(&newest(a))
-        }
+        (Heading::Dir(x), Heading::Dir(y)) => dir_key(x).cmp(&dir_key(y)),
     });
     groups
 }
@@ -245,12 +241,12 @@ mod tests {
     }
 
     #[test]
-    fn groups_by_directory_newest_first() {
+    fn directories_alphabetical_sessions_newest_first() {
         let groups = build(
             vec![
-                stored("a", "/x", 50),
-                stored("b", "/y", 10),
-                stored("c", "/x", 5),
+                stored("a", "/y", 50),
+                stored("b", "/x", 100),
+                stored("c", "/y", 5),
             ],
             &[],
             &HashSet::new(),
@@ -259,7 +255,7 @@ mod tests {
         let dirs: Vec<_> = groups.iter().map(|g| g.heading.clone()).collect();
         assert_eq!(dirs, [dir("/x"), dir("/y")]);
         let ids: Vec<_> = flatten(&groups).map(|e| e.claude_id.as_str()).collect();
-        assert_eq!(ids, ["c", "a", "b"]);
+        assert_eq!(ids, ["b", "c", "a"]);
     }
 
     #[test]
@@ -283,8 +279,9 @@ mod tests {
             &external,
             &Assignments::new(),
         );
-        // Gruppen mit laufenden Sessions stehen vor rein gespeicherten.
-        assert_eq!(groups.last().map(|g| g.heading.clone()), Some(dir("/y")));
+        // Verzeichnisse alphabetisch, auch wenn darin Sessions laufen.
+        let dirs: Vec<_> = groups.iter().map(|g| g.heading.clone()).collect();
+        assert_eq!(dirs, [dir("/x"), dir("/y"), dir("/z")]);
         let neu = flatten(&groups)
             .find(|e| e.claude_id == "neu")
             .expect("neu");
@@ -342,9 +339,9 @@ mod tests {
         assert_eq!(
             cursors,
             [
-                Cursor::Heading(dir("/y").key()),
                 Cursor::Heading(dir("/x").key()),
                 Cursor::Session("a".into()),
+                Cursor::Heading(dir("/y").key()),
             ]
         );
         assert_eq!(

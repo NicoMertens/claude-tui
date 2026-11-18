@@ -33,7 +33,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
 | `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session; Lesestand als `sessions-cache.json`, beim Start im Hintergrund nachgelesen |
-| `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis; sichtbare Zeilen (Überschriften und, sofern nicht eingeklappt, Sessions) und der Listen-Cursor, der auf einer Session oder einer Überschrift steht |
+| `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis (ebenfalls alphabetisch, Sessions darin zeitlich); sichtbare Zeilen (Überschriften und, sofern nicht eingeklappt, Sessions) und der Listen-Cursor, der auf einer Session oder einer Überschrift steht |
 | `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |
 | `grouppick.rs` | Gruppen-Dialog (`Ctrl+A g`): Eingabe eines neuen Namens, Auswahl aus „None“ und vorhandenen bzw. zuletzt verwendeten Gruppen |
 | `textbuf.rs` | Text mit Cursor für Notiz-Editor und Notizblock: Einfügen, Löschen, Cursor links/rechts, Bereinigen eingefügten Texts (AltGr-Regel wie bei der Session) |
