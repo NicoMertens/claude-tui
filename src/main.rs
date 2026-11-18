@@ -15,6 +15,7 @@ mod list;
 mod menu;
 mod mouse;
 mod noteedit;
+mod notepad;
 mod paths;
 mod recent;
 mod selection;
@@ -22,6 +23,7 @@ mod session;
 mod state;
 mod tags;
 mod term_view;
+mod textbuf;
 mod theme;
 mod trace;
 mod ui;
@@ -163,7 +165,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
         }
     }
     app.save_cache();
-    Ok(())
+    app.save_notepad()
 }
 
 /// Verarbeitet ein Ereignis; `true`, wenn sich dadurch etwas geändert haben kann.

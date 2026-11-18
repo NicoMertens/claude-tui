@@ -1,8 +1,11 @@
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState,
+    },
     Frame,
 };
 
@@ -13,7 +16,7 @@ use crate::{
     dirpick::DirPicker,
     grouppick::{Choice, GroupPicker},
     help::{self, Help},
-    keys,
+    keys, layout,
     list::{self, Cursor, Entry, Group, Heading, Row},
     menu::Menu,
     noteedit::NoteEditor,
@@ -21,7 +24,7 @@ use crate::{
     tags,
     term_view::TermView,
     theme, update,
-    windows::Focus,
+    windows::{Focus, Pane},
 };
 
 const SIDEBAR_WIDTH: u16 = 42;
@@ -234,6 +237,17 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     // Je Bildschirmzeile die Listenzeile dahinter; `None` = Leerzeile zwischen Abschnitten.
     let mut cursors: Vec<Option<Cursor>> = Vec::with_capacity(rows.len());
     let mut selected_item = None;
+    let notepad_selected = selected == Some(Cursor::Notepad);
+    if notepad_selected {
+        selected_item = Some(0);
+    }
+    let line = notepad_line(app, width);
+    items.push(if notepad_selected {
+        selected_item_of(line, focused)
+    } else {
+        ListItem::new(line)
+    });
+    cursors.push(Some(Cursor::Notepad));
     for row in &rows {
         if matches!(row, Row::Heading(_)) && !items.is_empty() {
             items.push(ListItem::new(Line::default()));
@@ -255,7 +269,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
         });
         cursors.push(Some(cursor));
     }
-    if app.loading() && items.is_empty() {
+    if app.loading() && rows.is_empty() {
         items.push(ListItem::new(muted("loading sessions …")));
     }
     let mut state = ListState::default().with_selected(selected_item);
@@ -429,6 +443,33 @@ fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'s
         Span::styled(tag, tag_style()),
         Span::styled(window, Style::default().fg(window_color)),
         Span::styled(format!(" {time:>5}"), Style::default().fg(theme::MUTED)),
+    ])
+}
+
+/// Zeile des Notizblocks ganz oben in der Liste: `✎ Notepad (Zeilen)` und wie bei einer Session
+/// die Fensternummer, falls er sichtbar ist.
+fn notepad_line(app: &App, width: usize) -> Line<'static> {
+    let window = match app.windows.slot_of(Pane::Notepad) {
+        Some(s) => format!(" [{}]", s + 1),
+        None => " ".repeat(4),
+    };
+    // Symbol + Leerzeichen, Fensterspalte, Platz der Zeitspalte wie bei den Sessions.
+    let title_width = width.saturating_sub(2 + 4 + 6);
+    let title = head(
+        &format!("Notepad ({})", app.notepad.line_count()),
+        title_width,
+    );
+    let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", theme::NOTE_ICON),
+            Style::default().fg(theme::NOTE),
+        ),
+        Span::styled(
+            format!("{title}{padding}"),
+            Style::default().fg(theme::TEXT),
+        ),
+        Span::styled(window, Style::default().fg(theme::TEXT)),
     ])
 }
 
@@ -838,16 +879,23 @@ fn draw_windows(f: &mut Frame, app: &App) {
         f.render_widget(text.block(rounded(theme::UNFOCUS)), area);
         return;
     }
-    for (slot, id, rect) in rects {
+    for (slot, pane, rect) in rects {
         // Die Fensterrechtecke stammen aus der zuletzt gemeldeten Größe; ist das Terminal
         // inzwischen kleiner, nur den sichtbaren Teil zeichnen.
         let rect = rect.intersection(f.area());
-        let Some(session) = app.session(id) else {
-            continue;
-        };
         if rect.is_empty() {
             continue;
         }
+        let id = match pane {
+            Pane::Session(id) => id,
+            Pane::Notepad => {
+                draw_notepad(f, app, slot, rect);
+                continue;
+            }
+        };
+        let Some(session) = app.session(id) else {
+            continue;
+        };
         let focused = app.windows.focus() == Focus::Window(slot);
         let color = frame_color(focused);
         let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
@@ -892,15 +940,7 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 .right_aligned(),
             );
         }
-        // Ohne Sessionliste fehlt deren Hinweiszeile; der Hinweis steht dann unten im Fenster
-        // mit Fokus.
-        if let Some(notice) = app.notice.as_deref().filter(|_| app.list_hidden && focused) {
-            let width = (rect.width as usize).saturating_sub(4);
-            block = block.title_bottom(Line::from(Span::styled(
-                format!(" {} ", head(notice, width)),
-                Style::default().fg(theme::WAITING),
-            )));
-        }
+        block = with_notice(block, app, focused, rect);
         f.render_widget(block, rect);
         let (inner, note_row) = app.window_content(id, rect);
         if let (Some(area), Some(note)) = (note_row, app.note_of(&session.claude_id)) {
@@ -937,6 +977,69 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 .selection(selection),
             inner,
         );
+    }
+}
+
+/// Ohne Sessionliste fehlt deren Hinweiszeile; der Hinweis steht dann unten im Fenster mit Fokus.
+fn with_notice<'a>(block: Block<'a>, app: &App, focused: bool, rect: Rect) -> Block<'a> {
+    match app.notice.as_deref().filter(|_| app.list_hidden && focused) {
+        Some(notice) => {
+            let width = (rect.width as usize).saturating_sub(4);
+            block.title_bottom(Line::from(Span::styled(
+                format!(" {} ", head(notice, width)),
+                Style::default().fg(theme::WAITING),
+            )))
+        }
+        None => block,
+    }
+}
+
+/// Fenster mit dem Notizblock: umbrochener Text, Cursor nur mit Fokus, rechts am Rahmen eine
+/// Scrollbar, sobald der Text nicht in das Fenster passt.
+fn draw_notepad(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
+    let focused = app.windows.focus() == Focus::Window(slot);
+    let color = frame_color(focused);
+    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    let mut spans = vec![
+        Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
+        Span::styled(
+            format!("{} Notepad ", theme::NOTE_ICON),
+            title_style.fg(theme::NOTE),
+        ),
+    ];
+    if app.windows.zoomed() == Some(slot) {
+        spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
+    }
+    let block = with_notice(rounded(color).title(Line::from(spans)), app, focused, rect);
+    f.render_widget(block, rect);
+    let text = layout::notepad_text(rect);
+    if text.is_empty() {
+        return;
+    }
+    let (width, height) = (usize::from(text.width), usize::from(text.height));
+    let shown = app.notepad.render(width, height);
+    let lines: Vec<Line> = shown.lines.into_iter().map(Line::raw).collect();
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(theme::TEXT)),
+        text,
+    );
+    if let Some((row, col)) = shown.cursor.filter(|_| focused) {
+        // Am Ende einer vollen Zeile steht der Cursor auf deren letzter Spalte.
+        let x = text.x + u16::try_from(col.min(width - 1)).unwrap_or(0);
+        let y = text.y + u16::try_from(row).unwrap_or(0);
+        f.buffer_mut()[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
+    }
+    if shown.total > height {
+        let mut state = ScrollbarState::new(shown.total - height + 1)
+            .position(shown.scroll)
+            .viewport_content_length(height);
+        let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .track_style(Style::default().fg(color))
+            .thumb_style(Style::default().fg(theme::TEXT));
+        f.render_stateful_widget(bar, rect.inner(Margin::new(0, 1)), &mut state);
     }
 }
 

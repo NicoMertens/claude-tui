@@ -24,6 +24,7 @@ use crate::{
     menu::{self, Action, Context, Menu, Outcome, Purpose},
     mouse,
     noteedit::{NoteEditor, Outcome as NoteOutcome},
+    notepad::Notepad,
     recent,
     selection::{self, Cell, Selection},
     session::{self, Session, Status},
@@ -32,7 +33,7 @@ use crate::{
     trace, ui,
     update::{self, Available},
     waiting,
-    windows::{Focus, SessionId, Windows, MAX_WINDOWS},
+    windows::{Focus, Pane, SessionId, Windows, MAX_WINDOWS},
 };
 
 /// So oft wird `~/.claude/projects` nach neuen Sessions und Titeln durchsucht.
@@ -114,6 +115,8 @@ pub struct App {
     pub group_picker: Option<GroupPicker>,
     /// Notiz-Editor (Ctrl+A t).
     pub note_editor: Option<NoteEditor>,
+    /// Notizblock (Ctrl+A p); sein Text gehört keiner Session.
+    pub notepad: Notepad,
     /// Hilfeseite (Ctrl+A h).
     pub help: Option<Help>,
     pub menu: Option<Menu>,
@@ -197,6 +200,7 @@ impl App {
         hooks::start_server();
         crate::paths::restrict_config_dir();
         hooks::purge_stale();
+        let (notepad, notepad_error) = Notepad::load();
         let mut app = Self {
             sessions: Vec::new(),
             windows: Windows::default(),
@@ -211,6 +215,7 @@ impl App {
             notes: BTreeMap::new(),
             group_picker: None,
             note_editor: None,
+            notepad,
             help: None,
             menu: None,
             dir_picker: None,
@@ -250,6 +255,7 @@ impl App {
             list_hidden: false,
             next_id: 0,
         };
+        app.notice = notepad_error;
         let mut saved = state::load();
         // Vor dem Wiederherstellen übernehmen: jedes `place` speichert den Zustand neu.
         app.tags = std::mem::take(&mut saved.tags);
@@ -315,15 +321,22 @@ impl App {
                 Err(e) => self.notice = Some(format!("{e:#}")),
             }
         }
+        if let Some(slot) = saved.notepad_window.filter(|&s| s < MAX_WINDOWS) {
+            self.place_pane(Pane::Notepad, slot);
+        }
         let focus = match (saved.focus, self.windows.first()) {
-            (Some(slot), _) if self.windows.session(slot).is_some() => Focus::Window(slot),
+            (Some(slot), _) if self.windows.pane(slot).is_some() => Focus::Window(slot),
             (_, Some(first)) => Focus::Window(first),
             (_, None) => Focus::List,
         };
         self.set_focus(focus);
         self.set_list_hidden(saved.list_hidden);
-        let mut order: Vec<SessionId> = self.windows.open().map(|(_, id)| id).collect();
-        if let Some(first) = self.windows.focused_session() {
+        let mut order: Vec<SessionId> = self
+            .windows
+            .open()
+            .filter_map(|(_, pane)| pane.session())
+            .collect();
+        if let Some(first) = self.focused_session() {
             order.retain(|&id| id != first);
             order.insert(0, first);
         }
@@ -361,6 +374,11 @@ impl App {
     /// Lesestand der Protokolle sichern (beim Beenden).
     pub fn save_cache(&mut self) {
         self.store.save_cache();
+    }
+
+    /// Speichert ausstehende Änderungen am Notizblock sofort (beim Beenden).
+    pub fn save_notepad(&mut self) -> Result<()> {
+        self.notepad.save_if_due(true)
     }
 
     /// Ergebnis des Einlesens beim Start übernehmen und ein aufgeschobenes Layout wiederherstellen.
@@ -429,7 +447,7 @@ impl App {
     pub fn selected_entry(&self) -> Option<&Entry> {
         match self.visible_cursor()? {
             Cursor::Session(id) => list::flatten(&self.groups).find(|e| e.claude_id == id),
-            Cursor::Heading(_) => None,
+            Cursor::Heading(_) | Cursor::Notepad => None,
         }
     }
 
@@ -445,7 +463,7 @@ impl App {
                     Cursor::Session(id.clone())
                 })
             }
-            heading @ Cursor::Heading(_) => Some(heading.clone()),
+            other @ (Cursor::Heading(_) | Cursor::Notepad) => Some(other.clone()),
         }
     }
 
@@ -454,6 +472,7 @@ impl App {
         match self.visible_cursor()? {
             Cursor::Heading(key) => self.groups.iter().find(|g| g.heading.key() == key),
             Cursor::Session(id) => list::group_with(&self.groups, &id),
+            Cursor::Notepad => None,
         }
     }
 
@@ -471,7 +490,9 @@ impl App {
                     .and_then(|g| keys.iter().position(|k| *k == g.heading.key())),
                 false,
             ),
-            None => (None, false),
+            // Darüber gibt es nichts; nach unten geht es zur ersten Überschrift.
+            Some(Cursor::Notepad) if delta < 0 => return,
+            Some(Cursor::Notepad) | None => (None, false),
         };
         let target = match index {
             None => 0,
@@ -526,17 +547,39 @@ impl App {
         self.selected_entry().and_then(|e| e.running)
     }
 
-    /// Sichtbare Fenster als (Fensterindex, Session, Rechteck) in Nummernreihenfolge; gezoomt nur
+    /// Sichtbare Fenster als (Fensterindex, Inhalt, Rechteck) in Nummernreihenfolge; gezoomt nur
     /// das gezoomte Fenster über die ganze Fensterfläche.
-    pub fn window_rects(&self) -> Vec<(usize, SessionId, Rect)> {
+    pub fn window_rects(&self) -> Vec<(usize, Pane, Rect)> {
         layout::visible(
             ui::windows_area(self.screen, self.list_hidden),
             self.windows.occupied(),
             self.windows.zoomed(),
         )
         .into_iter()
-        .filter_map(|(slot, rect)| Some((slot, self.windows.session(slot)?, rect)))
+        .filter_map(|(slot, rect)| Some((slot, self.windows.pane(slot)?, rect)))
         .collect()
+    }
+
+    /// Sichtbare Session-Fenster wie [`Self::window_rects`], ohne den Notizblock.
+    pub fn session_rects(&self) -> Vec<(usize, SessionId, Rect)> {
+        self.window_rects()
+            .into_iter()
+            .filter_map(|(slot, pane, rect)| Some((slot, pane.session()?, rect)))
+            .collect()
+    }
+
+    /// Session im Fenster mit Fokus (`None` auch beim Notizblock).
+    fn focused_session(&self) -> Option<SessionId> {
+        self.windows.focused_pane().and_then(Pane::session)
+    }
+
+    /// Textfläche des Notizblocks, falls er sichtbar ist.
+    pub fn notepad_rect(&self) -> Option<Rect> {
+        let (_, _, rect) = self
+            .window_rects()
+            .into_iter()
+            .find(|&(_, pane, _)| pane == Pane::Notepad)?;
+        Some(layout::notepad_text(rect))
     }
 
     /// Rechteck von Fenster `slot`, falls es sichtbar ist.
@@ -564,7 +607,7 @@ impl App {
     /// Terminalfläche von Fenster `slot`, falls es sichtbar ist.
     fn term_rect(&self, slot: usize) -> Option<Rect> {
         let (_, id, rect) = self
-            .window_rects()
+            .session_rects()
             .into_iter()
             .find(|&(s, _, _)| s == slot)?;
         Some(self.window_content(id, rect).0)
@@ -603,7 +646,7 @@ impl App {
         for (id, switch) in switches {
             self.follow_switch(id, switch);
         }
-        for id in waiting::newly_waiting(changes, self.windows.focused_session()) {
+        for id in waiting::newly_waiting(changes, self.focused_session()) {
             self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
             self.ring_bell = waiting::bell_enabled();
         }
@@ -626,6 +669,9 @@ impl App {
             self.remove_process(id);
         }
         self.expire_notice();
+        if let Err(e) = self.notepad.sync() {
+            self.notice = Some(format!("{e:#}"));
+        }
         self.poll_update();
         if let Err(e) = self.poll_store_load() {
             self.notice = Some(format!("{e:#}"));
@@ -842,6 +888,7 @@ impl App {
         let valid = match &self.cursor {
             Some(Cursor::Session(id)) => listed.contains(id.as_str()),
             Some(Cursor::Heading(key)) => self.groups.iter().any(|g| g.heading.key() == *key),
+            Some(Cursor::Notepad) => true,
             None => false,
         };
         if !valid {
@@ -950,14 +997,15 @@ impl App {
             self.toggle_unread();
             return Ok(());
         }
-        match self.windows.focused_session() {
-            Some(id) => {
+        match self.windows.focused_pane() {
+            Some(Pane::Session(id)) => {
                 if let Some(session) = self.session_mut(id) {
                     if let Some(bytes) = keys::to_bytes(&key, session.application_cursor()) {
                         session.write(&bytes)?;
                     }
                 }
             }
+            Some(Pane::Notepad) => self.notepad.on_key(&key),
             None => self.on_list_key(key)?,
         }
         Ok(())
@@ -980,12 +1028,16 @@ impl App {
             editor.paste(text);
             return Ok(());
         }
-        if let Some(id) = self.windows.focused_session() {
-            if let Some(session) = self.session_mut(id) {
-                if let Err(e) = session.paste(text) {
-                    self.notice = Some(format!("{e:#}"));
+        match self.windows.focused_pane() {
+            Some(Pane::Session(id)) => {
+                if let Some(session) = self.session_mut(id) {
+                    if let Err(e) = session.paste(text) {
+                        self.notice = Some(format!("{e:#}"));
+                    }
                 }
             }
+            Some(Pane::Notepad) => self.notepad.paste(text),
+            None => {}
         }
         Ok(())
     }
@@ -1005,6 +1057,9 @@ impl App {
                     _ => {}
                 }
             }
+            return;
+        }
+        if self.notepad_mouse(mouse) {
             return;
         }
         if self.forward_mouse(mouse) {
@@ -1145,6 +1200,37 @@ impl App {
         true
     }
 
+    /// Klick und Mausrad über dem Notizblock: Fokus, Cursor setzen, scrollen. `true`, wenn das
+    /// Ereignis damit erledigt ist; Ziehen und Loslassen gehören weiter einer laufenden Markierung.
+    fn notepad_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let position = Position::new(mouse.column, mouse.row);
+        let Some(slot) = self
+            .window_rects()
+            .into_iter()
+            .find(|&(_, pane, rect)| pane == Pane::Notepad && rect.contains(position))
+            .map(|(slot, _, _)| slot)
+        else {
+            return false;
+        };
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.notepad.wheel(true),
+            MouseEventKind::ScrollDown => self.notepad.wheel(false),
+            MouseEventKind::Down(button) => {
+                self.close_overlays();
+                self.selection = None;
+                self.dragging = false;
+                self.set_focus(Focus::Window(slot));
+                let text = self.notepad_rect().filter(|r| r.contains(position));
+                if let (Some(text), MouseButton::Left) = (text, button) {
+                    let cell = cell_in(text, position);
+                    self.notepad.click(cell.row.into(), cell.col.into());
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn on_overlay(&self, position: Position) -> bool {
         let open = self.menu.is_some()
             || self.dir_picker.is_some()
@@ -1179,7 +1265,7 @@ impl App {
             self.set_collapsed(key, !collapsed);
             return;
         }
-        if double && matches!(self.cursor, Some(Cursor::Session(_))) {
+        if double && matches!(self.cursor, Some(Cursor::Session(_) | Cursor::Notepad)) {
             self.last_list_click = None;
             let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
             if let Err(e) = self.on_list_key(enter) {
@@ -1199,7 +1285,7 @@ impl App {
 
     /// Fenster unter der Mausposition: Fensterindex, Session und Zelle im Fensterinhalt.
     fn window_at(&self, position: Position) -> Option<(usize, SessionId, Cell)> {
-        self.window_rects()
+        self.session_rects()
             .into_iter()
             .find(|(_, _, rect)| rect.contains(position))
             .map(|(slot, id, rect)| {
@@ -1251,8 +1337,9 @@ impl App {
 
     /// Claude-ID der Session im Fenster mit Fokus bzw. der in der Liste gewählten.
     fn focused_claude_id(&self) -> Option<String> {
-        match self.windows.focused_session() {
-            Some(id) => self.session(id).map(|s| s.claude_id.clone()),
+        match self.windows.focused_pane() {
+            Some(Pane::Session(id)) => self.session(id).map(|s| s.claude_id.clone()),
+            Some(Pane::Notepad) => None,
             None => self.selected_entry().map(|e| e.claude_id.clone()),
         }
     }
@@ -1328,6 +1415,7 @@ impl App {
             }
             _ => match self.visible_cursor() {
                 Some(Cursor::Heading(heading)) => self.on_heading_key(key, heading),
+                Some(Cursor::Notepad) => self.on_notepad_row_key(key),
                 _ => self.on_entry_key(key)?,
             },
         }
@@ -1359,6 +1447,30 @@ impl App {
                 self.move_cursor(1);
             }
             _ => {}
+        }
+    }
+
+    /// Zeile des Notizblocks: Enter zeigt ihn (Fokus auf sein Fenster bzw. Fensterauswahl), 1–4
+    /// legt ihn in dieses Fenster.
+    fn on_notepad_row_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => match self.windows.slot_of(Pane::Notepad) {
+                Some(slot) => self.set_focus(Focus::Window(slot)),
+                None => self.show_notepad(),
+            },
+            KeyCode::Char(d @ '1'..='4') => {
+                self.place_pane(Pane::Notepad, d as usize - '1' as usize);
+            }
+            _ => {}
+        }
+    }
+
+    /// Notizblock in ein Fenster: ohne offenes Fenster direkt in Fenster 1, sonst Fensterauswahl.
+    fn show_notepad(&mut self) {
+        if self.windows.count() == 0 {
+            self.place_pane(Pane::Notepad, 0);
+        } else {
+            self.open_pick(Purpose::Notepad);
         }
     }
 
@@ -1402,9 +1514,12 @@ impl App {
     }
 
     fn move_cursor(&mut self, delta: isize) {
-        let rows: Vec<Cursor> = list::rows(&self.groups, &self.collapsed)
-            .iter()
-            .map(Row::cursor)
+        let rows: Vec<Cursor> = std::iter::once(Cursor::Notepad)
+            .chain(
+                list::rows(&self.groups, &self.collapsed)
+                    .iter()
+                    .map(Row::cursor),
+            )
             .collect();
         let visible = self.visible_cursor();
         let current = rows
@@ -1501,14 +1616,21 @@ impl App {
                 }
                 Some(Purpose::Show(id)) => self.place(id, slot),
                 Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
+                Some(Purpose::Notepad) => self.place_pane(Pane::Notepad, slot),
                 Some(Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..))
                 | None => {}
             },
             Action::CloseWindow => {
-                if let Some(slot) = self
-                    .context_session()
-                    .and_then(|id| self.windows.window_of(id))
-                {
+                let slot = match self.windows.focus() {
+                    Focus::Window(slot) => Some(slot),
+                    Focus::List if self.visible_cursor() == Some(Cursor::Notepad) => {
+                        self.windows.slot_of(Pane::Notepad)
+                    }
+                    Focus::List => self
+                        .selected_running()
+                        .and_then(|id| self.windows.window_of(id)),
+                };
+                if let Some(slot) = slot {
                     self.windows.close(slot);
                     self.after_layout_change();
                 }
@@ -1527,11 +1649,7 @@ impl App {
             Action::DeleteOlder => self.menu = Some(Menu::pick_age()),
             Action::DeleteOlderThan(days) => self.ask_delete_older(days),
             Action::DeleteSession => {
-                let target = match self.windows.focused_session() {
-                    Some(id) => self.session(id).map(|s| s.claude_id.clone()),
-                    None => self.selected_entry().map(|e| e.claude_id.clone()),
-                };
-                if let Some(claude_id) = target {
+                if let Some(claude_id) = self.focused_claude_id() {
                     let title = list::flatten(&self.groups)
                         .find(|e| e.claude_id == claude_id)
                         .map_or_else(|| NEW_SESSION_TITLE.to_string(), |e| e.title.clone());
@@ -1558,6 +1676,7 @@ impl App {
             }
             Action::SetGroup => self.open_group_picker(),
             Action::EditNote => self.open_note_editor(),
+            Action::ShowNotepad => self.show_notepad(),
             Action::ToggleCollapsed => {
                 if let Some(group) = self.selected_group() {
                     let (key, collapsed) = (group.heading.key(), self.is_collapsed(group));
@@ -1592,9 +1711,11 @@ impl App {
     /// Laufende Session, auf die sich c/x beziehen: die im Fenster mit Fokus, sonst die in der
     /// Liste gewählte.
     fn context_session(&self) -> Option<SessionId> {
-        self.windows
-            .focused_session()
-            .or_else(|| self.selected_running())
+        match self.windows.focused_pane() {
+            Some(Pane::Session(id)) => Some(id),
+            Some(Pane::Notepad) => None,
+            None => self.selected_running(),
+        }
     }
 
     fn open_commands(&mut self) {
@@ -1602,7 +1723,11 @@ impl App {
         self.menu = Some(Menu::commands(&Context {
             focus: self.windows.focus(),
             windows: self.windows.occupied(),
-            selected_has_window: selected.is_some_and(|id| self.windows.window_of(id).is_some()),
+            selected_has_window: match self.visible_cursor() {
+                Some(Cursor::Notepad) => self.windows.slot_of(Pane::Notepad).is_some(),
+                _ => selected.is_some_and(|id| self.windows.window_of(id).is_some()),
+            },
+            notepad_focused: self.windows.focused_pane() == Some(Pane::Notepad),
             has_selection: self.selected_entry().is_some(),
             update: self
                 .update
@@ -1792,6 +1917,7 @@ impl App {
     fn open_pick(&mut self, purpose: Purpose) {
         let title = match &purpose {
             Purpose::NewSession(_) => "New session in".to_string(),
+            Purpose::Notepad => "Notepad in".to_string(),
             &Purpose::Show(id) => format!("Show {} in", self.title_of(id)),
             Purpose::Resume(_) => self
                 .selected_entry()
@@ -1881,15 +2007,23 @@ impl App {
     }
 
     fn sync_cursor(&mut self) {
-        if let Some(id) = self.windows.focused_session() {
-            if let Some(session) = self.session(id) {
-                self.cursor = Some(Cursor::Session(session.claude_id.clone()));
+        match self.windows.focused_pane() {
+            Some(Pane::Session(id)) => {
+                if let Some(session) = self.session(id) {
+                    self.cursor = Some(Cursor::Session(session.claude_id.clone()));
+                }
             }
+            Some(Pane::Notepad) => self.cursor = Some(Cursor::Notepad),
+            None => {}
         }
     }
 
     fn place(&mut self, id: SessionId, slot: usize) {
-        if self.windows.place(id, slot) {
+        self.place_pane(Pane::Session(id), slot);
+    }
+
+    fn place_pane(&mut self, pane: Pane, slot: usize) {
+        if self.windows.place(pane, slot) {
             self.after_layout_change();
         }
     }
@@ -1915,6 +2049,9 @@ impl App {
     /// Ctrl+Space für die Session mit Fokus bzw. die in der Liste gewählte — läuft sie nicht,
     /// direkt am gespeicherten Stand.
     fn toggle_unread(&mut self) {
+        if self.windows.focused_pane() == Some(Pane::Notepad) {
+            return;
+        }
         if let Some(id) = self.context_session() {
             if let Some(session) = self.session_mut(id) {
                 session.toggle_unread();
@@ -1972,11 +2109,13 @@ impl App {
                 .slots()
                 .iter()
                 .map(|slot| {
-                    slot.and_then(|id| self.session(id))
+                    slot.and_then(Pane::session)
+                        .and_then(|id| self.session(id))
                         .map(|s| s.claude_id.clone())
                         .unwrap_or_default()
                 })
                 .collect(),
+            notepad_window: self.windows.slot_of(Pane::Notepad),
             focus: match self.windows.focus() {
                 Focus::Window(slot) => Some(slot),
                 Focus::List => None,
@@ -1997,7 +2136,10 @@ impl App {
     /// Jede sichtbare Session bekommt die Innenmaße ihres Fensters; Hintergrund-Sessions und
     /// beim Zoom verdeckte Fenster behalten ihre letzte Größe.
     fn resize_windows(&mut self) {
-        for (_, id, rect) in self.window_rects() {
+        if let Some(text) = self.notepad_rect() {
+            self.notepad.set_view(text.width.into(), text.height.into());
+        }
+        for (_, id, rect) in self.session_rects() {
             let (inner, _) = self.window_content(id, rect);
             if let Some(session) = self.session_mut(id) {
                 session.resize(inner.height.max(1), inner.width.max(1));

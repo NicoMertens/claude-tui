@@ -34,6 +34,8 @@ pub enum Action {
     SetGroup,
     /// Notiz-Editor für die Session mit Fokus bzw. die in der Liste gewählte öffnen.
     EditNote,
+    /// Notizblock in einem Fenster zeigen (danach Fensterauswahl).
+    ShowNotepad,
     /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
     ToggleCollapsed,
     /// Alle Abschnitte einklappen (`true`) bzw. ausklappen.
@@ -106,6 +108,11 @@ pub const NOTE: Entry = entry(
     "Note …",
     "Write, edit or remove the note of the session; it shows at the bottom of its window and as ✎ in the list",
 );
+pub const NOTEPAD: Entry = entry(
+    'p',
+    "Notepad",
+    "Show the notepad in a window of your choice: free text, independent of sessions, saved automatically",
+);
 pub const COLLAPSE: Entry = Entry {
     hotkey: 'f',
     keys: "f / ← →",
@@ -153,12 +160,13 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 15] = [
+pub const ENTRIES: [&Entry; 16] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
     &GROUP,
     &NOTE,
+    &NOTEPAD,
     &COLLAPSE,
     &COLLAPSE_ALL,
     &EXPAND_ALL,
@@ -187,6 +195,8 @@ pub enum Purpose {
     Show(SessionId),
     /// Gespeicherte Claude-Session fortsetzen (`--resume`).
     Resume(String),
+    /// Notizblock zeigen.
+    Notepad,
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
     /// Mehrere Claude-Sessions (markiert oder nach Alter), deren Löschen bestätigt werden soll.
@@ -219,6 +229,8 @@ pub struct Context<'a> {
     pub windows: [bool; MAX_WINDOWS],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
+    /// Das Fenster mit Fokus zeigt den Notizblock.
+    pub notepad_focused: bool,
     /// In der Liste ist eine Session ausgewählt.
     pub has_selection: bool,
     /// Version eines verfügbaren Updates (`None` = keins oder läuft schon).
@@ -248,6 +260,12 @@ impl Menu {
             })
         };
         let in_window = matches!(ctx.focus, Focus::Window(_));
+        // Gibt es eine Session, auf die sich x, g und t beziehen (im Fenster bzw. in der Liste)?
+        let one_session = if in_window {
+            !ctx.notepad_focused
+        } else {
+            ctx.has_selection
+        };
 
         add(&NEW_SESSION, NEW_SESSION.label, Action::NewSession);
         if in_window || ctx.selected_has_window {
@@ -257,19 +275,20 @@ impl Menu {
         if !in_window && ctx.marked > 0 {
             let label = format!("Delete {} marked", ctx.marked);
             add(&DELETE, &label, Action::DeleteSession);
-        } else if in_window || ctx.has_selection {
+        } else if one_session {
             add(&DELETE, DELETE.label, Action::DeleteSession);
         }
         if !in_window && ctx.marked > 0 {
             let label = format!("Group {} marked …", ctx.marked);
             add(&GROUP, &label, Action::SetGroup);
-        } else if in_window || ctx.has_selection {
+        } else if one_session {
             add(&GROUP, GROUP.label, Action::SetGroup);
         }
         // Gilt immer der einen Session mit Fokus bzw. Auswahl, nie den markierten.
-        if in_window || ctx.has_selection {
+        if one_session {
             add(&NOTE, NOTE.label, Action::EditNote);
         }
+        add(&NOTEPAD, NOTEPAD.label, Action::ShowNotepad);
         if let (false, Some(collapsed)) = (in_window, ctx.collapsed) {
             let label = if collapsed {
                 "Expand group"
@@ -534,6 +553,7 @@ mod tests {
             focus: Focus::Window(0),
             windows,
             selected_has_window: true,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -557,6 +577,7 @@ mod tests {
             focus: Focus::Window(1),
             windows,
             selected_has_window: true,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -576,6 +597,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -594,6 +616,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden,
@@ -628,6 +651,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: true,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -710,6 +734,7 @@ mod tests {
             focus: Focus::Window(1),
             windows: [false, true, false, true],
             selected_has_window: true,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -729,12 +754,38 @@ mod tests {
     }
 
     #[test]
+    fn notepad_window_offers_no_session_items() {
+        let menu = Menu::commands(&Context {
+            focus: Focus::Window(0),
+            windows: [true, true, false, false],
+            selected_has_window: true,
+            notepad_focused: true,
+            has_selection: true,
+            update: None,
+            list_hidden: false,
+            zoomed: false,
+            marked: 2,
+            collapsed: None,
+            any_expanded: false,
+            any_collapsed: false,
+        });
+        let hotkeys: String = menu.items.iter().map(|i| i.hotkey).collect();
+        for absent in ['x', 'g', 't'] {
+            assert!(!hotkeys.contains(absent), "{absent} in {hotkeys}");
+        }
+        for present in ['n', 'c', 'p', 'z'] {
+            assert!(hotkeys.contains(present), "{present} fehlt in {hotkeys}");
+        }
+    }
+
+    #[test]
     fn marked_sessions_change_delete_in_list_only() {
         let windows = open(1);
         let ctx = |focus| Context {
             focus,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -767,6 +818,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -815,6 +867,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection,
             update: None,
             list_hidden: false,
@@ -861,6 +914,7 @@ mod tests {
                 focus,
                 windows: open(if flag { 2 } else { 4 }),
                 selected_has_window: true,
+                notepad_focused: false,
                 has_selection: true,
                 update: Some("9.9.9"),
                 list_hidden: flag,
@@ -884,6 +938,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: false,
             update: None,
             list_hidden: false,
@@ -906,6 +961,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
+            notepad_focused: false,
             has_selection: false,
             update: None,
             list_hidden: false,

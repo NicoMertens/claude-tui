@@ -4,6 +4,23 @@ pub const MAX_WINDOWS: usize = 4;
 
 pub type SessionId = usize;
 
+/// Inhalt eines Fensters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pane {
+    Session(SessionId),
+    /// Der Notizblock (höchstens ein Fenster).
+    Notepad,
+}
+
+impl Pane {
+    pub fn session(self) -> Option<SessionId> {
+        match self {
+            Self::Session(id) => Some(id),
+            Self::Notepad => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     List,
@@ -15,7 +32,7 @@ pub enum Focus {
 /// geschlossen werden (Anordnung in [`crate::layout`]).
 #[derive(Debug)]
 pub struct Windows {
-    slots: [Option<SessionId>; MAX_WINDOWS],
+    slots: [Option<Pane>; MAX_WINDOWS],
     focus: Focus,
     /// Das Fenster mit Fokus füllt die ganze Fensterfläche (wie tmux-Zoom). Endet mit jeder
     /// Änderung von Fokus oder Fensterbelegung.
@@ -38,8 +55,8 @@ impl Windows {
         self.slots.iter().flatten().count()
     }
 
-    /// Session je Fensterplatz (`None` = Fenster nicht offen).
-    pub fn slots(&self) -> &[Option<SessionId>; MAX_WINDOWS] {
+    /// Inhalt je Fensterplatz (`None` = Fenster nicht offen).
+    pub fn slots(&self) -> &[Option<Pane>; MAX_WINDOWS] {
         &self.slots
     }
 
@@ -48,15 +65,15 @@ impl Windows {
         self.slots.map(|s| s.is_some())
     }
 
-    /// Offene Fenster als (Fensterindex, Session) in Nummernreihenfolge.
-    pub fn open(&self) -> impl Iterator<Item = (usize, SessionId)> + '_ {
+    /// Offene Fenster als (Fensterindex, Inhalt) in Nummernreihenfolge.
+    pub fn open(&self) -> impl Iterator<Item = (usize, Pane)> + '_ {
         self.slots
             .iter()
             .enumerate()
-            .filter_map(|(i, s)| s.map(|id| (i, id)))
+            .filter_map(|(i, s)| s.map(|pane| (i, pane)))
     }
 
-    pub fn session(&self, slot: usize) -> Option<SessionId> {
+    pub fn pane(&self, slot: usize) -> Option<Pane> {
         self.slots.get(slot).copied().flatten()
     }
 
@@ -69,17 +86,17 @@ impl Windows {
         self.focus
     }
 
-    /// Session im Fenster mit Fokus.
-    pub fn focused_session(&self) -> Option<SessionId> {
+    /// Inhalt des Fensters mit Fokus.
+    pub fn focused_pane(&self) -> Option<Pane> {
         match self.focus {
-            Focus::Window(i) => self.session(i),
+            Focus::Window(i) => self.pane(i),
             Focus::List => None,
         }
     }
 
     pub fn set_focus(&mut self, focus: Focus) {
         match focus {
-            Focus::Window(i) if self.session(i).is_none() => {}
+            Focus::Window(i) if self.pane(i).is_none() => {}
             _ if focus == self.focus => {}
             _ => {
                 self.focus = focus;
@@ -102,23 +119,28 @@ impl Windows {
         self.zoomed = zoomed && matches!(self.focus, Focus::Window(_)) && self.count() >= 2;
     }
 
+    /// Fenster der Session `id`.
     pub fn window_of(&self, id: SessionId) -> Option<usize> {
-        self.slots.iter().position(|&s| s == Some(id))
+        self.slot_of(Pane::Session(id))
     }
 
-    /// Zeigt `id` in Fenster `slot` und setzt den Fokus dorthin.
+    pub fn slot_of(&self, pane: Pane) -> Option<usize> {
+        self.slots.iter().position(|&s| s == Some(pane))
+    }
+
+    /// Zeigt `pane` in Fenster `slot` und setzt den Fokus dorthin.
     ///
     /// Jedes der vier Fenster lässt sich öffnen, auch wenn Fenster mit kleinerer Nummer fehlen.
     /// Ist die Session schon in einem anderen Fenster sichtbar, tauscht sie den Platz mit dem
     /// Zielfenster (ein leeres Zielfenster lässt ihren alten Platz leer). Eine verdrängte Session
     /// läuft ohne Fenster weiter.
-    pub fn place(&mut self, id: SessionId, slot: usize) -> bool {
+    pub fn place(&mut self, pane: Pane, slot: usize) -> bool {
         if slot >= MAX_WINDOWS {
             return false;
         }
-        match self.window_of(id) {
+        match self.slot_of(pane) {
             Some(current) => self.slots.swap(current, slot),
-            None => self.slots[slot] = Some(id),
+            None => self.slots[slot] = Some(pane),
         }
         self.zoomed = false;
         self.focus = Focus::Window(slot);
@@ -129,7 +151,7 @@ impl Windows {
     /// Lag der Fokus darauf, geht er an das nächste offene Fenster mit höherer Nummer, sonst an
     /// das letzte, ohne Fenster an die Liste.
     pub fn close(&mut self, slot: usize) {
-        if self.session(slot).is_none() {
+        if self.pane(slot).is_none() {
             return;
         }
         self.slots[slot] = None;
@@ -159,29 +181,29 @@ mod tests {
     fn with(ids: &[SessionId]) -> Windows {
         let mut w = Windows::default();
         for (slot, &id) in ids.iter().enumerate() {
-            assert!(w.place(id, slot));
+            assert!(w.place(Pane::Session(id), slot));
         }
         w
     }
 
     fn ids(w: &Windows) -> [Option<SessionId>; MAX_WINDOWS] {
-        *w.slots()
+        w.slots().map(|s| s.and_then(Pane::session))
     }
 
     #[test]
     fn any_window_opens_even_with_gaps() {
         let mut w = with(&[10, 11]);
-        assert!(w.place(12, 3));
+        assert!(w.place(Pane::Session(12), 3));
         assert_eq!(ids(&w), [Some(10), Some(11), None, Some(12)]);
         assert_eq!(w.count(), 3);
         assert_eq!(w.focus(), Focus::Window(3));
-        assert!(!w.place(13, 4));
+        assert!(!w.place(Pane::Session(13), 4));
     }
 
     #[test]
     fn replacing_sends_old_session_to_background() {
         let mut w = with(&[1, 2]);
-        assert!(w.place(3, 0));
+        assert!(w.place(Pane::Session(3), 0));
         assert_eq!(ids(&w), [Some(3), Some(2), None, None]);
         assert_eq!(w.window_of(1), None);
     }
@@ -189,7 +211,7 @@ mod tests {
     #[test]
     fn visible_session_swaps_places() {
         let mut w = with(&[1, 2, 3]);
-        assert!(w.place(3, 0));
+        assert!(w.place(Pane::Session(3), 0));
         assert_eq!(ids(&w), [Some(3), Some(2), Some(1), None]);
         assert_eq!(w.focus(), Focus::Window(0));
     }
@@ -197,7 +219,7 @@ mod tests {
     #[test]
     fn visible_session_moves_to_empty_window() {
         let mut w = with(&[1, 2, 3]);
-        assert!(w.place(1, 3));
+        assert!(w.place(Pane::Session(1), 3));
         assert_eq!(ids(&w), [None, Some(2), Some(3), Some(1)]);
         assert_eq!(w.focus(), Focus::Window(3));
     }
@@ -260,14 +282,26 @@ mod tests {
     fn zoom_ends_when_windows_change() {
         let mut w = with(&[1, 2, 3]);
         w.set_zoomed(true);
-        assert!(w.place(4, 0));
+        assert!(w.place(Pane::Session(4), 0));
         assert_eq!(w.zoomed(), None, "ersetzt");
         w.set_zoomed(true);
         w.close(0);
         assert_eq!(w.zoomed(), None, "geschlossen");
         w.set_zoomed(true);
-        assert!(w.place(5, 3));
+        assert!(w.place(Pane::Session(5), 3));
         assert_eq!(w.zoomed(), None, "neues Fenster");
+    }
+
+    #[test]
+    fn notepad_takes_a_window_and_swaps_like_a_session() {
+        let mut w = with(&[1, 2]);
+        assert!(w.place(Pane::Notepad, 0));
+        assert_eq!(ids(&w), [None, Some(2), None, None]);
+        assert_eq!(w.focused_pane(), Some(Pane::Notepad));
+        assert!(w.place(Pane::Notepad, 1));
+        assert_eq!(w.slot_of(Pane::Notepad), Some(1));
+        assert_eq!(w.pane(0), Some(Pane::Session(2)));
+        assert_eq!(w.count(), 2);
     }
 
     #[test]

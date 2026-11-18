@@ -3,6 +3,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::textbuf::TextBuf;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Stay,
@@ -16,9 +18,7 @@ pub struct NoteEditor {
     pub title: String,
     /// Claude-ID der Session, deren Notiz bearbeitet wird (beim Öffnen festgelegt).
     pub target: String,
-    text: String,
-    /// Cursor als Zeichenindex in `text`.
-    cursor: usize,
+    buf: TextBuf,
 }
 
 impl NoteEditor {
@@ -26,8 +26,7 @@ impl NoteEditor {
         Self {
             title,
             target,
-            text: text.to_string(),
-            cursor: text.chars().count(),
+            buf: TextBuf::new(text),
         }
     }
 
@@ -37,108 +36,40 @@ impl NoteEditor {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
             KeyCode::Esc => return Outcome::Cancel,
-            KeyCode::Enter if shift || alt => self.insert("\n"),
-            KeyCode::Enter => return Outcome::Save(normalize(&self.text)),
+            KeyCode::Enter if shift || alt => self.buf.insert(
+                "
+",
+            ),
+            KeyCode::Enter => return Outcome::Save(normalize(self.buf.text())),
             // Ctrl+J ist ein Zeilenumbruch in Terminals, die Shift+Enter nicht unterscheiden.
-            KeyCode::Char('j') if ctrl && !alt => self.insert("\n"),
+            KeyCode::Char('j') if ctrl && !alt => self.buf.insert(
+                "
+",
+            ),
             KeyCode::Char('d') if ctrl && !alt => return Outcome::Save(None),
-            KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Right => self.cursor = (self.cursor + 1).min(self.len()),
-            KeyCode::Home => self.cursor = self.line_start(),
-            KeyCode::End => self.cursor = self.line_end(),
-            KeyCode::Up => self.move_vertically(false),
-            KeyCode::Down => self.move_vertically(true),
-            KeyCode::Backspace if self.cursor > 0 => {
-                self.cursor -= 1;
-                self.remove_at(self.cursor);
+            KeyCode::Home => self.buf.set_cursor(self.buf.line_start()),
+            KeyCode::End => self.buf.set_cursor(self.buf.line_end()),
+            KeyCode::Up => self.buf.move_vertically(false),
+            KeyCode::Down => self.buf.move_vertically(true),
+            _ => {
+                self.buf.edit(key);
             }
-            KeyCode::Delete if self.cursor < self.len() => self.remove_at(self.cursor),
-            // Ctrl+Alt ist unter Windows AltGr (@, {, [ auf deutscher Tastatur).
-            KeyCode::Char(c) if !ctrl || alt => self.insert(&c.to_string()),
-            _ => {}
         }
         Outcome::Stay
     }
 
-    /// Zeilenumbrüche bleiben, Tabs werden Leerzeichen, andere Steuerzeichen fallen weg — sie
-    /// verschöben beim Zeichnen die Spalten.
     pub fn paste(&mut self, text: &str) {
-        let text: String = text
-            .replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .replace('\t', "    ")
-            .chars()
-            .filter(|&c| c == '\n' || !c.is_control())
-            .collect();
-        self.insert(&text);
+        self.buf.paste(text);
     }
 
     /// Zeilen des Texts; mindestens eine (leere).
     pub fn lines(&self) -> Vec<&str> {
-        self.text.split('\n').collect()
+        self.buf.lines()
     }
 
     /// Cursor als (Zeile, Spalte in Zeichen).
     pub fn cursor_position(&self) -> (usize, usize) {
-        let before: String = self.text.chars().take(self.cursor).collect();
-        let row = before.matches('\n').count();
-        let col = before
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
-        (row, col)
-    }
-
-    fn len(&self) -> usize {
-        self.text.chars().count()
-    }
-
-    fn byte_index(&self, chars: usize) -> usize {
-        self.text
-            .char_indices()
-            .nth(chars)
-            .map_or(self.text.len(), |(i, _)| i)
-    }
-
-    fn insert(&mut self, s: &str) {
-        let at = self.byte_index(self.cursor);
-        self.text.insert_str(at, s);
-        self.cursor += s.chars().count();
-    }
-
-    fn remove_at(&mut self, chars: usize) {
-        let at = self.byte_index(chars);
-        self.text.remove(at);
-    }
-
-    fn line_start(&self) -> usize {
-        let (_, col) = self.cursor_position();
-        self.cursor - col
-    }
-
-    fn line_end(&self) -> usize {
-        let rest = self.text.chars().skip(self.cursor);
-        self.cursor + rest.take_while(|&c| c != '\n').count()
-    }
-
-    /// Eine Zeile hoch bzw. runter, möglichst in derselben Spalte.
-    fn move_vertically(&mut self, down: bool) {
-        let (row, col) = self.cursor_position();
-        let lines = self.lines();
-        // Über die erste bzw. letzte Zeile hinaus: an deren Anfang bzw. Ende.
-        if !down && row == 0 {
-            self.cursor = 0;
-            return;
-        }
-        if down && row + 1 >= lines.len() {
-            self.cursor = self.len();
-            return;
-        }
-        let target = if down { row + 1 } else { row - 1 };
-        let start: usize = lines[..target].iter().map(|l| l.chars().count() + 1).sum();
-        self.cursor = start + col.min(lines[target].chars().count());
+        self.buf.cursor_position()
     }
 }
 
@@ -209,14 +140,6 @@ mod tests {
         assert_eq!(e.cursor_position(), (1, 2));
         e.on_key(&key(KeyCode::Down));
         assert_eq!(e.cursor_position(), (1, 3), "letzte Zeile: ans Ende");
-    }
-
-    #[test]
-    fn paste_keeps_line_breaks() {
-        let mut e = empty();
-        e.paste("a\r\nb\tc\x07");
-        assert_eq!(e.lines(), ["a", "b    c"]);
-        assert_eq!(e.cursor_position(), (1, 6));
     }
 
     #[test]

@@ -41,8 +41,8 @@ const OVERVIEW: &[Row] = &[
          of its running sessions in front of its heading.",
     ),
     Text(
-        "Each row shows state, title, a ✎ if it has a note, quick number (#3), window number          ([1]) and the time since \
-         the last activity. A /color set in Claude colours the title.",
+        "Each row shows state, title, a ✎ if it has a note, quick number (#3), window number \
+         ([1]) and the time since the last activity. A /color set in Claude colours the title.",
     ),
     Heading("Windows"),
     Text(
@@ -50,6 +50,12 @@ const OVERVIEW: &[Row] = &[
          Missing windows leave no gap: a window alone in its column gets the full height, a \
          column alone the full width. The window bar shows number, title and state. The session \
          of a closed or replaced window keeps running in the background and stays in the list.",
+    ),
+    Text(
+        "A window can also show the notepad (Ctrl+A p): free text that belongs to no session. \
+         It keeps its text when closed and comes back after a restart. It is the first row of \
+         the session list (✎ Notepad with its number of lines): Enter shows it, 1…4 puts it \
+         into that window.",
     ),
     Heading("States"),
     Key("✻ working", "Claude works on a prompt or uses a tool"),
@@ -93,6 +99,17 @@ const KEYS: &[Row] = &[
     Key("Other keys", "Go to the session"),
     Key("Shift+Enter", "New line in Claude's input"),
     Key("Alt+← / →", "Jump by word in Claude's input"),
+    Heading("Notepad focused"),
+    Key(
+        "Typing",
+        "Edit the text; long lines wrap, it is saved by itself",
+    ),
+    Key("Enter / Tab", "New line / four spaces"),
+    Key(
+        "↑ ↓ Home End",
+        "Move by screen line; Ctrl+Home / Ctrl+End go to the start / end of the text",
+    ),
+    Key("PgUp / PgDn", "Move by a page"),
     Heading("Session list focused"),
     Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),
@@ -130,7 +147,8 @@ const KEYS: &[Row] = &[
     Key("d / w / m", "Delete older than a day / week / month"),
     Key(
         "Note editor",
-        "Enter saves, Shift+Enter or Ctrl+J starts a new line, Ctrl+D or saving empty text          removes the note",
+        "Enter saves, Shift+Enter or Ctrl+J starts a new line, Ctrl+D or saving empty text \
+         removes the note",
     ),
     Key(
         "Typing",
@@ -153,7 +171,7 @@ const MOUSE: &[Row] = &[
         "Double-click",
         "On a session in the list: like Enter; in a window: copy a word",
     ),
-    Key("Wheel", "Scroll a window's history"),
+    Key("Wheel", "Scroll a window's history, or the notepad"),
     Key(
         "Drag",
         "Select text; in fullscreen mode Claude selects and copies, otherwise claude-tui",

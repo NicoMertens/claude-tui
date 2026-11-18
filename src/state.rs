@@ -48,6 +48,9 @@ pub struct State {
     /// Claude-Session-ID → Notiz (Ctrl+A t).
     #[serde(default)]
     pub notes: BTreeMap<String, String>,
+    /// Fensterindex des Notizblocks (sein Platz in `windows` bleibt `""`).
+    #[serde(default)]
+    pub notepad_window: Option<usize>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -105,12 +108,8 @@ mod tests {
             superseded: BTreeMap::from([("alt".to_string(), "b".to_string())]),
             collapsed: BTreeSet::from(["dir:/x".to_string()]),
             unread: BTreeSet::from(["a".to_string()]),
-            notes: BTreeMap::from([(
-                "b".to_string(),
-                "x
-y"
-                .to_string(),
-            )]),
+            notes: BTreeMap::from([("b".to_string(), "x\ny".to_string())]),
+            notepad_window: Some(0),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);

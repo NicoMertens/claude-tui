@@ -61,6 +61,13 @@ pub fn visible(
 /// Höchstens so viele Notizzeilen stehen unten im Fenster.
 pub const NOTE_MAX_ROWS: usize = 5;
 
+/// Textfläche des Notizblocks im Fensterrechteck `rect`: innerhalb des Rahmens je eine Spalte
+/// Abstand links und rechts. Die Scrollbar liegt auf dem rechten Rahmen, damit der Umbruch nicht
+/// davon abhängt, ob sie gerade zu sehen ist.
+pub fn notepad_text(rect: Rect) -> Rect {
+    rect.inner(Margin::new(2, 1))
+}
+
 /// Innenfläche eines Fensters: der Teil für das Terminal der Session und darunter `note_lines`
 /// Notizzeilen — höchstens [`NOTE_MAX_ROWS`] und höchstens ein Drittel der Höhe, damit Claude
 /// genug Platz behält. Bleibt keine Zeile übrig, entfällt die Notiz.

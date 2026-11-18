@@ -26,8 +26,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 |---|---|
 | `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild). Gezeichnet wird nur nach Ereignissen, neuer Ausgabe oder geändertem Zustand (`App::tick` meldet das), sonst alle 120 ms bei Spinnern bzw. jede Sekunde; die Sessionliste baut `App::tick` nur nach Änderungen bzw. sekündlich neu |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
-| `windows.rs` | welche Session in welchem Fenster liegt (4 feste Plätze, auch mit Lücken; Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
-| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil`; Innenfläche eines Fensters, aufgeteilt in Terminal und Notizzeilen (bis 5, höchstens ein Drittel der Höhe; `window_content` — einzige Quelle für Zeichnen, PTY-Größe und Mauszellen) |
+| `windows.rs` | welche Session (oder der Notizblock, `Pane`) in welchem Fenster liegt (4 feste Plätze, auch mit Lücken; Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
+| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil`; Innenfläche eines Fensters, aufgeteilt in Terminal und Notizzeilen (bis 5, höchstens ein Drittel der Höhe; `window_content` — einzige Quelle für Zeichnen, PTY-Größe und Mauszellen); Textfläche des Notizblocks (`notepad_text`) |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter. `ENTRIES` ist die gemeinsame Tabelle der Menüpunkte (Taste, Beschriftung, Hilfetext) für Menü und Hilfe |
 | `help.rs` | Hilfeseite (`Ctrl+A h`): Aufbau, Zustände, alle Tasten, Menüpunkte aus `menu::ENTRIES`, Maus; Umbruch nach Anzeigebreite und Scrollen |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
@@ -36,16 +36,18 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis; sichtbare Zeilen (Überschriften und, sofern nicht eingeklappt, Sessions) und der Listen-Cursor, der auf einer Session oder einer Überschrift steht |
 | `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |
 | `grouppick.rs` | Gruppen-Dialog (`Ctrl+A g`): Eingabe eines neuen Namens, Auswahl aus „None“ und vorhandenen bzw. zuletzt verwendeten Gruppen |
+| `textbuf.rs` | Text mit Cursor für Notiz-Editor und Notizblock: Einfügen, Löschen, Cursor links/rechts, Bereinigen eingefügten Texts (AltGr-Regel wie bei der Session) |
 | `noteedit.rs` | Notiz-Editor (`Ctrl+A t`): mehrzeiliger Text mit Cursor; Enter speichert, leerer Text oder `Ctrl+D` entfernt die Notiz |
+| `notepad.rs` | Notizblock (`Ctrl+A p`): Umbruch nach Anzeigebreite an Wortgrenzen, Cursor nach Bildschirmzeilen (am Umbruch steht er am Anfang der nächsten); in der Sessionliste die eigene erste Zeile `list::Cursor::Notepad` mit der Zeilenzahl, Scrollen mit dem Cursor bzw. Mausrad; speichert `notepad.txt` spätestens eine Sekunde nach einer Änderung und beim Beenden, liest sie neu, wenn eine andere Instanz sie geändert hat, und überschreibt sie nie, wenn sie sich nicht lesen ließ |
 | `external.rs` | erkennt Sessions, die außerhalb von claude-tui laufen (`~/.claude/sessions`, Prozessliste, Rückfall-Heuristik), und Sessions, die Claude Code als Hintergrund-Job mit neuer ID weiterführt (`parkedJobId` → `jobId`); claude-tui übernimmt dann die neue ID samt Nummer, Gruppe und Notiz und blendet das alte Protokoll aus (`state.json`, `superseded`) |
-| `state.rs` | Fensterlayout (Claude-ID je Fensterplatz, Fokus, Sessionliste ausgeblendet, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte, ungelesene Sessions, Notizen) als `state.json` für den Neustart |
+| `state.rs` | Fensterlayout (Claude-ID je Fensterplatz, Fokus, Sessionliste ausgeblendet, Schnellwahl-Nummern, Gruppen und zuletzt verwendete Gruppen, eingeklappte Abschnitte, ungelesene Sessions, Notizen, Fenster des Notizblocks) als `state.json` für den Neustart |
 | `tags.rs` | Schnellwahl-Nummern 1–9 → Claude-ID: vergeben, umhängen, entfernen (`Alt+Zahl` / `Ctrl+Zahl`) |
 | `paths.rs` | Konfigurationsordner von claude-tui (unter Unix `0700`) und Datenordner von Claude Code; atomares Schreiben dorthin (temporäre Datei, dann umbenennen) |
 | `session.rs` | eine Session: PTY öffnen, Prozess sofort oder später starten (Startreihe beim Wiederherstellen), Lese-Thread, Statuserkennung (Hooks, sonst Heuristik), Schreiben, Resize |
 | `trace.rs` | Zeitmessung bei `CLAUDE_TUI_TRACE=1`: Zeilen mit Unix-ms und PID nach `trace.log` (App und Hook-Prozesse) |
 | `hooks.rs` | Claude-Code-Hooks: `--settings`-Datei erzeugen (HTTP-Hooks, sonst Befehls-Hooks), Event → Zustand → Statusdatei, Statusdateien lesen und aufräumen |
 | `hook_server.rs` | HTTP-Server auf `127.0.0.1` für die Hook-Meldungen (eine Anfrage je Event, Token im Pfad) |
-| `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), nächste wartende Session reihum für Menüpunkt `w`, `CLAUDE_TUI_NO_BELL` |
+| `waiting.rs` | Hinweis auf wartende Sessions: Wechsel auf „wartet“ erkennen (außer im Fenster mit Fokus), `CLAUDE_TUI_NO_BELL` |
 | `keys.rs` | Tastendruck → xterm-Bytefolge (inkl. Application-Cursor-Mode und AltGr), `Ctrl+Pfeil` als Fokuswechsel, `Alt`/`Ctrl+Zahl` als Schnellwahl |
 | `ui.rs` | Zeichnen: Sessionliste (Menühinweis im unteren Rahmen; ausblendbar, dann Fenster in voller Breite), Fenster mit Nummer, Zustand und Fokusrahmen, Menü als blaues Overlay mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `selection.rs` | eigene Mausmarkierung im Fenster (wenn das Programm die Maus nicht selbst will oder mit Alt), Wort per Doppelklick, Text für die Zwischenablage (`arboard`) |

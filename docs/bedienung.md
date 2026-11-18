@@ -71,8 +71,8 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 
 ## Aufbau
 
-Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Oben
-stehen die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
+Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Ganz
+oben steht der [Notizblock](#notizblock) (`✎ Notepad (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾) — Verzeichnisse mit der jüngsten Aktivität oben. Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
 stehen laufende Sessions zuerst. Je Session eine Zeile: Zustandssymbol, Titel (eigener Name aus `/rename`, sonst der KI-Titel,
@@ -91,7 +91,8 @@ Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, ye
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
 claude-tui liest dafür die letzte `agent-color`-Zeile aus dem Protokoll der Session.
 
-Rechts bis zu **4 Fenster**. Jede Nummer hat einen **festen Platz**: 1 oben links, 2 oben rechts,
+Rechts bis zu **4 Fenster**, jedes mit einer Session oder dem [Notizblock](#notizblock). Jede
+Nummer hat einen **festen Platz**: 1 oben links, 2 oben rechts,
 3 unten links, 4 unten rechts. Jede Nummer lässt sich öffnen, auch wenn kleinere fehlen. Fehlende
 Fenster lassen keine Lücke: Die linke Spalte gehört 1 und 3, die rechte 2 und 4. Ist eine Spalte
 leer, nimmt die andere die ganze Breite; steht ein Fenster allein in seiner Spalte, bekommt es die
@@ -199,9 +200,10 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen |
-| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen |
-| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen |
+| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht im Notizblock) |
+| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht im Notizblock) |
+| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht im Notizblock) |
+| `p` | [Notizblock](#notizblock) in einem Fenster zeigen: Fensterauswahl (ohne offenes Fenster gleich in Fenster 1) | wie links |
 | `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
 | `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
@@ -324,9 +326,49 @@ gewählte), mit der vorhandenen Notiz vorbelegt:
 Notizen bleiben über einen Neustart erhalten (`state.json`) und gehen wie die Gruppe bei `/clear`
 auf die neue Session über. Gelöschte Sessions verlieren ihre Notiz.
 
+### Notizblock
+
+Neben den Notizen je Session gibt es einen **Notizblock** für freien Text, der keiner Session
+gehört. Er steht als erste Zeile in der Sessionliste, über allen Abschnitten: `✎ Notepad (12)` mit
+der Anzahl seiner Textzeilen (umbrochene Zeilen zählen einfach) und, falls sichtbar, der
+Fensternummer. Auf dieser Zeile zeigt `Enter` ihn (Fokus auf sein Fenster bzw. Fensterauswahl),
+`1`–`4` legt ihn in dieses Fenster, ein Doppelklick wirkt wie `Enter` und `c` im Menü schließt sein
+Fenster. Hat sein Fenster den Fokus, steht die Listenauswahl auf dieser Zeile.
+
+`p` im Menü zeigt ihn in einem Fenster nach Wahl — wie eine Session: Er nimmt einen der
+vier Plätze ein, tauscht beim Verschieben den Platz, lässt sich zoomen und mit `c` schließen. Die
+Fensterleiste zeigt `[N] ✎ Notepad`. Es gibt nur einen Notizblock; ein zweites `p` verschiebt ihn.
+
+Der Text wird an Wortgrenzen umbrochen (kein waagerechtes Scrollen, ein Wort länger als die Zeile
+wird geteilt). Ist er länger als das Fenster, scrollt die Ansicht mit dem Cursor, und am rechten
+Rahmen erscheint eine Scrollbar. Mit Fokus auf dem Notizblock:
+
+| Taste | Wirkung |
+|---|---|
+| Tippen / Einfügen | Text eingeben; Eingefügtes behält seine Zeilenumbrüche |
+| `Enter` / `Tab` | neue Zeile / vier Leerzeichen |
+| `←` `→` | Cursor um ein Zeichen |
+| `↑` `↓` `Pos1` `Ende` | Cursor nach Bildschirmzeilen (eine umbrochene Zeile zählt mehrfach) |
+| `Ctrl+Pos1` / `Ctrl+Ende` | an den Anfang / das Ende des Texts |
+| `PgUp` / `PgDn` | seitenweise |
+| `Backspace` / `Entf` | Zeichen löschen |
+
+Ein Klick setzt den Cursor, das Mausrad scrollt (der Cursor bleibt, wo er ist). `Ctrl+A`, `Ctrl+Pfeil`
+und die Schnellwahl wirken wie in einem Session-Fenster.
+
+Löschen gibt es nicht, der Notizblock ist ein reiner Editor: Der Text bleibt beim Schließen des
+Fensters erhalten und wird spätestens eine Sekunde nach einer Änderung sowie beim Beenden als
+`notepad.txt` im Konfigurationsordner gespeichert (`%APPDATA%\claude-tui` bzw.
+`~/.config/claude-tui`). Das Fenster des Notizblocks kommt nach einem Neustart wie die Sessions
+zurück (`state.json`). Laufen mehrere claude-tui, teilen sie sich den Notizblock: Ändert ein
+anderes die Datei, liest dieses sie neu, solange es selbst nichts Ungespeichertes hat; sonst gewinnt,
+wer zuletzt speichert. Lässt sich `notepad.txt` nicht lesen (z. B. nicht UTF-8), meldet claude-tui das
+beim Start und überschreibt die Datei nicht.
+
 ## Maus
 
-Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen);
+Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen;
+über dem [Notizblock](#notizblock) dessen Text);
 die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
 
