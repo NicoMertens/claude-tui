@@ -401,6 +401,18 @@ impl App {
     }
 
     /// Die ausgewählte Session, sofern sie sichtbar ist (nicht in einem eingeklappten Abschnitt).
+    /// Zustand einer Zeile der Sessionliste: der laufenden Session, sonst ▲ für eine gespeicherte
+    /// Session mit ungelesener Antwort; `None` = kein Symbol.
+    pub fn list_status(&self, entry: &Entry) -> Option<Status> {
+        match entry.running.and_then(|id| self.session(id)) {
+            Some(session) => Some(session.status).filter(|&s| s != Status::Exited),
+            None => self
+                .unread
+                .contains(&entry.claude_id)
+                .then_some(Status::Waiting),
+        }
+    }
+
     pub fn selected_entry(&self) -> Option<&Entry> {
         match self.visible_cursor()? {
             Cursor::Session(id) => list::flatten(&self.groups).find(|e| e.claude_id == id),
@@ -876,10 +888,7 @@ impl App {
             };
         }
         if keys::is_toggle_unread(&key) {
-            if let Some(session) = self.context_session().and_then(|id| self.session_mut(id)) {
-                session.toggle_unread();
-            }
-            self.sync_unread();
+            self.toggle_unread();
             return Ok(());
         }
         match self.windows.focused_session() {
@@ -1490,7 +1499,6 @@ impl App {
                 self.windows.set_zoomed(zoom);
                 self.resize_windows();
             }
-            Action::NextWaiting => self.show_next_waiting()?,
             Action::SetGroup => self.open_group_picker(),
             Action::ToggleCollapsed => {
                 if let Some(group) = self.selected_group() {
@@ -1555,7 +1563,6 @@ impl App {
             list_hidden: self.list_hidden,
             stacked: self.stacked,
             zoomed: self.windows.zoomed().is_some(),
-            waiting: self.sessions.iter().any(|s| s.status == Status::Waiting),
             marked: self.marked.len(),
             collapsed: self.selected_group().map(|g| self.is_collapsed(g)),
             any_expanded: self.groups.iter().any(|g| !self.is_collapsed(g)),
@@ -1610,26 +1617,6 @@ impl App {
         self.rebuild_list();
         self.save_state();
         self.flash_notice(message);
-    }
-
-    /// Nächste wartende Session (Listenreihenfolge, reihum ab der aktuellen): hat sie ein Fenster,
-    /// Fokus dorthin, sonst wie Enter in der Liste.
-    fn show_next_waiting(&mut self) -> Result<()> {
-        let order: Vec<SessionId> = list::flatten(&self.groups)
-            .filter_map(|e| e.running)
-            .collect();
-        let is_waiting = |id| {
-            self.session(id)
-                .is_some_and(|s| s.status == Status::Waiting)
-        };
-        let Some(id) = waiting::next_waiting(&order, is_waiting, self.context_session()) else {
-            return Ok(());
-        };
-        if let Some(claude_id) = self.session(id).map(|s| s.claude_id.clone()) {
-            self.reveal(&claude_id);
-        }
-        let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
-        self.on_list_key(enter)
     }
 
     /// Schließt Fenster und Prozess (falls laufend) und löscht das Protokoll endgültig.
@@ -1846,6 +1833,22 @@ impl App {
         self.resize_windows();
         self.sync_cursor();
         self.save_state();
+    }
+
+    /// Ctrl+Space für die Session mit Fokus bzw. die in der Liste gewählte — läuft sie nicht,
+    /// direkt am gespeicherten Stand.
+    fn toggle_unread(&mut self) {
+        if let Some(id) = self.context_session() {
+            if let Some(session) = self.session_mut(id) {
+                session.toggle_unread();
+            }
+            self.sync_unread();
+        } else if let Some(claude_id) = self.selected_entry().map(|e| e.claude_id.clone()) {
+            if !self.unread.remove(&claude_id) {
+                self.unread.insert(claude_id);
+            }
+            self.save_state();
+        }
     }
 
     /// Übernimmt den Ungelesen-Stand der laufenden Sessions; speichert nur bei einer Änderung.

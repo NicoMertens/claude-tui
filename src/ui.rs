@@ -368,19 +368,15 @@ fn group_status(app: &App, group: &Group) -> Option<Status> {
     group
         .entries
         .iter()
-        .filter_map(|e| e.running.and_then(|id| app.session(id)))
-        .map(|s| s.status)
-        .filter(|s| *s != Status::Exited)
+        .filter_map(|e| app.list_status(e))
         .max_by_key(urgency)
 }
 
 /// Eine Zeile: Zustandssymbol, Titel, Fensternummer, Zeit seit der letzten Aktivität.
 fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'static> {
     let session = entry.running.and_then(|id| app.session(id));
-    // Nur laufende Sessions tragen ein Zustandssymbol; externe kennzeichnet ein Symbol in der
-    // Fensterspalte (unter der Ziffer von „ [1]“).
-    let status = session.map(|s| s.status).filter(|&s| s != Status::Exited);
-    let (symbol, color) = match status {
+    // Externe kennzeichnet ein Symbol in der Fensterspalte (unter der Ziffer von „ [1]“).
+    let (symbol, color) = match app.list_status(entry) {
         None => (" ", theme::MUTED),
         status => theme::status_symbol(status, clock()),
     };

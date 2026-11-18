@@ -32,8 +32,6 @@ pub enum Action {
     ToggleStacked,
     /// Fenster mit Fokus auf die ganze Fensterfläche zoomen bzw. den Zoom aufheben.
     ToggleZoom,
-    /// Zur nächsten Session springen, die auf dich wartet.
-    NextWaiting,
     /// Gruppen-Dialog für die Session mit Fokus bzw. die markierten Sessions öffnen.
     SetGroup,
     /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
@@ -131,11 +129,6 @@ pub const FOCUS: Entry = Entry {
     label: "Focus session list",
     help: "Focus this window / the session list",
 };
-pub const NEXT_WAITING: Entry = entry(
-    'w',
-    "Next waiting session",
-    "Jump to the next session waiting for you (only when one waits)",
-);
 pub const TOGGLE_LIST: Entry = entry('s', "Hide session list", "Hide or show the session list");
 pub const TOGGLE_STACKED: Entry = entry(
     'l',
@@ -160,7 +153,7 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 16] = [
+pub const ENTRIES: [&Entry; 15] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
@@ -170,7 +163,6 @@ pub const ENTRIES: [&Entry; 16] = [
     &EXPAND_ALL,
     &DELETE_OLDER,
     &FOCUS,
-    &NEXT_WAITING,
     &TOGGLE_LIST,
     &TOGGLE_STACKED,
     &TOGGLE_ZOOM,
@@ -237,8 +229,6 @@ pub struct Context<'a> {
     pub stacked: bool,
     /// Das Fenster mit Fokus ist gezoomt.
     pub zoomed: bool,
-    /// Mindestens eine Session wartet auf dich.
-    pub waiting: bool,
     /// Anzahl der in der Liste markierten Sessions.
     pub marked: usize,
     /// Abschnitt der Auswahl in der Liste ist eingeklappt (`None` = keine Auswahl).
@@ -308,9 +298,6 @@ impl Menu {
         }
         if in_window {
             add(&FOCUS, FOCUS.label, Action::Focus(Focus::List));
-        }
-        if ctx.waiting {
-            add(&NEXT_WAITING, NEXT_WAITING.label, Action::NextWaiting);
         }
         // Ausblenden nur, wenn ein Fenster den Platz übernimmt.
         if ctx.list_hidden {
@@ -560,7 +547,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -585,7 +571,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -606,7 +591,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -626,7 +610,6 @@ mod tests {
             list_hidden,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -662,7 +645,6 @@ mod tests {
             list_hidden: false,
             stacked,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -696,7 +678,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -716,33 +697,6 @@ mod tests {
         assert_eq!(zoom_label(Focus::List, 3, false), None);
         assert_eq!(zoom_label(w0, 4, true).as_deref(), Some("z Unzoom"));
         assert_eq!(zoom_label(w0, 1, true).as_deref(), Some("z Unzoom"));
-    }
-
-    #[test]
-    fn next_waiting_only_when_a_session_waits() {
-        let windows = names(1);
-        let has_next = |waiting| {
-            Menu::commands(&Context {
-                focus: Focus::List,
-                windows: &windows,
-                selected_has_window: false,
-                has_selection: true,
-                update: None,
-                list_hidden: false,
-                stacked: false,
-                zoomed: false,
-                waiting,
-                marked: 0,
-                collapsed: None,
-                any_expanded: false,
-                any_collapsed: false,
-            })
-            .items
-            .iter()
-            .any(|i| i.hotkey == 'w' && i.action == Action::NextWaiting)
-        };
-        assert!(has_next(true));
-        assert!(!has_next(false));
     }
 
     #[test]
@@ -795,7 +749,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 3,
             collapsed: None,
             any_expanded: false,
@@ -829,7 +782,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed,
             any_expanded,
@@ -879,7 +831,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked,
             collapsed: None,
             any_expanded: false,
@@ -928,7 +879,6 @@ mod tests {
                 list_hidden: flag,
                 stacked: flag,
                 zoomed: flag,
-                waiting: true,
                 marked,
                 collapsed: None,
                 any_expanded: false,
@@ -953,7 +903,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,
@@ -977,7 +926,6 @@ mod tests {
             list_hidden: false,
             stacked: false,
             zoomed: false,
-            waiting: false,
             marked: 0,
             collapsed: None,
             any_expanded: false,

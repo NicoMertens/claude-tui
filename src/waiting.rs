@@ -1,4 +1,4 @@
-//! Hinweis auf Sessions, die auf dich warten: Übergänge erkennen und reihum anspringen.
+//! Hinweis auf Sessions, die auf dich warten: Übergänge erkennen.
 
 use crate::{session::Status, windows::SessionId};
 
@@ -24,20 +24,6 @@ pub fn newly_waiting(
         .collect()
 }
 
-/// Nächste wartende Session nach `current` in Listenreihenfolge, am Ende wieder von vorn.
-pub fn next_waiting(
-    order: &[SessionId],
-    is_waiting: impl Fn(SessionId) -> bool,
-    current: Option<SessionId>,
-) -> Option<SessionId> {
-    let start = current
-        .and_then(|c| order.iter().position(|&id| id == c))
-        .map_or(0, |i| i + 1);
-    (0..order.len())
-        .map(|offset| order[(start + offset) % order.len()])
-        .find(|&id| is_waiting(id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,25 +43,5 @@ mod tests {
     fn focused_window_gets_no_hint() {
         let changes = [(1, Working, Waiting), (2, Idle, Waiting)];
         assert_eq!(newly_waiting(changes, Some(1)), [2]);
-    }
-
-    #[test]
-    fn next_waiting_goes_round_in_list_order() {
-        let order = [5, 3, 8, 1];
-        let waiting = |id| id == 3 || id == 1;
-        assert_eq!(next_waiting(&order, waiting, None), Some(3));
-        assert_eq!(next_waiting(&order, waiting, Some(3)), Some(1));
-        assert_eq!(next_waiting(&order, waiting, Some(1)), Some(3));
-        assert_eq!(next_waiting(&order, waiting, Some(8)), Some(1));
-        // Aktuelle Session nicht in der Liste: von vorn.
-        assert_eq!(next_waiting(&order, waiting, Some(42)), Some(3));
-    }
-
-    #[test]
-    fn single_waiting_session_is_found_again() {
-        let order = [5, 3];
-        assert_eq!(next_waiting(&order, |id| id == 3, Some(3)), Some(3));
-        assert_eq!(next_waiting(&order, |_| false, Some(3)), None);
-        assert_eq!(next_waiting(&[], |_| true, None), None);
     }
 }

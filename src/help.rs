@@ -60,7 +60,10 @@ const OVERVIEW: &[Row] = &[
         "● ready",
         "Claude is done, you have read it, it waits for the next prompt",
     ),
-    Key("no symbol", "Saved, not running; opening resumes it"),
+    Key(
+        "no symbol",
+        "Saved, not running; opening resumes it (▲ if its answer is unread)",
+    ),
     Key("⇄ elsewhere", "Runs outside claude-tui; opening asks first"),
 ];
 

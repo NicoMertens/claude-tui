@@ -82,10 +82,10 @@ Aktivität (`now`, `5m`, `3h`, `2d`); bei einer wartenden Session ist das die Wa
 arbeiten im Hintergrund weiter. Die Liste aktualisiert sich alle 2 Sekunden.
 
 **Einklappen:** Jeder Abschnitt lässt sich einklappen; dann steht nur noch seine Überschrift da
-(Verzeichnisse zeigen `▸` statt `▾`). Läuft darin eine Session, steht ihr Zustandssymbol vor der
+(Verzeichnisse zeigen `▸` statt `▾`). Läuft darin eine Session oder ist eine ungelesen, steht ihr Zustandssymbol vor der
 Überschrift — bei mehreren das dringlichste (waiting vor working vor ready). Eingeklappte Abschnitte
 bleiben über einen Neustart erhalten. Springt man per [Schnellwahl](#schnellwahl-altzahl--ctrlzahl)
-oder `w` zu einer Session darin, klappt ihr Abschnitt auf.
+zu einer Session darin, klappt ihr Abschnitt auf.
 
 Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, yellow, green, cyan,
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
@@ -204,7 +204,6 @@ vom Fokus ab:
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
 | `o` | gespeicherte Sessions älter als 1 Tag / 1 Woche / 1 Monat löschen | — |
 | `1`–`4` / `0` | Fokus auf Fenster / Sessionliste | Fokus auf Fenster / Sessionliste |
-| `w` | nur wenn eine Session wartet: zur nächsten wartenden Session | nur wenn eine Session wartet: zur nächsten wartenden Session |
 | `s` | Sessionliste aus- bzw. einblenden | Sessionliste aus- bzw. einblenden |
 | `l` | bei genau 2 Fenstern: übereinander / nebeneinander | bei genau 2 Fenstern: übereinander / nebeneinander |
 | `z` | — | ab 2 Fenstern: Fenster zoomen; gezoomt: Zoom aufheben |
@@ -224,11 +223,6 @@ Menüpunkt heißt „Unzoom“. Die Sessionliste bleibt, wie sie ist (`s` wirkt 
 von selbst, sobald sich das Layout ändert: Fokus auf ein anderes Fenster oder die Liste (`Ctrl+Pfeil`
 — der Nachbar wird im normalen Layout gesucht —, `0`–`4`, Mausklick), Fenster öffnen, schließen
 oder ersetzen, `l`. Er wird nicht in `state.json` gespeichert.
-
-`w` („Next waiting session“) springt zur nächsten Session im Zustand **waiting for you**, in der
-Reihenfolge der Sessionliste und ab der aktuellen Session (der im Fenster mit Fokus bzw. der in der
-Liste gewählten); bei mehreren wartenden geht es mit jedem `w` reihum weiter. Hat die Session ein
-Fenster, bekommt es den Fokus; sonst geht es weiter wie mit `Enter` in der Liste (Fensterauswahl).
 
 `c` lässt die Session im Hintergrund weiterlaufen. `x` fragt nach („Delete …?“, `y`/Enter bestätigt,
 `n`/Esc bricht ab), schließt dann Fenster und Prozess und **löscht das Protokoll endgültig**
@@ -363,9 +357,9 @@ Zustand **ready** setzt sie wieder als ungelesen. Eine echte Rückfrage bleibt d
 you**, bis sie beantwortet ist; `Ctrl+Space` ändert daran nichts.
 
 Ungelesene Sessions stehen in `state.json` und bleiben so über einen Neustart erhalten, auch über das
-Schließen eines Fensters: Wird die Session wieder geöffnet, steht sie wieder auf **waiting for you**.
-Gespeicherte Sessions, die nicht laufen, zeigen kein Zustandssymbol, die Markierung also erst nach
-dem Öffnen. Gibt es das Protokoll einer Session nicht mehr (in claude-tui oder außerhalb gelöscht,
+Schließen eines Fensters. Auch gespeicherte Sessions, die nicht laufen, zeigen dann ▲ in der Liste
+(sonst haben sie kein Zustandssymbol); `Ctrl+Space` auf der gewählten Zeile schaltet die Markierung
+um, ohne die Session zu öffnen. Gibt es das Protokoll einer Session nicht mehr (in claude-tui oder außerhalb gelöscht,
 von Claude Code aufgeräumt), verschwindet auch ihr Eintrag.
 
 Die Erkennung ist eine Heuristik über Ausgabe-Aktivität und Bildschirmtext, siehe
@@ -397,7 +391,7 @@ den Bildschirm geschrieben hat (meist die Fehlermeldung).
 **Hinweis auf wartende Sessions:** Wechselt eine Session, die nicht im Fenster mit Fokus liegt
 (auch eine Hintergrund-Session ohne Fenster), auf **waiting for you**, läutet claude-tui einmal die
 Terminal-Glocke (BEL) und zeigt unten in der Sessionliste `"<Titel>" is waiting for you`. Das
-passiert nur beim Wechsel, nicht dauerhaft. Hin kommt man mit `w` im Ctrl+A-Menü.
+passiert nur beim Wechsel, nicht dauerhaft.
 `CLAUDE_TUI_NO_BELL=1` schaltet die Glocke ab; der Hinweis bleibt. Ob und wie die Glocke zu hören
 oder zu sehen ist, stellt das Terminal ein (Windows Terminal: `bellStyle`).
 
