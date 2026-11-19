@@ -61,6 +61,11 @@ const OVERVIEW: &[Row] = &[
         "Likewise the todo list (Ctrl+A d): items to tick off; ticked items stay where they \
          are. Its row sits under the notepad (☰Todo with the number of open items).",
     ),
+    Text(
+        "And the notes overview (Ctrl+A m): the notes of all sessions, each under the session's \
+         row as in the list. Its row sits under the todo list (▤ Notes with the number of \
+         sessions that have a note).",
+    ),
     Heading("States"),
     Key("✻ working", "Claude works on a prompt or uses a tool"),
     Key(
@@ -130,6 +135,13 @@ const KEYS: &[Row] = &[
         "Edit the selected item; emptying it deletes it",
     ),
     Key("Shift+X", "Delete the selected item (cannot be undone)"),
+    Heading("Notes overview focused"),
+    Key("↑ / ↓", "Select a session"),
+    Key(
+        "Enter",
+        "Show the selected session like Enter in the list: focus its window or pick one",
+    ),
+    Key("1…4", "Show or resume the selected session in this window"),
     Heading("Session list focused"),
     Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),

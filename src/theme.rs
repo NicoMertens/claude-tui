@@ -42,6 +42,9 @@ pub const TODO_ICON: &str = "☰";
 pub const OPEN_ICON: &str = "☐";
 pub const DONE_ICON: &str = "✓";
 
+/// Notizübersicht aller Sessions: Symbol in Sessionliste und Fensterleiste (Farbe der Notizen).
+pub const NOTES_ICON: &str = "▤";
+
 pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 /// Rot für „arbeitet“ (Fensterleiste und Sessionliste).
 const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);
@@ -120,7 +123,7 @@ mod tests {
         const EMOJI: [char; 7] = ['✳', '✴', '❇', '❄', '☑', '✔', '✅'];
         assert!(SPINNER
             .iter()
-            .chain(&[NOTE_ICON, TODO_ICON, OPEN_ICON, DONE_ICON])
+            .chain(&[NOTE_ICON, TODO_ICON, OPEN_ICON, DONE_ICON, NOTES_ICON])
             .all(|frame| !frame.chars().any(|c| EMOJI.contains(&c))));
     }
 }

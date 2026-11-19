@@ -20,6 +20,7 @@ use crate::{
     list::{self, Cursor, Entry, Group, Heading, Row},
     menu::Menu,
     noteedit::NoteEditor,
+    notelist,
     session::Status,
     tags,
     term_view::TermView,
@@ -240,6 +241,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     for (cursor, line) in [
         (Cursor::Notepad, notepad_line(app, width)),
         (Cursor::Todo, todo_line(app, width)),
+        (Cursor::Notes, notes_line(app, width)),
     ] {
         let is_selected = selected.as_ref() == Some(&cursor);
         if is_selected {
@@ -468,6 +470,13 @@ fn todo_line(app: &App, width: usize) -> Line<'static> {
         &title,
         width,
     )
+}
+
+/// Zeile der Notizübersicht unter der Todo-Liste: `▤ Notes (Sessions mit Notiz)`.
+fn notes_line(app: &App, width: usize) -> Line<'static> {
+    let title = format!("Notes ({})", app.note_items().len());
+    let icon = format!("{} ", theme::NOTES_ICON);
+    panel_line(app, Pane::Notes, (&icon, theme::NOTE), &title, width)
 }
 
 /// `icon` samt Abstand zum Namen; ohne Abstand rückt der Name nach links, die Fensterspalte
@@ -920,6 +929,10 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 draw_todo(f, app, slot, rect);
                 continue;
             }
+            Pane::Notes => {
+                draw_notes(f, app, slot, rect);
+                continue;
+            }
         };
         let Some(session) = app.session(id) else {
             continue;
@@ -1206,6 +1219,110 @@ fn todo_row(line: crate::todo::Line, focused: bool, width: usize) -> Line<'stati
         Span::raw(padding),
     ])
     .style(row_style)
+}
+
+/// Tastenhinweis unten im Rahmen der Notizübersicht (mit Fokus).
+const NOTES_HINT: &str = "enter open · 1…4 open in window";
+
+/// Fenster mit der Notizübersicht: je Session mit Notiz deren Zeile wie in der Sessionliste
+/// (Zustand, Titel in Sessionfarbe, Fensternummer, Zeit), darunter eingerückt die Notiz. Der
+/// gewählte Eintrag ist über alle seine Zeilen hinterlegt.
+fn draw_notes(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
+    let focused = app.windows.focus() == Focus::Window(slot);
+    let color = frame_color(focused);
+    let items = app.note_items();
+    let title = vec![
+        Span::styled(
+            format!("{} Notes ", theme::NOTES_ICON),
+            Style::default().fg(theme::NOTE),
+        ),
+        Span::styled(
+            format!("({}) ", items.len()),
+            Style::default().fg(theme::MUTED),
+        ),
+    ];
+    let mut block = panel_block(app, slot, title, focused, rect);
+    let notice_shown = app.notice.is_some() && app.list_hidden;
+    if focused && !notice_shown && !items.is_empty() {
+        let width = usize::from(rect.width).saturating_sub(4);
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" {} ", head(NOTES_HINT, width.saturating_sub(2))),
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    f.render_widget(block, rect);
+    let area = layout::panel_text(rect);
+    if area.is_empty() {
+        return;
+    }
+    let (width, height) = (usize::from(area.width), usize::from(area.height));
+    if items.is_empty() {
+        let hint = format!(
+            "No session has a note yet. {} t writes one for the selected session.",
+            keys::PREFIX_HINT
+        );
+        f.render_widget(
+            Paragraph::new(hint)
+                .style(Style::default().fg(theme::MUTED))
+                .wrap(ratatui::widgets::Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let shown = app.note_list.render(&items, width, height);
+    let entry_of = |index: usize| {
+        let claude_id = items[index].0;
+        list::flatten(&app.groups).find(|e| e.claude_id == claude_id)
+    };
+    let lines: Vec<Line> = shown
+        .rows
+        .into_iter()
+        .map(|row| {
+            let selected = Some(row.item()) == shown.selected;
+            let line = match &row {
+                notelist::Row::Header(index) => match entry_of(*index) {
+                    Some(entry) => entry_line(app, entry, selected, width),
+                    None => Line::default(),
+                },
+                notelist::Row::Note(_, text) => {
+                    let used =
+                        notelist::INDENT + unicode_width::UnicodeWidthStr::width(text.as_str());
+                    Line::from(vec![
+                        Span::raw(" ".repeat(notelist::INDENT)),
+                        Span::styled(text.clone(), Style::default().fg(theme::TEXT)),
+                        Span::raw(" ".repeat(width.saturating_sub(used))),
+                    ])
+                }
+            };
+            if selected {
+                selected_line(line, focused)
+            } else {
+                line
+            }
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), area);
+    draw_scrollbar(f, rect, color, shown.total, shown.scroll, height);
+}
+
+/// Wie [`selected_item_of`], für eine Zeile außerhalb der Sessionliste.
+fn selected_line(line: Line<'static>, focused: bool) -> Line<'static> {
+    let (fg, bg) = if focused {
+        (Some(theme::SELECTED_FG), theme::SELECTED_BG)
+    } else {
+        (None, theme::SELECTED_DIM_BG)
+    };
+    let mut style = Style::default().bg(bg);
+    if let Some(fg) = fg {
+        style = style.fg(fg);
+    }
+    Line::from(
+        line.spans
+            .into_iter()
+            .map(|span| span.patch_style(style))
+            .collect::<Vec<_>>(),
+    )
+    .style(Style::default().bg(bg))
 }
 
 #[cfg(test)]

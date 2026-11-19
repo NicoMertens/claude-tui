@@ -72,8 +72,8 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 ## Aufbau
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Ganz
-oben stehen der [Notizblock](#notizblock) (`✎ Notepad (N)`) und die [Todo-Liste](#todo-liste)
-(`☰Todo (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
+oben stehen der [Notizblock](#notizblock) (`✎ Notepad (N)`), die [Todo-Liste](#todo-liste)
+(`☰Todo (N)`) und die [Notizübersicht](#notizübersicht) (`▤ Notes (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾, alphabetisch). Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
 stehen laufende Sessions zuerst (in der Reihenfolge, in der sie gestartet wurden, damit sie
@@ -93,8 +93,8 @@ Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, ye
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
 claude-tui liest dafür die letzte `agent-color`-Zeile aus dem Protokoll der Session.
 
-Rechts bis zu **4 Fenster**, jedes mit einer Session, dem [Notizblock](#notizblock) oder der
-[Todo-Liste](#todo-liste). Jede
+Rechts bis zu **4 Fenster**, jedes mit einer Session, dem [Notizblock](#notizblock), der
+[Todo-Liste](#todo-liste) oder der [Notizübersicht](#notizübersicht). Jede
 Nummer hat einen **festen Platz**: 1 oben links, 2 oben rechts,
 3 unten links, 4 unten rechts. Jede Nummer lässt sich öffnen, auch wenn kleinere fehlen. Fehlende
 Fenster lassen keine Lücke: Die linke Spalte gehört 1 und 3, die rechte 2 und 4. Ist eine Spalte
@@ -203,11 +203,12 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht in Notizblock und Todo-Liste) |
-| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht in Notizblock und Todo-Liste) |
-| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht in Notizblock und Todo-Liste) |
+| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
+| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
+| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
 | `p` | [Notizblock](#notizblock) in einem Fenster zeigen: Fensterauswahl (ohne offenes Fenster gleich in Fenster 1) | wie links |
 | `d` | [Todo-Liste](#todo-liste) in einem Fenster zeigen, wie `p` | wie links |
+| `m` | [Notizübersicht](#notizübersicht) in einem Fenster zeigen, wie `p` | wie links |
 | `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
 | `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
@@ -405,10 +406,33 @@ geteilt mit anderen claude-tui —, als `todo.json` im Konfigurationsordner. Sol
 bearbeitet wird, übernimmt claude-tui keine Änderungen anderer Instanzen. Lässt sich `todo.json`
 nicht lesen, meldet claude-tui das beim Start und überschreibt die Datei nicht.
 
+### Notizübersicht
+
+Unter der Todo-Liste steht die **Notizübersicht**: `▤ Notes (2)` mit der Anzahl der Sessions, die
+eine [Notiz](#notizen) haben. Auf ihrer Zeile wirken `Enter`, `1`–`4`, Doppelklick und `c` wie beim
+Notizblock; `m` im Menü zeigt sie in einem Fenster nach Wahl. Die Fensterleiste zeigt
+`[N] ▤ Notes (2)`.
+
+Sie zeigt die Notizen aller Sessions in der Reihenfolge der Sessionliste: je Session deren Zeile
+wie in der Liste (Zustand, Titel in der Sessionfarbe, Schnellwahl-Nummer, Fensternummer, Zeit),
+darunter eingerückt die Notiz mit allen Zeilen, lange Zeilen umbrochen. Mit Fokus auf der
+Notizübersicht:
+
+| Taste | Wirkung |
+|---|---|
+| `↑` / `↓`, `PgUp` / `PgDn`, `Pos1` / `Ende` | Session wählen |
+| `Enter` | gewählte Session zeigen wie `Enter` in der Sessionliste: Hat sie ein Fenster, bekommt es den Fokus, sonst Fensterauswahl; eine gespeicherte wird fortgesetzt |
+| `1`–`4` | gewählte Session in diesem Fenster zeigen bzw. fortsetzen (ersetzt dort auch die Notizübersicht) |
+
+Ein Klick wählt eine Session, ein Doppelklick wirkt wie `Enter`, das Mausrad scrollt. Bearbeitet
+werden Notizen weiter mit `Ctrl+A t` an der Session; die Übersicht folgt sofort. Eingefügter Text
+wirkt hier nicht.
+
 ## Maus
 
 Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen;
-über dem [Notizblock](#notizblock) dessen Text, über der [Todo-Liste](#todo-liste) deren Einträge);
+über dem [Notizblock](#notizblock) dessen Text, über der [Todo-Liste](#todo-liste) deren Einträge, über der
+[Notizübersicht](#notizübersicht) deren Sessions);
 die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
 

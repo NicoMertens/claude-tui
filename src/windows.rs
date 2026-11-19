@@ -12,13 +12,15 @@ pub enum Pane {
     Notepad,
     /// Die Todo-Liste (höchstens ein Fenster).
     Todo,
+    /// Die Notizübersicht aller Sessions (höchstens ein Fenster).
+    Notes,
 }
 
 impl Pane {
     pub fn session(self) -> Option<SessionId> {
         match self {
             Self::Session(id) => Some(id),
-            Self::Notepad | Self::Todo => None,
+            Self::Notepad | Self::Todo | Self::Notes => None,
         }
     }
 }

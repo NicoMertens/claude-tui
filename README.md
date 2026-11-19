@@ -20,6 +20,8 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 - **Sessionliste ausblendbar**, damit die Fenster die volle Breite bekommen.
 - **Todo-Liste** (`Ctrl+A d`): Einträge zum Abhaken, mehrzeilig, Reihenfolge per Verschieben;
   steht als `☰Todo (offene)` unter dem Notizblock in der Sessionliste.
+- **Notizübersicht** (`Ctrl+A m`): die Notizen aller Sessions untereinander, je Session mit
+  Zustand und Farbe wie in der Sessionliste; `Enter` bzw. `1`–`4` öffnet die gewählte Session.
 - **Notizblock** (`Ctrl+A p`): freier Text unabhängig von den Sessions, in einem Fenster nach Wahl,
   mit Zeilenumbruch und Scrollbar; steht als `✎ Notepad (Zeilen)` ganz oben in der Sessionliste
   und wird automatisch gespeichert.

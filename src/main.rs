@@ -16,6 +16,7 @@ mod list;
 mod menu;
 mod mouse;
 mod noteedit;
+mod notelist;
 mod notepad;
 mod paths;
 mod recent;

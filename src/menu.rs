@@ -38,6 +38,8 @@ pub enum Action {
     ShowNotepad,
     /// Todo-Liste in einem Fenster zeigen (danach Fensterauswahl).
     ShowTodo,
+    /// Notizübersicht in einem Fenster zeigen (danach Fensterauswahl).
+    ShowNotes,
     /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
     ToggleCollapsed,
     /// Alle Abschnitte einklappen (`true`) bzw. ausklappen.
@@ -120,6 +122,11 @@ pub const TODO: Entry = entry(
     "Todo list",
     "Show the todo list in a window of your choice: items to tick off, independent of sessions, saved automatically",
 );
+pub const NOTES: Entry = entry(
+    'm',
+    "Notes overview",
+    "Show the notes of all sessions in a window of your choice; Enter or 1…4 opens a session",
+);
 pub const COLLAPSE: Entry = Entry {
     hotkey: 'f',
     keys: "f / ← →",
@@ -167,7 +174,7 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 17] = [
+pub const ENTRIES: [&Entry; 18] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
@@ -175,6 +182,7 @@ pub const ENTRIES: [&Entry; 17] = [
     &NOTE,
     &NOTEPAD,
     &TODO,
+    &NOTES,
     &COLLAPSE,
     &COLLAPSE_ALL,
     &EXPAND_ALL,
@@ -207,6 +215,8 @@ pub enum Purpose {
     Notepad,
     /// Todo-Liste zeigen.
     Todo,
+    /// Notizübersicht zeigen.
+    Notes,
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
     /// Mehrere Claude-Sessions (markiert oder nach Alter), deren Löschen bestätigt werden soll.
@@ -239,7 +249,7 @@ pub struct Context<'a> {
     pub windows: [bool; MAX_WINDOWS],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
-    /// Das Fenster mit Fokus zeigt keine Session (Notizblock oder Todo-Liste).
+    /// Das Fenster mit Fokus zeigt keine Session (Notizblock, Todo-Liste oder Notizübersicht).
     pub panel_focused: bool,
     /// In der Liste ist eine Session ausgewählt.
     pub has_selection: bool,
@@ -300,6 +310,7 @@ impl Menu {
         }
         add(&NOTEPAD, NOTEPAD.label, Action::ShowNotepad);
         add(&TODO, TODO.label, Action::ShowTodo);
+        add(&NOTES, NOTES.label, Action::ShowNotes);
         if let (false, Some(collapsed)) = (in_window, ctx.collapsed) {
             let label = if collapsed {
                 "Expand group"
@@ -784,7 +795,7 @@ mod tests {
         for absent in ['x', 'g', 't'] {
             assert!(!hotkeys.contains(absent), "{absent} in {hotkeys}");
         }
-        for present in ['n', 'c', 'p', 'z'] {
+        for present in ['n', 'c', 'p', 'd', 'm', 'z'] {
             assert!(hotkeys.contains(present), "{present} fehlt in {hotkeys}");
         }
     }
