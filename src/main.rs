@@ -203,15 +203,20 @@ fn on_typed(
     let mut burst = vec![first];
     let mut chars: Vec<char> = keys::pasted_char(&first).into_iter().collect();
     let mut rest = None;
+    let since_paste = last_paste.map(|at| at.elapsed());
+    let started = Instant::now();
+    let mut last_char = started;
+    let mut max_gap = Duration::ZERO;
+    let mut paste;
     loop {
-        // Sobald mehr als ein Zeichen ohne Pause kam, kurz auf den Rest warten: Lange Texte
-        // liefert die Konsole stückweise, auch mitten in einer Zeile. Endete der Stoß dort, lief
-        // der Rest samt abschließendem Enter als Tippen durch und schickte ab.
-        let wait = if chars.len() > 1 {
-            PASTE_GAP
-        } else {
-            Duration::ZERO
-        };
+        // Die Konsole liefert eingefügten Text stückweise, auch mitten in einer Zeile. Ein Stück
+        // darf deshalb nie allein entscheiden: Was schon als Tastendrücke an die Session ging,
+        // lässt sich nicht zurückholen (sonst kam der Anfang getippt, der Rest als eingefügter
+        // Block, oder ein Enter im Rest schickte ab). Steht fest, dass eingefügt wird, wird bis
+        // zur Ruhe gesammelt und alles als ein Block weitergegeben.
+        paste =
+            keys::is_paste(&chars, since_paste) || (chars.len() > 1 && app.takes_bursts_as_paste());
+        let wait = if paste { PASTE_QUIET } else { PASTE_GAP };
         if !event::poll(wait)? {
             break;
         }
@@ -219,8 +224,12 @@ fn on_typed(
             Event::Key(key)
                 if key.kind == KeyEventKind::Release
                     || matches!(key.code, event::KeyCode::Modifier(_)) => {}
+            // Mausbewegung meldet das Terminal ständig; sie darf den Text nicht zerteilen.
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => {}
             Event::Key(key) => match keys::pasted_char(&key) {
                 Some(c) => {
+                    max_gap = max_gap.max(last_char.elapsed());
+                    last_char = Instant::now();
                     burst.push(key);
                     chars.push(c);
                 }
@@ -235,12 +244,12 @@ fn on_typed(
             }
         }
     }
-    let since_paste = last_paste.map(|at| at.elapsed());
-    let paste =
-        keys::is_paste(&chars, since_paste) || (chars.len() > 1 && app.takes_bursts_as_paste());
     trace::mark(format_args!(
-        "input: {} chars, paste {paste}, ends with newline {}, {}ms since paste, ended by {}",
+        "input: {} chars in {}ms (largest gap {}ms), paste {paste}, ends with newline {}, \
+         {}ms since paste, ended by {}",
         chars.len(),
+        last_char.duration_since(started).as_millis(),
+        max_gap.as_millis(),
         chars.last() == Some(&'\n'),
         since_paste.map_or(-1, |d| d.as_millis() as i64),
         if rest.is_some() {
@@ -260,8 +269,12 @@ fn on_typed(
     Ok(rest)
 }
 
-/// So lange darf in einem Stoß eingefügten Textes Pause sein, bevor der Rest kommt.
+/// So lange wird auf ein weiteres Zeichen gewartet, solange noch offen ist, ob eingefügt wird —
+/// auch nach dem ersten, damit ein Text nicht nach einem Zeichen zerfällt. Tippen merkt das nicht.
 const PASTE_GAP: Duration = Duration::from_millis(10);
+/// Steht fest, dass eingefügt wird: So lange Ruhe beendet den Text. Kürzer als der Abstand
+/// zwischen getippten Tasten, damit Weitertippen nicht in den Block rutscht.
+const PASTE_QUIET: Duration = Duration::from_millis(50);
 
 /// Höchstens so viele Ereignisse je Bild.
 const MAX_EVENTS_PER_FRAME: usize = 64;

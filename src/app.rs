@@ -1026,14 +1026,24 @@ impl App {
         Ok(())
     }
 
-    /// Die Todo-Liste mit Fokus nimmt Buchstaben als Befehle: Mehrere ohne Pause angekommene
-    /// Zeichen sind dann eingefügter Text (Windows liefert Einfügen als Tastendrücke), keine Folge
-    /// von Befehlen.
+    /// Mehrere ohne Pause angekommene Zeichen sind eingefügter Text (Windows liefert Einfügen als
+    /// Tastendrücke): in einer Session, damit Claude ihn als einen Block bekommt und ein Enter darin
+    /// nicht abschickt, und in der Todo-Liste, die Buchstaben sonst als Befehle nimmt. Menü, Hilfe
+    /// und Dialoge nehmen Tasten als Befehle und bekommen sie einzeln.
     pub fn takes_bursts_as_paste(&self) -> bool {
-        self.windows.focused_pane() == Some(Pane::Todo)
-            && !self.todo.is_editing()
-            && self.menu.is_none()
-            && self.help.is_none()
+        if self.menu.is_some()
+            || self.help.is_some()
+            || self.dir_picker.is_some()
+            || self.group_picker.is_some()
+            || self.note_editor.is_some()
+        {
+            return false;
+        }
+        match self.windows.focused_pane() {
+            Some(Pane::Session(_)) => true,
+            Some(Pane::Todo) => !self.todo.is_editing(),
+            _ => false,
+        }
     }
 
     pub fn on_paste(&mut self, text: &str) -> Result<()> {

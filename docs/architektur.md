@@ -71,13 +71,15 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
    merkt sich den Zeitpunkt der letzten Ausgabe.
 3. Die Hauptschleife fragt bei jedem Takt den Status ab, zeichnet und leitet Tastendrücke als
    Bytes an das PTY der Session im Fenster mit Fokus weiter. Unter Windows kann crossterm kein
-   Bracketed Paste, eingefügter Text kommt dort als Tastendrücke an. Folgt in einer ohne Pause
-   anstehenden Folge noch Text auf ein Enter, gibt `main.rs` die Folge als eingefügten Text
-   weiter (mit Bracketed-Paste-Rahmen, wenn die Session ihn verlangt). So schickt Claude nicht
-   schon nach der ersten Zeile ab. Lange Texte liefert die Konsole stückweise, auch mitten in
-   einer Zeile: Nach dem zweiten Zeichen wartet `main.rs` deshalb kurz (10 ms) auf weitere, und
-   was bis 150 ms nach eingefügtem Text kommt, gehört noch dazu — sonst schickte das Enter am
-   Ende des Rests ab. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
+   Bracketed Paste, eingefügter Text kommt dort als Tastendrücke an. `main.rs` wartet nach jedem
+   Zeichen kurz (10 ms) auf ein weiteres. Kommen mindestens zwei ohne Pause, ist es eingefügter
+   Text, wenn eine Session oder die Todo-Liste den Fokus hat (sonst nur, wenn auf ein Enter noch
+   Text folgt). Dann sammelt `main.rs`, bis 50 ms Ruhe ist, und gibt alles als einen Text weiter
+   (mit Bracketed-Paste-Rahmen, wenn die Session ihn verlangt). So schickt Claude weder nach der
+   ersten Zeile noch bei einem Enter am Ende ab. Die Konsole liefert lange Texte stückweise, auch
+   mitten in einer Zeile; entschiede jedes Stück für sich, käme der Anfang als Tippen und der Rest
+   als eigener Block an. Mausbewegungen unterbrechen das Sammeln nicht, und was bis 150 ms nach
+   eingefügtem Text kommt, gehört noch dazu. Beendete Prozesse verlieren ihr Fenster; die Claude-Session bleibt in der Liste. Alle 2 s liest
    `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte). Wechselt eine
    Session dabei auf „wartet“, setzt `App::tick` einen Hinweis und `ring_bell`; `main.rs` schreibt
    das BEL nach dem Zeichnen direkt über das Terminal-Backend.
