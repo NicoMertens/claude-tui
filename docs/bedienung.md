@@ -466,7 +466,8 @@ Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede S
 `--settings` und eigenen Hook-Einträgen, die per HTTP an claude-tui melden (Prompt abgeschickt
 oder Tool genutzt = working, Freigabedialog = waiting for you, Antwort fertig = ready). Liegt für
 eine Session (noch) keine Meldung vor — etwa bei einem eigenen Befehl ohne Hook-Unterstützung —,
-greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working, Rückfrage-Text auf dem
+greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working (ohne das Neuzeichnen kurz
+nach Scrollen oder Klicken mit der Maus), Rückfrage-Text auf dem
 Bildschirm („Do you want to …“) = waiting for you, sonst ready. Nach einer Eingabe in eine Session,
 die gerade wartet oder arbeitet, entscheidet bis zur nächsten Meldung ebenfalls die Heuristik
 (z. B. nach einer abgelehnten Freigabe oder einem Abbruch mit `Esc`). Details in

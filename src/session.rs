@@ -22,6 +22,9 @@ use crate::{
 /// Ausgabe innerhalb dieses Fensters gilt als „arbeitet“ — Claude Code animiert seinen Spinner,
 /// solange es rechnet, und schreibt nichts, wenn es auf Eingabe wartet.
 const WORKING_WINDOW: Duration = Duration::from_millis(1500);
+/// So lange nach einem weitergereichten Mausereignis zählt Ausgabe nicht als Aktivität: Claude Code
+/// zeichnet im Fullscreen-Modus beim Scrollen neu, arbeitet dabei aber nicht.
+const MOUSE_ECHO: Duration = Duration::from_millis(500);
 const SCROLLBACK: usize = 10_000;
 /// Zeilen je Mausrad-Raste.
 const WHEEL_LINES: usize = 3;
@@ -51,7 +54,7 @@ pub struct Session {
     pub status: Status,
     size: (u16, u16),
     parser: Arc<Mutex<vt100::Parser>>,
-    last_output: Arc<Mutex<Instant>>,
+    activity: Arc<Mutex<Activity>>,
     reader_done: Arc<AtomicBool>,
     /// Zeitpunkt der letzten Eingabe in die Session.
     last_input: SystemTime,
@@ -113,12 +116,12 @@ impl Session {
             non_zero(cols),
             SCROLLBACK,
         )));
-        let last_output = Arc::new(Mutex::new(Instant::now()));
+        let activity = Arc::new(Mutex::new(Activity::new(Instant::now())));
         let reader_done = Arc::new(AtomicBool::new(false));
 
         {
             let parser = Arc::clone(&parser);
-            let last_output = Arc::clone(&last_output);
+            let activity = Arc::clone(&activity);
             let reader_done = Arc::clone(&reader_done);
             thread::spawn(move || {
                 let mut buf = [0u8; 8192];
@@ -127,7 +130,7 @@ impl Session {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
                             lock(&parser).process(&buf[..n]);
-                            *lock(&last_output) = Instant::now();
+                            lock(&activity).output(Instant::now());
                         }
                     }
                 }
@@ -143,7 +146,7 @@ impl Session {
             status: Status::Starting,
             size: (rows, cols),
             parser,
-            last_output,
+            activity,
             reader_done,
             last_input: SystemTime::UNIX_EPOCH,
             hook: None,
@@ -199,7 +202,7 @@ impl Session {
 
     /// Zeitpunkt der letzten Ausgabe — bei einer wartenden Session also, seit wann sie wartet.
     pub fn last_output(&self) -> Instant {
-        *lock(&self.last_output)
+        lock(&self.activity).last_output
     }
 
     /// Letzte nicht leere Zeile auf dem Bildschirm — nach dem Ende meist die Fehlermeldung.
@@ -286,7 +289,7 @@ impl Session {
                 since(self.started)
             ));
         }
-        let recently_active = lock(&self.last_output).elapsed() < WORKING_WINDOW;
+        let recently_active = self.last_output().elapsed() < WORKING_WINDOW;
         let on_screen = || waits_for_decision(&self.screen().screen().contents());
         self.status = resolve(self.hook, self.last_input, recently_active, on_screen);
     }
@@ -337,7 +340,8 @@ impl Session {
         };
         // Nicht über `write`: Maus ist keine Eingabe — sie darf weder den Hook-Zustand auf die
         // Heuristik zurückwerfen (`last_input`) noch eine wartende Session als beantwortet gelten
-        // lassen.
+        // lassen. Auch die Ausgabe, mit der das Programm darauf neu zeichnet, ist keine Arbeit.
+        lock(&self.activity).ignore_for(Instant::now(), MOUSE_ECHO);
         self.writer.write_all(&bytes)?;
         self.writer.flush()?;
         Ok(())
@@ -398,6 +402,32 @@ impl Drop for Session {
             let _ = child.kill();
         }
         hooks::clear(&self.hook_id);
+    }
+}
+
+/// Letzte Ausgabe der Session, ohne das bloße Neuzeichnen nach einem Mausereignis.
+#[derive(Clone, Copy, Debug)]
+struct Activity {
+    last_output: Instant,
+    ignore_until: Option<Instant>,
+}
+
+impl Activity {
+    fn new(now: Instant) -> Self {
+        Self {
+            last_output: now,
+            ignore_until: None,
+        }
+    }
+
+    fn output(&mut self, now: Instant) {
+        if self.ignore_until.is_none_or(|until| now >= until) {
+            self.last_output = now;
+        }
+    }
+
+    fn ignore_for(&mut self, now: Instant, window: Duration) {
+        self.ignore_until = Some(now + window);
     }
 }
 
@@ -574,6 +604,20 @@ mod tests {
 
     fn at(secs: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn redraw_after_mouse_is_not_activity() {
+        let start = Instant::now();
+        let ms = |n| start + Duration::from_millis(n);
+        let mut activity = Activity::new(start);
+        activity.output(ms(100));
+        assert_eq!(activity.last_output, ms(100));
+        activity.ignore_for(ms(200), Duration::from_millis(500));
+        activity.output(ms(250));
+        assert_eq!(activity.last_output, ms(100));
+        activity.output(ms(700));
+        assert_eq!(activity.last_output, ms(700));
     }
 
     /// Spielt rohe Zustände (mit „Hook meldet arbeitet“) ab und liefert den zuletzt gezeigten.
