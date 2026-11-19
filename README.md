@@ -18,6 +18,8 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
   Fenster lassen keine Lücke (z. B. 1 und 3 übereinander, 2 allein über die ganze Fläche).
 - **Zoom** wie in tmux: ein Fenster bekommt die ganze Fläche, die übrigen Sessions laufen weiter.
 - **Sessionliste ausblendbar**, damit die Fenster die volle Breite bekommen.
+- **Todo-Liste** (`Ctrl+A d`): Einträge zum Abhaken, mehrzeilig, Reihenfolge per Verschieben;
+  steht als `☰Todo (offene)` unter dem Notizblock in der Sessionliste.
 - **Notizblock** (`Ctrl+A p`): freier Text unabhängig von den Sessions, in einem Fenster nach Wahl,
   mit Zeilenumbruch und Scrollbar; steht als `✎ Notepad (Zeilen)` ganz oben in der Sessionliste
   und wird automatisch gespeichert.
@@ -69,7 +71,7 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 **Start und Wiederherstellen**
 
 - Beim Start kommen die Sessions des letzten Laufs in ihre Fenster zurück, samt Fokus, Layout,
-  Gruppen, Notizen, Notizblock und Schnellwahl-Nummern.
+  Gruppen, Notizen, Notizblock, Todo-Liste und Schnellwahl-Nummern.
 - Die Claude-Prozesse starten **nacheinander**, damit sie sich nicht gegenseitig ausbremsen.
 - Eigener Startbefehl möglich, z. B. `claude-tui "claude --model opus"`.
 - Zeitmessung für die Fehlersuche mit `CLAUDE_TUI_TRACE=1`.

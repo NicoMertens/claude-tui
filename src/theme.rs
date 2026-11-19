@@ -32,6 +32,16 @@ pub const NOTE: Color = Color::Rgb(0xFF, 0x8C, 0x00);
 /// Kennzeichnet Sessions mit Notiz. Einfach breit und unter Windows kein Emoji (anders als ✏).
 pub const NOTE_ICON: &str = "✎";
 
+/// Todo-Liste: Symbol in Sessionliste und Fensterleiste, Kästchen offener und Häkchen erledigter
+/// Einträge.
+pub const TODO: Color = Color::Rgb(0x8F, 0xBF, 0x7F);
+/// Wie alle Symbole einfach breit und unter Windows kein Emoji (anders als ☑ oder ✔). `☰` steht
+/// ohne Leerzeichen vor „Todo“: mit Leerzeichen wirkte der Abstand im Terminal größer als bei
+/// `✎ Notepad`.
+pub const TODO_ICON: &str = "☰";
+pub const OPEN_ICON: &str = "☐";
+pub const DONE_ICON: &str = "✓";
+
 pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 /// Rot für „arbeitet“ (Fensterleiste und Sessionliste).
 const BUSY: Color = Color::Rgb(0xE0, 0x5A, 0x4F);
@@ -105,11 +115,12 @@ mod tests {
     }
 
     #[test]
-    fn spinner_has_no_emoji_characters() {
+    fn symbols_have_no_emoji_characters() {
         // Zeichen mit Emoji-Darstellung unter Windows (✳ ✴ ❇ u. a.) verschieben die Zeile.
-        const EMOJI: [char; 4] = ['✳', '✴', '❇', '❄'];
+        const EMOJI: [char; 7] = ['✳', '✴', '❇', '❄', '☑', '✔', '✅'];
         assert!(SPINNER
             .iter()
+            .chain(&[NOTE_ICON, TODO_ICON, OPEN_ICON, DONE_ICON])
             .all(|frame| !frame.chars().any(|c| EMOJI.contains(&c))));
     }
 }

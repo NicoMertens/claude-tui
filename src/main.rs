@@ -2,6 +2,7 @@ mod app;
 mod claude_store;
 mod dirpick;
 mod external;
+mod filesync;
 mod grouppick;
 mod groups;
 mod help;
@@ -25,6 +26,7 @@ mod tags;
 mod term_view;
 mod textbuf;
 mod theme;
+mod todo;
 mod trace;
 mod ui;
 mod update;
@@ -165,7 +167,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
         }
     }
     app.save_cache();
-    app.save_notepad()
+    app.save_panels()
 }
 
 /// Verarbeitet ein Ereignis; `true`, wenn sich dadurch etwas geändert haben kann.
@@ -234,7 +236,8 @@ fn on_typed(
         }
     }
     let since_paste = last_paste.map(|at| at.elapsed());
-    let paste = keys::is_paste(&chars, since_paste);
+    let paste =
+        keys::is_paste(&chars, since_paste) || (chars.len() > 1 && app.takes_bursts_as_paste());
     trace::mark(format_args!(
         "input: {} chars, paste {paste}, ends with newline {}, {}ms since paste, ended by {}",
         chars.len(),

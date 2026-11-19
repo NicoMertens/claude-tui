@@ -61,10 +61,10 @@ pub fn visible(
 /// Höchstens so viele Notizzeilen stehen unten im Fenster.
 pub const NOTE_MAX_ROWS: usize = 5;
 
-/// Textfläche des Notizblocks im Fensterrechteck `rect`: innerhalb des Rahmens je eine Spalte
+/// Textfläche des Notizblocks bzw. der Todo-Liste im Fensterrechteck `rect`: innerhalb des Rahmens je eine Spalte
 /// Abstand links und rechts. Die Scrollbar liegt auf dem rechten Rahmen, damit der Umbruch nicht
 /// davon abhängt, ob sie gerade zu sehen ist.
-pub fn notepad_text(rect: Rect) -> Rect {
+pub fn panel_text(rect: Rect) -> Rect {
     rect.inner(Margin::new(2, 1))
 }
 

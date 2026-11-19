@@ -57,6 +57,10 @@ const OVERVIEW: &[Row] = &[
          the session list (✎ Notepad with its number of lines): Enter shows it, 1…4 puts it \
          into that window.",
     ),
+    Text(
+        "Likewise the todo list (Ctrl+A d): items to tick off; ticked items stay where they \
+         are. Its row sits under the notepad (☰Todo with the number of open items).",
+    ),
     Heading("States"),
     Key("✻ working", "Claude works on a prompt or uses a tool"),
     Key(
@@ -110,6 +114,22 @@ const KEYS: &[Row] = &[
         "Move by screen line; Ctrl+Home / Ctrl+End go to the start / end of the text",
     ),
     Key("PgUp / PgDn", "Move by a page"),
+    Heading("Todo list focused"),
+    Key("↑ / ↓", "Select an item"),
+    Key(
+        "Shift+↑ / ↓",
+        "Move the selected item up or down by one place (also Alt+↑ / ↓)",
+    ),
+    Key("Space", "Tick off or reopen; the item stays where it is"),
+    Key(
+        "a",
+        "Add an item below the selection; Enter saves, Shift+Enter starts a new line, Esc cancels",
+    ),
+    Key(
+        "e / Enter",
+        "Edit the selected item; emptying it deletes it",
+    ),
+    Key("Shift+X", "Delete the selected item (cannot be undone)"),
     Heading("Session list focused"),
     Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),
@@ -171,7 +191,10 @@ const MOUSE: &[Row] = &[
         "Double-click",
         "On a session in the list: like Enter; in a window: copy a word",
     ),
-    Key("Wheel", "Scroll a window's history, or the notepad"),
+    Key(
+        "Wheel",
+        "Scroll a window's history, the notepad or the todo list",
+    ),
     Key(
         "Drag",
         "Select text; in fullscreen mode Claude selects and copies, otherwise claude-tui",

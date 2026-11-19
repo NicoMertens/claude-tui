@@ -237,17 +237,21 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     // Je Bildschirmzeile die Listenzeile dahinter; `None` = Leerzeile zwischen Abschnitten.
     let mut cursors: Vec<Option<Cursor>> = Vec::with_capacity(rows.len());
     let mut selected_item = None;
-    let notepad_selected = selected == Some(Cursor::Notepad);
-    if notepad_selected {
-        selected_item = Some(0);
+    for (cursor, line) in [
+        (Cursor::Notepad, notepad_line(app, width)),
+        (Cursor::Todo, todo_line(app, width)),
+    ] {
+        let is_selected = selected.as_ref() == Some(&cursor);
+        if is_selected {
+            selected_item = Some(items.len());
+        }
+        items.push(if is_selected {
+            selected_item_of(line, focused)
+        } else {
+            ListItem::new(line)
+        });
+        cursors.push(Some(cursor));
     }
-    let line = notepad_line(app, width);
-    items.push(if notepad_selected {
-        selected_item_of(line, focused)
-    } else {
-        ListItem::new(line)
-    });
-    cursors.push(Some(Cursor::Notepad));
     for row in &rows {
         if matches!(row, Row::Heading(_)) && !items.is_empty() {
             items.push(ListItem::new(Line::default()));
@@ -449,22 +453,42 @@ fn entry_line(app: &App, entry: &Entry, selected: bool, width: usize) -> Line<'s
 /// Zeile des Notizblocks ganz oben in der Liste: `✎ Notepad (Zeilen)` und wie bei einer Session
 /// die Fensternummer, falls er sichtbar ist.
 fn notepad_line(app: &App, width: usize) -> Line<'static> {
-    let window = match app.windows.slot_of(Pane::Notepad) {
+    let title = format!("Notepad ({})", app.notepad.line_count());
+    let icon = format!("{} ", theme::NOTE_ICON);
+    panel_line(app, Pane::Notepad, (&icon, theme::NOTE), &title, width)
+}
+
+/// Zeile der Todo-Liste unter dem Notizblock: `☰Todo (offene Einträge)`.
+fn todo_line(app: &App, width: usize) -> Line<'static> {
+    let title = format!("Todo ({})", app.todo.open_count());
+    panel_line(
+        app,
+        Pane::Todo,
+        (theme::TODO_ICON, theme::TODO),
+        &title,
+        width,
+    )
+}
+
+/// `icon` samt Abstand zum Namen; ohne Abstand rückt der Name nach links, die Fensterspalte
+/// bleibt an ihrem Platz.
+fn panel_line(
+    app: &App,
+    pane: Pane,
+    (icon, color): (&str, Color),
+    title: &str,
+    width: usize,
+) -> Line<'static> {
+    let window = match app.windows.slot_of(pane) {
         Some(s) => format!(" [{}]", s + 1),
         None => " ".repeat(4),
     };
-    // Symbol + Leerzeichen, Fensterspalte, Platz der Zeitspalte wie bei den Sessions.
-    let title_width = width.saturating_sub(2 + 4 + 6);
-    let title = head(
-        &format!("Notepad ({})", app.notepad.line_count()),
-        title_width,
-    );
+    // Symbol mit Abstand, Fensterspalte, Platz der Zeitspalte wie bei den Sessions.
+    let title_width = width.saturating_sub(unicode_width::UnicodeWidthStr::width(icon) + 4 + 6);
+    let title = head(title, title_width);
     let padding = " ".repeat(title_width.saturating_sub(title.chars().count()));
     Line::from(vec![
-        Span::styled(
-            format!("{} ", theme::NOTE_ICON),
-            Style::default().fg(theme::NOTE),
-        ),
+        Span::styled(icon.to_string(), Style::default().fg(color)),
         Span::styled(
             format!("{title}{padding}"),
             Style::default().fg(theme::TEXT),
@@ -892,6 +916,10 @@ fn draw_windows(f: &mut Frame, app: &App) {
                 draw_notepad(f, app, slot, rect);
                 continue;
             }
+            Pane::Todo => {
+                draw_todo(f, app, slot, rect);
+                continue;
+            }
         };
         let Some(session) = app.session(id) else {
             continue;
@@ -999,20 +1027,13 @@ fn with_notice<'a>(block: Block<'a>, app: &App, focused: bool, rect: Rect) -> Bl
 fn draw_notepad(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
     let focused = app.windows.focus() == Focus::Window(slot);
     let color = frame_color(focused);
-    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
-    let mut spans = vec![
-        Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
-        Span::styled(
-            format!("{} Notepad ", theme::NOTE_ICON),
-            title_style.fg(theme::NOTE),
-        ),
-    ];
-    if app.windows.zoomed() == Some(slot) {
-        spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
-    }
-    let block = with_notice(rounded(color).title(Line::from(spans)), app, focused, rect);
+    let title = vec![Span::styled(
+        format!("{} Notepad ", theme::NOTE_ICON),
+        Style::default().fg(theme::NOTE),
+    )];
+    let block = panel_block(app, slot, title, focused, rect);
     f.render_widget(block, rect);
-    let text = layout::notepad_text(rect);
+    let text = layout::panel_text(rect);
     if text.is_empty() {
         return;
     }
@@ -1029,18 +1050,162 @@ fn draw_notepad(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
         let y = text.y + u16::try_from(row).unwrap_or(0);
         f.buffer_mut()[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
     }
-    if shown.total > height {
-        let mut state = ScrollbarState::new(shown.total - height + 1)
-            .position(shown.scroll)
-            .viewport_content_length(height);
-        let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_symbol(Some("│"))
-            .track_style(Style::default().fg(color))
-            .thumb_style(Style::default().fg(theme::TEXT));
-        f.render_stateful_widget(bar, rect.inner(Margin::new(0, 1)), &mut state);
+    draw_scrollbar(f, rect, color, shown.total, shown.scroll, height);
+}
+
+/// Rahmen von Notizblock bzw. Todo-Liste: Fensternummer, `title`, ggf. „zoomed“ und unten ein
+/// Hinweis wie bei den Session-Fenstern.
+fn panel_block<'a>(
+    app: &App,
+    slot: usize,
+    title: Vec<Span<'a>>,
+    focused: bool,
+    rect: Rect,
+) -> Block<'a> {
+    let color = frame_color(focused);
+    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    let mut spans = vec![Span::styled(
+        format!(" [{}] ", slot + 1),
+        title_style.fg(theme::TEXT),
+    )];
+    spans.extend(
+        title
+            .into_iter()
+            .map(|span| Span::styled(span.content, title_style.patch(span.style))),
+    );
+    if app.windows.zoomed() == Some(slot) {
+        spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
     }
+    with_notice(rounded(color).title(Line::from(spans)), app, focused, rect)
+}
+
+/// Scrollbar auf dem rechten Rahmen, sobald `total` Zeilen nicht in `height` passen.
+fn draw_scrollbar(
+    f: &mut Frame,
+    rect: Rect,
+    color: Color,
+    total: usize,
+    scroll: usize,
+    height: usize,
+) {
+    if total <= height {
+        return;
+    }
+    let mut state = ScrollbarState::new(total - height + 1)
+        .position(scroll)
+        .viewport_content_length(height);
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("│"))
+        .track_style(Style::default().fg(color))
+        .thumb_style(Style::default().fg(theme::TEXT));
+    f.render_stateful_widget(bar, rect.inner(Margin::new(0, 1)), &mut state);
+}
+
+/// Tastenhinweise unten im Rahmen der Todo-Liste (mit Fokus): in der Liste bzw. beim Bearbeiten.
+const TODO_HINT: &str = "a add · e edit · space done · shift+x delete · shift+↑↓ move";
+const TODO_EDIT_HINT: &str = "enter save · shift+enter new line · esc cancel";
+
+/// Fenster mit der Todo-Liste: je Eintrag Häkchen und umbrochener Text (Folgezeilen eingerückt),
+/// erledigte gedämpft und durchgestrichen; der gewählte Eintrag ist hinterlegt.
+fn draw_todo(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
+    let focused = app.windows.focus() == Focus::Window(slot);
+    let color = frame_color(focused);
+    let todo = &app.todo;
+    let counts = match todo.done_count() {
+        0 => format!("({} open) ", todo.open_count()),
+        n => format!("({} open · {n} done) ", todo.open_count()),
+    };
+    let title = vec![
+        Span::styled(
+            format!("{}Todo ", theme::TODO_ICON),
+            Style::default().fg(theme::TODO),
+        ),
+        Span::styled(counts, Style::default().fg(theme::MUTED)),
+    ];
+    let mut block = panel_block(app, slot, title, focused, rect);
+    // Ein Hinweis (Fehler o. Ä.) belegt den unteren Rahmen schon.
+    let notice_shown = app.notice.is_some() && app.list_hidden;
+    if focused && !notice_shown {
+        let hint = if todo.is_editing() {
+            TODO_EDIT_HINT
+        } else {
+            TODO_HINT
+        };
+        let width = usize::from(rect.width).saturating_sub(4);
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" {} ", head(hint, width.saturating_sub(2))),
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    f.render_widget(block, rect);
+    let area = layout::panel_text(rect);
+    if area.is_empty() {
+        return;
+    }
+    let (width, height) = (usize::from(area.width), usize::from(area.height));
+    let shown = todo.render(width, height);
+    if shown.lines.is_empty() {
+        f.render_widget(
+            Paragraph::new("No todos yet. Press a to add one.")
+                .style(Style::default().fg(theme::MUTED))
+                .wrap(ratatui::widgets::Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let lines: Vec<Line> = shown
+        .lines
+        .into_iter()
+        .map(|line| todo_row(line, focused, width))
+        .collect();
+    f.render_widget(Paragraph::new(lines), area);
+    if let Some((row, col)) = shown.cursor.filter(|_| focused) {
+        let col = (crate::todo::MARK_WIDTH + col).min(width - 1);
+        let x = area.x + u16::try_from(col).unwrap_or(0);
+        let y = area.y + u16::try_from(row).unwrap_or(0);
+        f.buffer_mut()[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
+    }
+    draw_scrollbar(f, rect, color, shown.total, shown.scroll, height);
+}
+
+/// Eine Bildschirmzeile der Todo-Liste, auf `width` aufgefüllt, damit die Hinterlegung der
+/// Auswahl über die ganze Breite reicht.
+fn todo_row(line: crate::todo::Line, focused: bool, width: usize) -> Line<'static> {
+    let (mark, mark_color) = match line.mark {
+        Some(true) => (theme::DONE_ICON, theme::TODO),
+        Some(false) => (theme::OPEN_ICON, theme::TEXT),
+        None => (" ", theme::TEXT),
+    };
+    let mut text_style = if line.done && !line.editing {
+        Style::default()
+            .fg(theme::MUTED)
+            .add_modifier(Modifier::CROSSED_OUT)
+    } else {
+        Style::default().fg(theme::TEXT)
+    };
+    let mut mark_style = Style::default().fg(mark_color);
+    let mut row_style = Style::default();
+    // Wie in der Sessionliste: blau mit dunkler Schrift nur mit Fokus, sonst dezent hinterlegt.
+    // Das Eingabefeld bleibt dezent, damit der Cursor erkennbar ist.
+    if line.selected {
+        if focused && !line.editing {
+            row_style = row_style.bg(theme::SELECTED_BG);
+            text_style = text_style.fg(theme::SELECTED_FG);
+            mark_style = mark_style.fg(theme::SELECTED_FG);
+        } else {
+            row_style = row_style.bg(theme::SELECTED_DIM_BG);
+        }
+    }
+    let used = crate::todo::MARK_WIDTH + unicode_width::UnicodeWidthStr::width(line.text.as_str());
+    let padding = " ".repeat(width.saturating_sub(used));
+    Line::from(vec![
+        Span::styled(format!("{mark} "), mark_style),
+        Span::styled(line.text, text_style),
+        Span::raw(padding),
+    ])
+    .style(row_style)
 }
 
 #[cfg(test)]
@@ -1048,6 +1213,33 @@ mod tests {
     use super::*;
 
     const WINDOWS: Rect = Rect::new(42, 0, 100, 40);
+
+    #[test]
+    fn todo_rows_strike_done_items_and_fill_the_selection() {
+        let row = |done, selected| {
+            todo_row(
+                crate::todo::Line {
+                    mark: Some(done),
+                    text: "abc".into(),
+                    done,
+                    selected,
+                    editing: false,
+                },
+                true,
+                10,
+            )
+        };
+        let done = row(true, false);
+        assert_eq!(done.spans[0].content, format!("{} ", theme::DONE_ICON));
+        assert!(done.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::CROSSED_OUT));
+        let open = row(false, true);
+        assert_eq!(open.spans[0].content, format!("{} ", theme::OPEN_ICON));
+        assert_eq!(open.style.bg, Some(theme::SELECTED_BG));
+        assert_eq!(open.width(), 10, "Hinterlegung über die ganze Breite");
+    }
 
     #[test]
     fn note_editor_fits_over_the_session_list() {

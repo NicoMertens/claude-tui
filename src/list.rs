@@ -50,8 +50,8 @@ impl Heading {
     }
 }
 
-/// Position des Cursors in der Liste: auf einer Session, einer Überschrift oder dem Notizblock
-/// (eigene Zeile ganz oben, gehört zu keinem Abschnitt).
+/// Position des Cursors in der Liste: auf einer Session, einer Überschrift, dem Notizblock oder der
+/// Todo-Liste (eigene Zeilen ganz oben, gehören zu keinem Abschnitt).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cursor {
     /// Claude-ID der Session.
@@ -59,6 +59,8 @@ pub enum Cursor {
     /// Schlüssel der Überschrift (siehe [`Heading::key`]).
     Heading(String),
     Notepad,
+    /// Die Todo-Liste (Zeile unter dem Notizblock).
+    Todo,
 }
 
 /// Eine sichtbare Zeile der Liste.

@@ -72,7 +72,8 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 ## Aufbau
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Ganz
-oben steht der [Notizblock](#notizblock) (`✎ Notepad (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
+oben stehen der [Notizblock](#notizblock) (`✎ Notepad (N)`) und die [Todo-Liste](#todo-liste)
+(`☰Todo (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾, alphabetisch). Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
 stehen laufende Sessions zuerst (in der Reihenfolge, in der sie gestartet wurden, damit sie
@@ -92,7 +93,8 @@ Hat eine Session in Claude per **`/color`** eine Farbe bekommen (red, orange, ye
 blue, purple, pink), erscheint ihr Titel in dieser Farbe; `/color default` hebt das wieder auf.
 claude-tui liest dafür die letzte `agent-color`-Zeile aus dem Protokoll der Session.
 
-Rechts bis zu **4 Fenster**, jedes mit einer Session oder dem [Notizblock](#notizblock). Jede
+Rechts bis zu **4 Fenster**, jedes mit einer Session, dem [Notizblock](#notizblock) oder der
+[Todo-Liste](#todo-liste). Jede
 Nummer hat einen **festen Platz**: 1 oben links, 2 oben rechts,
 3 unten links, 4 unten rechts. Jede Nummer lässt sich öffnen, auch wenn kleinere fehlen. Fehlende
 Fenster lassen keine Lücke: Die linke Spalte gehört 1 und 3, die rechte 2 und 4. Ist eine Spalte
@@ -201,10 +203,11 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
-| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht im Notizblock) |
-| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht im Notizblock) |
-| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht im Notizblock) |
+| `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht in Notizblock und Todo-Liste) |
+| `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht in Notizblock und Todo-Liste) |
+| `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht in Notizblock und Todo-Liste) |
 | `p` | [Notizblock](#notizblock) in einem Fenster zeigen: Fensterauswahl (ohne offenes Fenster gleich in Fenster 1) | wie links |
+| `d` | [Todo-Liste](#todo-liste) in einem Fenster zeigen, wie `p` | wie links |
 | `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
 | `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
@@ -366,10 +369,46 @@ anderes die Datei, liest dieses sie neu, solange es selbst nichts Ungespeicherte
 wer zuletzt speichert. Lässt sich `notepad.txt` nicht lesen (z. B. nicht UTF-8), meldet claude-tui das
 beim Start und überschreibt die Datei nicht.
 
+### Todo-Liste
+
+Unter dem Notizblock steht die **Todo-Liste**: `☰Todo (3)` mit der Anzahl der offenen Einträge
+und, falls sichtbar, der Fensternummer. Auf ihrer Zeile wirken `Enter`, `1`–`4`, Doppelklick und
+`c` wie beim Notizblock; `d` im Menü zeigt sie in einem Fenster nach Wahl. Die Fensterleiste zeigt
+`[N] ☰Todo (3 open · 2 done)`.
+
+Die Reihenfolge bestimmt man selbst: Abhaken lässt einen Eintrag an seiner Stelle, erledigte
+erscheinen gedämpft, durchgestrichen und mit `✓`. Ein Eintrag kann mehrere Zeilen haben; lange
+Zeilen werden umbrochen und unter dem Text eingerückt. Mit Fokus auf der Todo-Liste:
+
+| Taste | Wirkung |
+|---|---|
+| `↑` / `↓`, `PgUp` / `PgDn`, `Pos1` / `Ende` | Eintrag wählen |
+| `Shift+↑` / `Shift+↓` (auch `Alt+↑` / `Alt+↓`) | gewählten Eintrag um eine Stelle nach oben bzw. unten verschieben; die Auswahl geht mit |
+| `Leertaste` | erledigt ↔ offen; Eintrag und Auswahl bleiben an ihrer Stelle |
+| `a` | neuer Eintrag unter dem gewählten, gleich zum Schreiben; `Enter` auf leerer Liste ebenso |
+| `e` / `Enter` / `F2` | gewählten Eintrag bearbeiten |
+| `Shift+X` | gewählten Eintrag löschen — bewusst mit Shift, Gelöschtes lässt sich nicht zurückholen |
+
+Beim Schreiben und Bearbeiten gilt, was der [Notiz-Editor](#notizen) kennt: `Enter` übernimmt,
+`Shift+Enter` bzw. `Ctrl+J` beginnt eine neue Zeile, `Esc` bricht ab, Einfügen behält
+Zeilenumbrüche. Ein neuer Eintrag ohne Text wird verworfen; leert man einen bestehenden, wird er
+gelöscht. Unten im Rahmen stehen die wichtigsten Tasten.
+
+Ein Klick wählt einen Eintrag, ein Klick auf sein Kästchen hakt ihn ab bzw. öffnet ihn wieder, das
+Mausrad scrollt. Ein offenes Eingabefeld wird übernommen, wenn man einen anderen Eintrag anklickt
+oder claude-tui beendet. Außerhalb des Eingabefelds wirkt Einfügen nicht: Mehrere ohne Pause
+ankommende Zeichen gelten dort als eingefügt und werden ignoriert, sonst liefen sie als Befehle
+(Windows-Konsolen liefern Einfügen als Tastendrücke).
+
+Gespeichert wird wie beim Notizblock — spätestens eine Sekunde nach einer Änderung und beim Beenden,
+geteilt mit anderen claude-tui —, als `todo.json` im Konfigurationsordner. Solange ein Eintrag
+bearbeitet wird, übernimmt claude-tui keine Änderungen anderer Instanzen. Lässt sich `todo.json`
+nicht lesen, meldet claude-tui das beim Start und überschreibt die Datei nicht.
+
 ## Maus
 
 Das **Mausrad** über einem Fenster scrollt dessen Verlauf (3 Zeilen je Raste, bis zu 10 000 Zeilen;
-über dem [Notizblock](#notizblock) dessen Text);
+über dem [Notizblock](#notizblock) dessen Text, über der [Todo-Liste](#todo-liste) deren Einträge);
 die Fensterleiste zeigt dann `↑ N lines`. Jede Eingabe in die Session springt zurück ans Ende.
 Schaltet das Programm im Fenster selbst die Maus ein, bekommt es das Rad-Ereignis durchgereicht.
 

@@ -51,6 +51,9 @@ pub struct State {
     /// Fensterindex des Notizblocks (sein Platz in `windows` bleibt `""`).
     #[serde(default)]
     pub notepad_window: Option<usize>,
+    /// Fensterindex der Todo-Liste (ihr Platz in `windows` bleibt `""`).
+    #[serde(default)]
+    pub todo_window: Option<usize>,
 }
 
 /// Fehlt die Datei oder ist sie unlesbar, gibt es nichts wiederherzustellen.
@@ -110,6 +113,7 @@ mod tests {
             unread: BTreeSet::from(["a".to_string()]),
             notes: BTreeMap::from([("b".to_string(), "x\ny".to_string())]),
             notepad_window: Some(0),
+            todo_window: Some(2),
         };
         let text = serde_json::to_string(&state).expect("json");
         assert_eq!(serde_json::from_str::<State>(&text).expect("json"), state);

@@ -5,25 +5,16 @@
 //! gespeichert. Ändert eine andere claude-tui-Instanz die Datei, wird sie neu gelesen, solange hier
 //! nichts ungespeichert ist; sonst gewinnt, wer zuletzt speichert.
 
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-    time::{Duration, Instant, SystemTime},
-};
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_width::UnicodeWidthChar;
 
 use crate::{
-    paths,
+    filesync::SyncedFile,
     textbuf::{self, TextBuf},
 };
 
 const FILE_NAME: &str = "notepad.txt";
-/// So lange nach der ersten ungespeicherten Änderung wird gespeichert (Tippen schreibt nicht bei
-/// jeder Taste); ebenso oft wird geprüft, ob eine andere Instanz die Datei geändert hat.
-const SAVE_DELAY: Duration = Duration::from_secs(1);
 /// Zeilen je Mausrad-Raste.
 const WHEEL_ROWS: usize = 3;
 
@@ -36,7 +27,7 @@ pub struct Row {
     pub soft: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Notepad {
     buf: TextBuf,
     /// Erste sichtbare Bildschirmzeile.
@@ -45,76 +36,58 @@ pub struct Notepad {
     goal: Option<usize>,
     /// Breite und Höhe der Textfläche, zuletzt gesetzt über [`Self::set_view`].
     view: (usize, usize),
-    /// Zeitpunkt der ersten noch nicht gespeicherten Änderung.
-    unsaved_since: Option<Instant>,
-    /// Änderungszeit der Datei beim letzten Lesen bzw. Schreiben.
-    disk: Option<SystemTime>,
-    last_check: Option<Instant>,
-    /// Die Datei ließ sich nicht lesen (sie fehlte nicht nur): nie speichern, sonst wäre ihr Text
-    /// verloren.
-    blocked: bool,
+    file: SyncedFile,
+}
+
+impl Default for Notepad {
+    fn default() -> Self {
+        Self {
+            buf: TextBuf::default(),
+            scroll: 0,
+            goal: None,
+            view: (0, 0),
+            file: SyncedFile::new(FILE_NAME, "notepad"),
+        }
+    }
 }
 
 impl Notepad {
     /// Liest den gespeicherten Text; fehlt die Datei, ist der Notizblock leer. Lässt sie sich nicht
     /// lesen, bleibt er leer und speichert nie — mit Hinweis für den Benutzer.
     pub fn load() -> (Self, Option<String>) {
-        let Some(file) = file() else {
-            return (Self::default(), None);
-        };
-        match read(&file) {
-            Ok(Some((text, modified))) => (
+        let mut file = SyncedFile::new(FILE_NAME, "notepad");
+        match file.load() {
+            Ok(text) => (
                 Self {
-                    disk: modified,
-                    ..Self::with_text(&text)
+                    file,
+                    ..Self::with_text(&clean(text.as_deref().unwrap_or_default()))
                 },
                 None,
             ),
-            Ok(None) => (Self::default(), None),
             Err(e) => (
                 Self {
-                    blocked: true,
+                    file,
                     ..Self::default()
                 },
-                Some(format!("notepad not loaded, changes are not saved: {e:#}")),
+                Some(format!("{e:#}")),
             ),
         }
     }
 
-    /// Je Durchlauf der Hauptschleife: Ungespeichertes nach [`SAVE_DELAY`] speichern, sonst
-    /// höchstens so oft nachsehen, ob eine andere Instanz die Datei geändert hat.
+    /// Je Durchlauf der Hauptschleife: Ungespeichertes nach der Wartezeit speichern, sonst
+    /// übernehmen, was eine andere Instanz gespeichert hat.
     pub fn sync(&mut self) -> Result<()> {
-        if self.unsaved_since.is_some() {
+        if self.file.is_unsaved() {
             return self.save_if_due(false);
         }
-        if self.blocked || self.last_check.is_some_and(|at| at.elapsed() < SAVE_DELAY) {
-            return Ok(());
+        if let Some(text) = self.file.poll()? {
+            let cursor = self.buf.cursor();
+            self.buf = TextBuf::new(&clean(&text));
+            self.buf.set_cursor(cursor);
+            self.goal = None;
+            self.follow_cursor();
         }
-        self.last_check = Some(Instant::now());
-        let Some(file) = file() else {
-            return Ok(());
-        };
-        let modified = modified(&file);
-        if modified.is_none() || modified == self.disk {
-            return Ok(());
-        }
-        self.disk = modified;
-        match read(&file) {
-            Ok(Some((text, modified))) => {
-                let cursor = self.buf.cursor();
-                self.buf = TextBuf::new(&text);
-                self.buf.set_cursor(cursor);
-                self.disk = modified;
-                self.goal = None;
-                self.follow_cursor();
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(e) => {
-                self.blocked = true;
-                Err(e.context("notepad changed elsewhere, changes are no longer saved"))
-            }
-        }
+        Ok(())
     }
 
     fn with_text(text: &str) -> Self {
@@ -126,26 +99,10 @@ impl Notepad {
         }
     }
 
-    /// Speichert, wenn sich seit [`SAVE_DELAY`] nichts mehr geändert hat (`force`: sofort).
+    /// Speichert, wenn sich seit der Wartezeit nichts mehr geändert hat (`force`: sofort).
     pub fn save_if_due(&mut self, force: bool) -> Result<()> {
-        let Some(since) = self.unsaved_since else {
-            return Ok(());
-        };
-        if self.blocked {
-            self.unsaved_since = None;
-            return Ok(());
-        }
-        if !force && since.elapsed() < SAVE_DELAY {
-            return Ok(());
-        }
-        let file = file().context("no config directory")?;
-        let saved = paths::write_atomic(&file, self.buf.text()).context("saving notepad");
-        // Fehlgeschlagen: nach SAVE_DELAY erneut versuchen, nicht in jedem Durchlauf.
-        self.unsaved_since = saved.is_err().then(Instant::now);
-        if saved.is_ok() {
-            self.disk = modified(&file);
-        }
-        saved
+        let buf = &self.buf;
+        self.file.save_if_due(force, || buf.text().to_string())
     }
 
     /// Anzahl der Textzeilen (ohne Umbruch gezählt); leerer Text hat keine.
@@ -271,7 +228,7 @@ impl Notepad {
     }
 
     fn touch(&mut self) {
-        self.unsaved_since.get_or_insert_with(Instant::now);
+        self.file.touch();
     }
 
     /// Cursor in Bildschirmzeile `target`, möglichst in der gemerkten Spalte; ohne Ziel (über die
@@ -300,30 +257,10 @@ impl Notepad {
     }
 }
 
-fn file() -> Option<PathBuf> {
-    paths::config_dir().map(|d| d.join(FILE_NAME))
-}
-
-fn modified(file: &Path) -> Option<SystemTime> {
-    fs::metadata(file).and_then(|m| m.modified()).ok()
-}
-
-/// Text und Änderungszeit der Datei; `None`, wenn es sie nicht gibt.
-fn read(file: &Path) -> Result<Option<(String, Option<SystemTime>)>> {
-    let bytes = match fs::read(file) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e).with_context(|| format!("reading {}", file.display())),
-    };
-    let text =
-        String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("{} is not UTF-8", file.display()))?;
-    Ok(Some((clean(&text), modified(file))))
-}
-
-/// Mit einem anderen Editor bearbeitet: BOM und `\r` lägen sonst als unsichtbare Zeichen unter dem
-/// Cursor.
+/// Mit einem anderen Editor bearbeitet: `\r` und Tabs lägen sonst als unsichtbare Zeichen unter
+/// dem Cursor (das BOM entfernt schon [`SyncedFile`]).
 fn clean(text: &str) -> String {
-    textbuf::sanitize(text.strip_prefix('\u{feff}').unwrap_or(text))
+    textbuf::sanitize(text)
 }
 
 /// Ergebnis von [`Notepad::render`].
@@ -548,25 +485,7 @@ mod tests {
 
     #[test]
     fn text_from_other_editors_is_cleaned() {
-        assert_eq!(clean("\u{feff}a\r\n\tb"), "a\n    b");
-    }
-
-    #[test]
-    fn unreadable_file_is_never_overwritten() {
-        let dir = std::env::temp_dir().join(format!("claude-tui-notepad-{}", std::process::id()));
-        fs::create_dir_all(&dir).expect("Ordner");
-        let file = dir.join(FILE_NAME);
-        fs::write(&file, [0xff, 0xfe, b'a']).expect("schreiben");
-        assert!(read(&file).is_err(), "kein UTF-8");
-        assert_eq!(read(&dir.join("fehlt.txt")).expect("fehlt"), None);
-        let mut p = Notepad {
-            blocked: true,
-            ..Notepad::default()
-        };
-        p.paste("x");
-        p.save_if_due(true).expect("nichts zu tun");
-        assert!(p.unsaved_since.is_none());
-        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(clean("a\r\n\tb"), "a\n    b");
     }
 
     #[test]
@@ -580,8 +499,8 @@ mod tests {
         let mut p = pad("ab", 10, 5);
         p.on_key(&key(KeyCode::Left));
         p.on_key(&key(KeyCode::End));
-        assert!(p.unsaved_since.is_none());
+        assert!(!p.file.is_unsaved());
         p.on_key(&key(KeyCode::Backspace));
-        assert!(p.unsaved_since.is_some());
+        assert!(p.file.is_unsaved());
     }
 }

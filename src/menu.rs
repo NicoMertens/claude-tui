@@ -36,6 +36,8 @@ pub enum Action {
     EditNote,
     /// Notizblock in einem Fenster zeigen (danach Fensterauswahl).
     ShowNotepad,
+    /// Todo-Liste in einem Fenster zeigen (danach Fensterauswahl).
+    ShowTodo,
     /// Abschnitt der Auswahl in der Liste ein- bzw. ausklappen.
     ToggleCollapsed,
     /// Alle Abschnitte einklappen (`true`) bzw. ausklappen.
@@ -113,6 +115,11 @@ pub const NOTEPAD: Entry = entry(
     "Notepad",
     "Show the notepad in a window of your choice: free text, independent of sessions, saved automatically",
 );
+pub const TODO: Entry = entry(
+    'd',
+    "Todo list",
+    "Show the todo list in a window of your choice: items to tick off, independent of sessions, saved automatically",
+);
 pub const COLLAPSE: Entry = Entry {
     hotkey: 'f',
     keys: "f / ← →",
@@ -160,13 +167,14 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 16] = [
+pub const ENTRIES: [&Entry; 17] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
     &DELETE,
     &GROUP,
     &NOTE,
     &NOTEPAD,
+    &TODO,
     &COLLAPSE,
     &COLLAPSE_ALL,
     &EXPAND_ALL,
@@ -197,6 +205,8 @@ pub enum Purpose {
     Resume(String),
     /// Notizblock zeigen.
     Notepad,
+    /// Todo-Liste zeigen.
+    Todo,
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
     /// Mehrere Claude-Sessions (markiert oder nach Alter), deren Löschen bestätigt werden soll.
@@ -229,8 +239,8 @@ pub struct Context<'a> {
     pub windows: [bool; MAX_WINDOWS],
     /// Die in der Liste ausgewählte Session hat ein Fenster.
     pub selected_has_window: bool,
-    /// Das Fenster mit Fokus zeigt den Notizblock.
-    pub notepad_focused: bool,
+    /// Das Fenster mit Fokus zeigt keine Session (Notizblock oder Todo-Liste).
+    pub panel_focused: bool,
     /// In der Liste ist eine Session ausgewählt.
     pub has_selection: bool,
     /// Version eines verfügbaren Updates (`None` = keins oder läuft schon).
@@ -262,7 +272,7 @@ impl Menu {
         let in_window = matches!(ctx.focus, Focus::Window(_));
         // Gibt es eine Session, auf die sich x, g und t beziehen (im Fenster bzw. in der Liste)?
         let one_session = if in_window {
-            !ctx.notepad_focused
+            !ctx.panel_focused
         } else {
             ctx.has_selection
         };
@@ -289,6 +299,7 @@ impl Menu {
             add(&NOTE, NOTE.label, Action::EditNote);
         }
         add(&NOTEPAD, NOTEPAD.label, Action::ShowNotepad);
+        add(&TODO, TODO.label, Action::ShowTodo);
         if let (false, Some(collapsed)) = (in_window, ctx.collapsed) {
             let label = if collapsed {
                 "Expand group"
@@ -553,7 +564,7 @@ mod tests {
             focus: Focus::Window(0),
             windows,
             selected_has_window: true,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -577,7 +588,7 @@ mod tests {
             focus: Focus::Window(1),
             windows,
             selected_has_window: true,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -597,7 +608,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -616,7 +627,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden,
@@ -651,7 +662,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: true,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -734,7 +745,7 @@ mod tests {
             focus: Focus::Window(1),
             windows: [false, true, false, true],
             selected_has_window: true,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -759,7 +770,7 @@ mod tests {
             focus: Focus::Window(0),
             windows: [true, true, false, false],
             selected_has_window: true,
-            notepad_focused: true,
+            panel_focused: true,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -785,7 +796,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -818,7 +829,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: true,
             update: None,
             list_hidden: false,
@@ -867,7 +878,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection,
             update: None,
             list_hidden: false,
@@ -914,7 +925,7 @@ mod tests {
                 focus,
                 windows: open(if flag { 2 } else { 4 }),
                 selected_has_window: true,
-                notepad_focused: false,
+                panel_focused: false,
                 has_selection: true,
                 update: Some("9.9.9"),
                 list_hidden: flag,
@@ -938,7 +949,7 @@ mod tests {
             focus: Focus::List,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: false,
             update: None,
             list_hidden: false,
@@ -961,7 +972,7 @@ mod tests {
             focus,
             windows,
             selected_has_window: false,
-            notepad_focused: false,
+            panel_focused: false,
             has_selection: false,
             update: None,
             list_hidden: false,
