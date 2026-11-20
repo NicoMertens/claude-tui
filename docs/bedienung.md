@@ -177,9 +177,10 @@ einen Zeilenumbruch ein.
 | `Leertaste` auf einer Überschrift | alle Sessions des Abschnitts markieren; sind schon alle markiert, Markierung aufheben |
 | `Enter` | hat die Session ein Fenster: Fokus dorthin; sonst Fensterauswahl (eine gespeicherte Session wird dabei mit `--resume` fortgesetzt) |
 | `1`–`4` | Session in dieses Fenster legen, auch wenn es noch nicht offen ist (eine sichtbare Session tauscht den Platz bzw. wandert ins freie Fenster) |
+| `0` / `Ctrl+Enter` | Session im [temporären Fenster](#temporäres-fenster) zeigen (ebenso auf den Zeilen von Notizblock, Todo-Liste und Notizübersicht); hat sie schon ein Fenster, bekommt stattdessen dieses den Fokus |
 
 Läuft die gewählte Session **außerhalb von claude-tui** (Kennzeichnung `⇄`, siehe
-[Zustände](#zustände-in-der-seitenleiste)), fragen `Enter`, Doppelklick und `1`–`4` erst nach:
+[Zustände](#zustände-in-der-seitenleiste)), fragen `Enter`, Doppelklick, `1`–`4` und `0` erst nach:
 „<Titel> runs elsewhere – open anyway?“. `y` startet sie trotzdem ein zweites Mal (bei `Enter` folgt
 danach die Fensterauswahl), `n`, `Esc` und `Enter` brechen ab — die Vorauswahl ist „No“, denn zwei
 Prozesse schreiben sonst in dasselbe Protokoll.
@@ -188,6 +189,32 @@ Läuft sie als **Hintergrund-Session** von Claude Code (`claude --bg`), entfäll
 claude-tui verbindet sich mit `claude attach <Job-ID>` mit dem laufenden Prozess, statt einen
 zweiten zu starten (`--resume` lehnt laufende Hintergrund-Sessions ab). Schließt man das Fenster,
 trennt sich nur claude-tui; die Hintergrund-Session läuft weiter.
+
+### Temporäres Fenster
+
+Für einen schnellen Prompt oder Blick, ohne die Fenster umzubauen: `0` oder `Ctrl+Enter` auf einer
+Zeile der Liste — Session, Notizblock, Todo-Liste oder Notizübersicht — (bzw. `0` in der
+Fensterauswahl) zeigt sie in einem Fenster mittig über allen anderen, mit etwas Abstand zum Rand.
+Es belegt keinen der vier Fensterplätze, und der Fokus darunter bleibt, wo er war. Eine gespeicherte
+Session wird dafür fortgesetzt, eine neue gestartet.
+
+Liegt der Inhalt schon in einem Fenster, öffnet sich kein temporäres Fenster — der Fokus springt in
+sein Fenster.
+
+Solange es offen ist, verhält es sich wie ein Fenster mit Fokus: Tasten, eingefügter Text, Mausrad
+und Klicks gehen an seinen Inhalt; bei einer Session gelten ihr auch `Alt+Zahl` (Nummer setzen) und
+`Ctrl+Leertaste` (gelesen/ungelesen). Öffnet die Notizübersicht darin eine Session, schließt es
+sich. Geschlossen wird es mit:
+
+| Taste | Wirkung |
+|---|---|
+| `Ctrl+Enter` | schließen; eine Session läuft im Hintergrund weiter |
+| `Ctrl+A` | schließen und das Menü öffnen |
+| `Ctrl+Zahl`, `Ctrl+Pfeil` | schließen und wie gewohnt springen |
+| Klick daneben | schließen; der Klick wirkt dann wie gewohnt |
+
+`Ctrl+Enter` unterscheiden nur Windows-Konsolen von `Enter`; unter Linux und macOS kommt es meist als
+einfaches `Enter` an. Dort öffnet `0` das Fenster, `Ctrl+A` und danach `Esc` schließen es.
 
 ### Menü (`Ctrl+A`)
 
@@ -268,7 +295,8 @@ bzw. `~/.config/claude-tui/recent-dirs.txt`. Ohne zuletzt genutztes Verzeichnis 
 vorgewählt, in dem claude-tui gestartet wurde.
 
 **Fensterauswahl:** listet alle vier Fenster mit ihrer Nummer als Taste, belegte als „Replace
-Window n“, freie als „New Window n“. Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
+Window n“, freie als „New Window n“, dazu `0` „Temporary window“ (siehe
+[Temporäres Fenster](#temporäres-fenster)). Eine ersetzte Session läuft im Hintergrund weiter. Ist noch kein Fenster offen, entfällt die Auswahl und Fenster 1 wird genommen.
 
 ### Hilfe
 
@@ -337,7 +365,7 @@ Neben den Notizen je Session gibt es einen **Notizblock** für freien Text, der 
 gehört. Er steht als erste Zeile in der Sessionliste, über allen Abschnitten: `✎ Notepad (12)` mit
 der Anzahl seiner Textzeilen (umbrochene Zeilen zählen einfach) und, falls sichtbar, der
 Fensternummer. Auf dieser Zeile zeigt `Enter` ihn (Fokus auf sein Fenster bzw. Fensterauswahl),
-`1`–`4` legt ihn in dieses Fenster, ein Doppelklick wirkt wie `Enter` und `c` im Menü schließt sein
+`1`–`4` legt ihn in dieses Fenster, `0` bzw. `Ctrl+Enter` zeigt ihn im temporären Fenster, ein Doppelklick wirkt wie `Enter` und `c` im Menü schließt sein
 Fenster. Hat sein Fenster den Fokus, steht die Listenauswahl auf dieser Zeile.
 
 `p` im Menü zeigt ihn in einem Fenster nach Wahl — wie eine Session: Er nimmt einen der

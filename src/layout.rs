@@ -58,6 +58,17 @@ pub fn visible(
     }
 }
 
+/// Rechteck des temporären Fensters: mittig in der Fensterfläche `area`, rundum ein Zehntel
+/// Abstand (mindestens zwei Spalten bzw. eine Zeile). Ist die Fläche dafür zu klein, füllt es sie.
+pub fn temporary(area: Rect) -> Rect {
+    let horizontal = (area.width / 10).max(2);
+    let vertical = (area.height / 10).max(1);
+    if area.width <= horizontal * 2 + 20 || area.height <= vertical * 2 + 5 {
+        return area;
+    }
+    area.inner(Margin::new(horizontal, vertical))
+}
+
 /// Höchstens so viele Notizzeilen stehen unten im Fenster.
 pub const NOTE_MAX_ROWS: usize = 5;
 
@@ -144,6 +155,13 @@ mod tests {
             occupied[i] = true;
         }
         occupied
+    }
+
+    #[test]
+    fn temporary_window_is_centered_with_margin_and_fills_tiny_areas() {
+        assert_eq!(temporary(AREA), Rect::new(38, 4, 80, 33));
+        let small = Rect::new(0, 0, 24, 8);
+        assert_eq!(temporary(small), small);
     }
 
     /// Rechteck je Fensterplatz; `None` für nicht offene Fenster.

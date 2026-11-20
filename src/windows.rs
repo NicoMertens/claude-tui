@@ -25,6 +25,14 @@ impl Pane {
     }
 }
 
+/// Wohin eine Session kommt: in einen Fensterplatz oder ins temporäre Fenster, das mittig über
+/// allen Fenstern liegt und keinen Platz belegt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spot {
+    Window(usize),
+    Temporary,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
     List,
@@ -41,6 +49,9 @@ pub struct Windows {
     /// Das Fenster mit Fokus füllt die ganze Fensterfläche (wie tmux-Zoom). Endet mit jeder
     /// Änderung von Fokus oder Fensterbelegung.
     zoomed: bool,
+    /// Inhalt des temporären Fensters: liegt über allen Fenstern und bekommt alle Eingaben, belegt
+    /// aber keinen Platz. Nie ein Inhalt, der schon in einem Fenster liegt.
+    temporary: Option<Pane>,
 }
 
 impl Default for Windows {
@@ -49,6 +60,7 @@ impl Default for Windows {
             slots: [None; MAX_WINDOWS],
             focus: Focus::List,
             zoomed: false,
+            temporary: None,
         }
     }
 }
@@ -98,7 +110,41 @@ impl Windows {
         }
     }
 
+    /// Wo die Eingaben hingehen: ins temporäre Fenster, solange es offen ist, sonst ins Fenster
+    /// mit Fokus (`None` = Sessionliste).
+    pub fn active(&self) -> Option<Spot> {
+        match (self.temporary, self.focus) {
+            (Some(_), _) => Some(Spot::Temporary),
+            (None, Focus::Window(i)) => Some(Spot::Window(i)),
+            (None, Focus::List) => None,
+        }
+    }
+
+    /// Inhalt, der die Eingaben bekommt (siehe [`Self::active`]).
+    pub fn input_pane(&self) -> Option<Pane> {
+        self.temporary.or_else(|| self.focused_pane())
+    }
+
+    pub fn temporary(&self) -> Option<Pane> {
+        self.temporary
+    }
+
+    /// Zeigt `pane` im temporären Fenster. Liegt es schon in einem Fenster, bleibt das temporäre
+    /// Fenster zu und dieses Fenster bekommt den Fokus. Fokus und Zoom darunter bleiben sonst.
+    pub fn show_temporary(&mut self, pane: Pane) {
+        match self.slot_of(pane) {
+            Some(slot) => self.set_focus(Focus::Window(slot)),
+            None => self.temporary = Some(pane),
+        }
+    }
+
+    pub fn close_temporary(&mut self) {
+        self.temporary = None;
+    }
+
+    /// Jeder Fokuswechsel schließt das temporäre Fenster.
     pub fn set_focus(&mut self, focus: Focus) {
+        self.temporary = None;
         match focus {
             Focus::Window(i) if self.pane(i).is_none() => {}
             _ if focus == self.focus => {}
@@ -146,6 +192,9 @@ impl Windows {
             Some(current) => self.slots.swap(current, slot),
             None => self.slots[slot] = Some(pane),
         }
+        if self.temporary == Some(pane) {
+            self.temporary = None;
+        }
         self.zoomed = false;
         self.focus = Focus::Window(slot);
         true
@@ -170,8 +219,11 @@ impl Windows {
         }
     }
 
-    /// Entfernt die Session aus ihrem Fenster, falls sie eines hat.
+    /// Entfernt die Session aus ihrem (auch temporären) Fenster, falls sie eines hat.
     pub fn remove_session(&mut self, id: SessionId) {
+        if self.temporary == Some(Pane::Session(id)) {
+            self.temporary = None;
+        }
         if let Some(slot) = self.window_of(id) {
             self.close(slot);
         }
@@ -181,6 +233,41 @@ impl Windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_window_takes_input_but_keeps_focus_and_zoom() {
+        let mut w = with(&[1, 2]);
+        w.set_focus(Focus::Window(1));
+        w.set_zoomed(true);
+        w.show_temporary(Pane::Notepad);
+        assert_eq!(w.active(), Some(Spot::Temporary));
+        assert_eq!(w.input_pane(), Some(Pane::Notepad));
+        assert_eq!((w.focus(), w.zoomed()), (Focus::Window(1), Some(1)));
+        w.close_temporary();
+        assert_eq!(w.input_pane(), Some(Pane::Session(2)));
+    }
+
+    #[test]
+    fn temporary_window_never_shows_what_a_window_shows() {
+        let mut w = with(&[1, 2]);
+        w.show_temporary(Pane::Session(1));
+        assert_eq!(w.temporary(), None);
+        assert_eq!(w.focus(), Focus::Window(0));
+        w.show_temporary(Pane::Todo);
+        w.place(Pane::Todo, 2);
+        assert_eq!(w.temporary(), None);
+        w.show_temporary(Pane::Session(9));
+        w.remove_session(9);
+        assert_eq!(w.temporary(), None);
+    }
+
+    #[test]
+    fn focus_change_closes_temporary_window() {
+        let mut w = with(&[1]);
+        w.show_temporary(Pane::Notes);
+        w.set_focus(Focus::Window(0));
+        assert_eq!(w.temporary(), None);
+    }
 
     fn with(ids: &[SessionId]) -> Windows {
         let mut w = Windows::default();

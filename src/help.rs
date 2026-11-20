@@ -142,6 +142,20 @@ const KEYS: &[Row] = &[
         "Show the selected session like Enter in the list: focus its window or pick one",
     ),
     Key("1…4", "Show or resume the selected session in this window"),
+    Heading("Temporary window"),
+    Key(
+        "Typing",
+        "Works like a focused window; Alt+number and Ctrl+Space apply to its session",
+    ),
+    Key(
+        "Ctrl+Enter",
+        "Close it; a session keeps running in the background",
+    ),
+    Key("Ctrl+A", "Close it and open the menu"),
+    Key(
+        "Ctrl+1…9",
+        "Close it and jump as usual; a click outside closes it too",
+    ),
     Heading("Session list focused"),
     Key("↑ / ↓", "Select a session or heading"),
     Key("PgUp / PgDn", "Move the selection by a page"),
@@ -155,7 +169,15 @@ const KEYS: &[Row] = &[
         "Go to its window, or pick a window (a saved session resumes); on a heading: collapse \
          or expand the section",
     ),
-    Key("1…4", "Put the session into this window"),
+    Key(
+        "1…4",
+        "Put the session (or notepad, todo list, notes) into this window",
+    ),
+    Key(
+        "0",
+        "Show it in a temporary window over all others; if it has a window, focus that",
+    ),
+    Key("Ctrl+Enter", "Same as 0 (Windows only)"),
     Key(
         "Space",
         "Mark or unmark the session and move on; on a heading: all its sessions",
@@ -176,6 +198,7 @@ const KEYS: &[Row] = &[
         "1…4",
         "Window picker: replace this window, or open a new one",
     ),
+    Key("0", "Window picker: show it in the temporary window"),
     Key("d / w / m", "Delete older than a day / week / month"),
     Key(
         "Note editor",

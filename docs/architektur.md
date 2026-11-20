@@ -26,8 +26,8 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 |---|---|
 | `main.rs` | Terminal einrichten/zurücksetzen, Ereignisschleife (16 ms Takt; bis zu 64 anstehende Ereignisse je Bild). Gezeichnet wird nur nach Ereignissen, neuer Ausgabe oder geändertem Zustand (`App::tick` meldet das), sonst alle 120 ms bei Spinnern bzw. jede Sekunde; die Sessionliste baut `App::tick` nur nach Änderungen bzw. sekündlich neu |
 | `app.rs` | Zustand: Sessions, Listenauswahl, offenes Menü; verteilt Tasten und führt Menü-Aktionen aus |
-| `windows.rs` | welche Session (oder Notizblock, Todo-Liste bzw. Notizübersicht, `Pane`) in welchem Fenster liegt (4 feste Plätze, auch mit Lücken; Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) — ohne PTY testbar |
-| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil`; Innenfläche eines Fensters, aufgeteilt in Terminal und Notizzeilen (bis 5, höchstens ein Drittel der Höhe; `window_content` — einzige Quelle für Zeichnen, PTY-Größe und Mauszellen); Textfläche von Notizblock, Todo-Liste und Notizübersicht (`panel_text`) |
+| `windows.rs` | welche Session (oder Notizblock, Todo-Liste bzw. Notizübersicht, `Pane`) in welchem Fenster liegt (4 feste Plätze, auch mit Lücken; Tauschen), wo der Fokus ist und ob das Fenster mit Fokus gezoomt ist (endet bei Fokuswechsel, Öffnen, Schließen, Ersetzen) und was im temporären Fenster liegt — ohne PTY testbar. `Spot` nennt den Ort: Fensterplatz oder temporäres Fenster (siehe [Fenster und Inhalte](#fenster-und-inhalte)) |
+| `layout.rs` | Fensterrechtecke der belegten Plätze (Spalten 1/3 und 2/4, fehlende Fenster ohne Lücke), sichtbare Fenster bei Zoom und Nachbarsuche für `Ctrl+Pfeil`; Innenfläche eines Fensters, aufgeteilt in Terminal und Notizzeilen (bis 5, höchstens ein Drittel der Höhe; `window_content` — einzige Quelle für Zeichnen, PTY-Größe und Mauszellen); Textfläche von Notizblock, Todo-Liste und Notizübersicht (`panel_text`); Rechteck des temporären Fensters (`temporary`) |
 | `menu.rs` | Ctrl+A-Menü je Fokus und Fensterauswahl; Auswahl per Taste oder Pfeil + Enter. `ENTRIES` ist die gemeinsame Tabelle der Menüpunkte (Taste, Beschriftung, Hilfetext) für Menü und Hilfe |
 | `help.rs` | Hilfeseite (`Ctrl+A h`): Aufbau, Zustände, alle Tasten, Menüpunkte aus `menu::ENTRIES`, Maus; Umbruch nach Anzeigebreite und Scrollen |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
@@ -84,11 +84,32 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
    `claude_store` neue Protokollzeilen (nur das seit dem letzten Lesen Angehängte). Wechselt eine
    Session dabei auf „wartet“, setzt `App::tick` einen Hinweis und `ring_bell`; `main.rs` schreibt
    das BEL nach dem Zeichnen direkt über das Terminal-Backend.
-4. Nach jeder Layout-Änderung und bei Resize bekommt jede sichtbare Session die Innenmaße ihres
+4. Nach jeder Layout-Änderung und bei Resize bekommt jeder sichtbare Inhalt die Maße seines
    Fensters. Sessions im Hintergrund behalten ihre letzte Größe; sie wird erst beim Anzeigen angepasst.
-   `App::window_rects` liefert nur sichtbare Fenster als (Fensterindex, Session, Rechteck) — beim
-   Zoom allein das gezoomte über die ganze Fensterfläche. Zeichnen, Maus und Resize gehen alle
-   darüber; nur die Nachbarsuche für `Ctrl+Pfeil` nimmt das ungezoomte Layout.
+
+## Fenster und Inhalte
+
+Zwei unabhängige Achsen: **wo** etwas liegt (`windows::Spot` — einer der vier Fensterplätze oder
+das temporäre Fenster, dazu Fokus und Zoom) und **was** es zeigt (`windows::Pane` — Session,
+Notizblock, Todo-Liste, Notizübersicht). Jeder Inhalt passt in jede Art Fenster.
+
+- `App::views` liefert die sichtbaren Fenster von unten nach oben als `View` (Ort, Inhalt,
+  Rechteck): die Plätze (beim Zoom nur der gezoomte über die ganze Fensterfläche), darüber das
+  temporäre Fenster aus `layout::temporary`. Zeichnen, Größen und Maus (oberstes Fenster zuerst,
+  `view_at`) gehen alle darüber; nur die Nachbarsuche für `Ctrl+Pfeil` nimmt das ungezoomte Layout.
+- `Windows::input_pane` ist der Inhalt, der Tasten und Einfügen bekommt: der des temporären
+  Fensters, solange es offen ist, sonst der des Fensters mit Fokus. Das temporäre Fenster belegt
+  keinen Platz und zeigt nie, was schon in einem Fenster liegt (dann bekommt dieses den Fokus);
+  jeder Fokuswechsel schließt es, Fokus und Zoom darunter bleiben sonst unverändert.
+- Was von der Art des Fensters abhängt (Kennung `[n]` bzw. „temporary“, Fokusrahmen, „zoomed“,
+  Hinweiszeile), baut `ui::Chrome`; die Inhalte liefern nur Titel und Inhalt.
+- Je Belang gibt es genau eine Stelle, die nach dem Inhalt verzweigt — erschöpfend, ohne `_`:
+  Zeichnen (`ui::draw_windows`), Taste (`App::pane_key`), Einfügen (`on_paste`,
+  `takes_bursts_as_paste`), Maus (`panel_mouse` bzw. die Session-Wege), Inhaltsfläche
+  (`content_rect`), Größe (`pane_resize`), Name (`pane_title`). Ein neuer Inhalt ist eine neue
+  `Pane`-Variante plus je ein Zweig dort — der Compiler zählt die Stellen auf —, dazu seine
+  Listenzeile (`list::Cursor`, zugeordnet in `App::cursor_pane`), ggf. sein Menüpunkt und sein
+  Platz in `state.json`. Am Fenstercode ändert sich nichts.
 
 ## Statuserkennung
 

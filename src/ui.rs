@@ -12,7 +12,7 @@ use ratatui::{
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    app::{App, ListHits},
+    app::{App, ListHits, View},
     dirpick::DirPicker,
     grouppick::{Choice, GroupPicker},
     help::{self, Help},
@@ -25,7 +25,7 @@ use crate::{
     tags,
     term_view::TermView,
     theme, update,
-    windows::{Focus, Pane},
+    windows::{Focus, Pane, SessionId, Spot},
 };
 
 const SIDEBAR_WIDTH: u16 = 42;
@@ -103,7 +103,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     }
     hint.push(Span::raw(" "));
 
-    let focused = app.windows.focus() == Focus::List;
+    let focused = app.windows.active().is_none();
     let title = vec![
         Span::styled(
             " ✻ claude-tui ",
@@ -232,7 +232,7 @@ fn draw_session_list(f: &mut Frame, app: &App, area: Rect) {
     let width = area.width as usize;
     let selected = app.visible_cursor();
     // Blau mit dunkler Schrift nur, solange die Liste den Fokus hat; sonst dezent hinterlegt.
-    let focused = app.windows.focus() == Focus::List;
+    let focused = app.windows.active().is_none();
     let rows = list::rows(&app.groups, &app.collapsed);
     let mut items: Vec<ListItem> = Vec::with_capacity(rows.len());
     // Je Bildschirmzeile die Listenzeile dahinter; `None` = Leerzeile zwischen Abschnitten.
@@ -904,121 +904,177 @@ fn note_lines(note: &str, width: usize, rows: usize) -> Vec<Line<'static>> {
 }
 
 fn draw_windows(f: &mut Frame, app: &App) {
-    let rects = app.window_rects();
-    if rects.is_empty() {
+    let views = app.views();
+    if !views.iter().any(|v| matches!(v.spot, Spot::Window(_))) {
         let [_, area] = split(f.area(), app.list_hidden);
         let hint = format!(" No window open – {} n starts a session", keys::PREFIX_HINT);
         let text = Paragraph::new(Span::styled(hint, Style::default().fg(theme::MUTED)));
         f.render_widget(text.block(rounded(theme::UNFOCUS)), area);
-        return;
     }
-    for (slot, pane, rect) in rects {
+    for view in views {
         // Die Fensterrechtecke stammen aus der zuletzt gemeldeten Größe; ist das Terminal
         // inzwischen kleiner, nur den sichtbaren Teil zeichnen.
-        let rect = rect.intersection(f.area());
+        let rect = view.rect.intersection(f.area());
         if rect.is_empty() {
             continue;
         }
-        let id = match pane {
-            Pane::Session(id) => id,
-            Pane::Notepad => {
-                draw_notepad(f, app, slot, rect);
-                continue;
-            }
-            Pane::Todo => {
-                draw_todo(f, app, slot, rect);
-                continue;
-            }
-            Pane::Notes => {
-                draw_notes(f, app, slot, rect);
-                continue;
-            }
+        if view.spot == Spot::Temporary {
+            f.render_widget(Clear, rect);
+        }
+        let chrome = Chrome::of(app, view, rect);
+        match view.pane {
+            Pane::Session(id) => draw_session(f, app, id, &chrome),
+            Pane::Notepad => draw_notepad(f, app, &chrome),
+            Pane::Todo => draw_todo(f, app, &chrome),
+            Pane::Notes => draw_notes(f, app, &chrome),
+        }
+    }
+}
+
+/// Schließhinweis im Titel des temporären Fensters; `Ctrl+Enter` meldet nur die Windows-Konsole
+/// unterscheidbar (siehe `keys`).
+const TEMPORARY_CLOSE: &str = if cfg!(windows) {
+    "Ctrl+Enter closes"
+} else {
+    "Ctrl+A closes"
+};
+
+/// Was am Rahmen eines Fensters von seiner Art abhängt (Fensterplatz oder temporäres Fenster):
+/// Kennung, Fokus, Zoom. Die Quellen (Session, Notizblock …) liefern nur Titel und Inhalt und
+/// fragen nie selbst nach der Art des Fensters.
+struct Chrome {
+    rect: Rect,
+    focused: bool,
+    label: String,
+    zoomed: bool,
+}
+
+impl Chrome {
+    fn of(app: &App, view: View, rect: Rect) -> Self {
+        let (label, zoomed) = match view.spot {
+            Spot::Window(slot) => (
+                format!("[{}]", slot + 1),
+                app.windows.zoomed() == Some(slot),
+            ),
+            Spot::Temporary => (format!("temporary · {TEMPORARY_CLOSE}"), false),
         };
-        let Some(session) = app.session(id) else {
-            continue;
-        };
-        let focused = app.windows.focus() == Focus::Window(slot);
-        let color = frame_color(focused);
+        Self {
+            rect,
+            // Unter dem temporären Fenster hat kein Fenster den Fokus (kein zweiter Cursor).
+            focused: app.windows.active() == Some(view.spot),
+            label,
+            zoomed,
+        }
+    }
+
+    fn color(&self) -> Color {
+        frame_color(self.focused)
+    }
+
+    /// Rahmen mit Kennung, fett gesetztem `title`, danach `plain` (eigene Stile) und ggf. „zoomed“;
+    /// unten der Hinweis, wenn die Sessionliste ausgeblendet ist.
+    fn block<'a>(&self, app: &App, title: Vec<Span<'a>>, plain: Vec<Span<'a>>) -> Block<'a> {
+        let color = self.color();
         let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
-        let tag = tag_label(app, &session.claude_id);
-        // Wie in der Liste trägt der Titel die Sessionfarbe aus `/color`.
-        let name_style = match app.color_of(id).as_deref().and_then(theme::session_color) {
-            Some(session_color) => title_style.fg(session_color),
-            None => title_style,
-        };
-        // Wie in der Liste: die Schnellwahl-Nummer hinter dem Titel.
-        let title = vec![
-            Span::styled(format!(" [{}] ", slot + 1), title_style.fg(theme::TEXT)),
-            Span::styled(format!("{} ", app.title_of(id)), name_style),
-            Span::styled(tag, tag_style()),
-        ];
-        let (label, label_color) = theme::status_label(session.status);
-        let (symbol, _) = theme::status_symbol(Some(session.status), clock());
-        let separator = Span::styled("· ", Style::default().fg(color));
-        let status = Span::styled(
-            format!("{symbol} {label} "),
-            Style::default().fg(label_color),
+        let mut spans = vec![Span::styled(
+            format!(" {} ", self.label),
+            title_style.fg(theme::TEXT),
+        )];
+        spans.extend(
+            title
+                .into_iter()
+                .map(|span| Span::styled(span.content, title_style.patch(span.style))),
         );
-        let mut spans = title;
-        spans.extend([separator, status]);
-        if app.windows.zoomed() == Some(slot) {
+        spans.extend(plain);
+        if self.zoomed {
             spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
         }
-        let scrolled = session.scroll_offset();
-        if scrolled > 0 {
-            spans.push(Span::styled(
-                format!("· ↑ {scrolled} lines "),
-                Style::default().fg(theme::MENU),
-            ));
-        }
-        let mut block = rounded(color).title(Line::from(spans));
-        if let Some(version) = app.version_of(&session.claude_id) {
-            block = block.title(
-                Line::from(Span::styled(
-                    format!(" v{version} "),
-                    Style::default().fg(theme::MUTED),
-                ))
-                .right_aligned(),
-            );
-        }
-        block = with_notice(block, app, focused, rect);
-        f.render_widget(block, rect);
-        let (inner, note_row) = app.window_content(id, rect);
-        if let (Some(area), Some(note)) = (note_row, app.note_of(&session.claude_id)) {
-            let lines = note_lines(note, area.width as usize, area.height as usize);
-            f.render_widget(Paragraph::new(lines), area);
-        }
-        // Bis Claude etwas anzeigt, steht im Fenster, worauf es wartet — sonst wirkt es hängend.
-        let waiting_text = if session.is_pending() {
-            Some("queued – starts after the previous window".to_string())
-        } else {
-            session.starting_since().map(|since| {
-                let (spinner, _) = theme::status_symbol(Some(session.status), clock());
-                format!("{spinner} starting claude … {}s", since.elapsed().as_secs())
-            })
-        };
-        if let Some(text) = waiting_text {
-            let line = Line::from(Span::styled(text, Style::default().fg(theme::MUTED)));
-            let middle = Rect {
-                y: inner.y + inner.height / 2,
-                height: inner.height.min(1),
-                ..inner
-            };
-            f.render_widget(Paragraph::new(line).centered(), middle);
-            continue;
-        }
-        let parser = session.screen();
-        let selection = app
-            .selection
-            .filter(|s| s.session == id && !s.is_empty())
-            .map(|s| s.range());
-        f.render_widget(
-            TermView::new(parser.screen())
-                .show_cursor(focused)
-                .selection(selection),
-            inner,
+        with_notice(
+            rounded(color).title(Line::from(spans)),
+            app,
+            self.focused,
+            self.rect,
+        )
+    }
+}
+
+/// Fenster einer Session: Titel und Zustand, darin Terminal und Notiz.
+fn draw_session(f: &mut Frame, app: &App, id: SessionId, chrome: &Chrome) {
+    let Some(session) = app.session(id) else {
+        return;
+    };
+    let (rect, focused, color) = (chrome.rect, chrome.focused, chrome.color());
+    // Wie in der Liste trägt der Titel die Sessionfarbe aus `/color` und dahinter die
+    // Schnellwahl-Nummer.
+    let name_style = app
+        .color_of(id)
+        .as_deref()
+        .and_then(theme::session_color)
+        .map_or_else(Style::default, |c| Style::default().fg(c));
+    let title = vec![Span::styled(format!("{} ", app.title_of(id)), name_style)];
+    let (label, label_color) = theme::status_label(session.status);
+    let (symbol, _) = theme::status_symbol(Some(session.status), clock());
+    let mut plain = vec![
+        Span::styled(tag_label(app, &session.claude_id), tag_style()),
+        Span::styled("· ", Style::default().fg(color)),
+        Span::styled(
+            format!("{symbol} {label} "),
+            Style::default().fg(label_color),
+        ),
+    ];
+    let scrolled = session.scroll_offset();
+    if scrolled > 0 {
+        plain.push(Span::styled(
+            format!("· ↑ {scrolled} lines "),
+            Style::default().fg(theme::MENU),
+        ));
+    }
+    let mut block = chrome.block(app, title, plain);
+    if let Some(version) = app.version_of(&session.claude_id) {
+        block = block.title(
+            Line::from(Span::styled(
+                format!(" v{version} "),
+                Style::default().fg(theme::MUTED),
+            ))
+            .right_aligned(),
         );
     }
+    f.render_widget(block, rect);
+    let (inner, note_row) = app.window_content(id, rect);
+    if let (Some(area), Some(note)) = (note_row, app.note_of(&session.claude_id)) {
+        let lines = note_lines(note, area.width as usize, area.height as usize);
+        f.render_widget(Paragraph::new(lines), area);
+    }
+    // Bis Claude etwas anzeigt, steht im Fenster, worauf es wartet — sonst wirkt es hängend.
+    let waiting_text = if session.is_pending() {
+        Some("queued – starts after the previous window".to_string())
+    } else {
+        session.starting_since().map(|since| {
+            let (spinner, _) = theme::status_symbol(Some(session.status), clock());
+            format!("{spinner} starting claude … {}s", since.elapsed().as_secs())
+        })
+    };
+    if let Some(text) = waiting_text {
+        let line = Line::from(Span::styled(text, Style::default().fg(theme::MUTED)));
+        let middle = Rect {
+            y: inner.y + inner.height / 2,
+            height: inner.height.min(1),
+            ..inner
+        };
+        f.render_widget(Paragraph::new(line).centered(), middle);
+        return;
+    }
+    let parser = session.screen();
+    let selection = app
+        .selection
+        .filter(|s| s.session == id && !s.is_empty())
+        .map(|s| s.range());
+    f.render_widget(
+        TermView::new(parser.screen())
+            .show_cursor(focused)
+            .selection(selection),
+        inner,
+    );
 }
 
 /// Ohne Sessionliste fehlt deren Hinweiszeile; der Hinweis steht dann unten im Fenster mit Fokus.
@@ -1037,14 +1093,13 @@ fn with_notice<'a>(block: Block<'a>, app: &App, focused: bool, rect: Rect) -> Bl
 
 /// Fenster mit dem Notizblock: umbrochener Text, Cursor nur mit Fokus, rechts am Rahmen eine
 /// Scrollbar, sobald der Text nicht in das Fenster passt.
-fn draw_notepad(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
-    let focused = app.windows.focus() == Focus::Window(slot);
-    let color = frame_color(focused);
+fn draw_notepad(f: &mut Frame, app: &App, chrome: &Chrome) {
+    let (rect, focused, color) = (chrome.rect, chrome.focused, chrome.color());
     let title = vec![Span::styled(
         format!("{} Notepad ", theme::NOTE_ICON),
         Style::default().fg(theme::NOTE),
     )];
-    let block = panel_block(app, slot, title, focused, rect);
+    let block = chrome.block(app, title, Vec::new());
     f.render_widget(block, rect);
     let text = layout::panel_text(rect);
     if text.is_empty() {
@@ -1064,32 +1119,6 @@ fn draw_notepad(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
         f.buffer_mut()[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
     }
     draw_scrollbar(f, rect, color, shown.total, shown.scroll, height);
-}
-
-/// Rahmen von Notizblock bzw. Todo-Liste: Fensternummer, `title`, ggf. „zoomed“ und unten ein
-/// Hinweis wie bei den Session-Fenstern.
-fn panel_block<'a>(
-    app: &App,
-    slot: usize,
-    title: Vec<Span<'a>>,
-    focused: bool,
-    rect: Rect,
-) -> Block<'a> {
-    let color = frame_color(focused);
-    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
-    let mut spans = vec![Span::styled(
-        format!(" [{}] ", slot + 1),
-        title_style.fg(theme::TEXT),
-    )];
-    spans.extend(
-        title
-            .into_iter()
-            .map(|span| Span::styled(span.content, title_style.patch(span.style))),
-    );
-    if app.windows.zoomed() == Some(slot) {
-        spans.push(Span::styled("· zoomed ", Style::default().fg(theme::MENU)));
-    }
-    with_notice(rounded(color).title(Line::from(spans)), app, focused, rect)
 }
 
 /// Scrollbar auf dem rechten Rahmen, sobald `total` Zeilen nicht in `height` passen.
@@ -1122,9 +1151,8 @@ const TODO_EDIT_HINT: &str = "enter save · shift+enter new line · esc cancel";
 
 /// Fenster mit der Todo-Liste: je Eintrag Häkchen und umbrochener Text (Folgezeilen eingerückt),
 /// erledigte gedämpft und durchgestrichen; der gewählte Eintrag ist hinterlegt.
-fn draw_todo(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
-    let focused = app.windows.focus() == Focus::Window(slot);
-    let color = frame_color(focused);
+fn draw_todo(f: &mut Frame, app: &App, chrome: &Chrome) {
+    let (rect, focused, color) = (chrome.rect, chrome.focused, chrome.color());
     let todo = &app.todo;
     let counts = match todo.done_count() {
         0 => format!("({} open) ", todo.open_count()),
@@ -1137,7 +1165,7 @@ fn draw_todo(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
         ),
         Span::styled(counts, Style::default().fg(theme::MUTED)),
     ];
-    let mut block = panel_block(app, slot, title, focused, rect);
+    let mut block = chrome.block(app, title, Vec::new());
     // Ein Hinweis (Fehler o. Ä.) belegt den unteren Rahmen schon.
     let notice_shown = app.notice.is_some() && app.list_hidden;
     if focused && !notice_shown {
@@ -1227,9 +1255,8 @@ const NOTES_HINT: &str = "enter open · 1…4 open in window";
 /// Fenster mit der Notizübersicht: je Session mit Notiz deren Zeile wie in der Sessionliste
 /// (Zustand, Titel in Sessionfarbe, Fensternummer, Zeit), darunter eingerückt die Notiz. Der
 /// gewählte Eintrag ist über alle seine Zeilen hinterlegt.
-fn draw_notes(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
-    let focused = app.windows.focus() == Focus::Window(slot);
-    let color = frame_color(focused);
+fn draw_notes(f: &mut Frame, app: &App, chrome: &Chrome) {
+    let (rect, focused, color) = (chrome.rect, chrome.focused, chrome.color());
     let items = app.note_items();
     let title = vec![
         Span::styled(
@@ -1241,7 +1268,7 @@ fn draw_notes(f: &mut Frame, app: &App, slot: usize, rect: Rect) {
             Style::default().fg(theme::MUTED),
         ),
     ];
-    let mut block = panel_block(app, slot, title, focused, rect);
+    let mut block = chrome.block(app, title, Vec::new());
     let notice_shown = app.notice.is_some() && app.list_hidden;
     if focused && !notice_shown && !items.is_empty() {
         let width = usize::from(rect.width).saturating_sub(4);

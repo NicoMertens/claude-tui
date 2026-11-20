@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
     keys,
-    windows::{Focus, SessionId, MAX_WINDOWS},
+    windows::{Focus, Pane, Spot, MAX_WINDOWS},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +54,8 @@ pub enum Action {
     ConfirmQuit,
     /// Fensterauswahl: Ziel-Fensterindex.
     Place(usize),
+    /// Fensterauswahl: ins temporäre Fenster.
+    PlaceTemporary,
 }
 
 /// Eintrag der gemeinsamen Tabelle für Menü und Hilfe: Taste, Grundbeschriftung im Menü und
@@ -207,23 +209,17 @@ pub struct Item {
 pub enum Purpose {
     /// Neue Session im gewählten Verzeichnis.
     NewSession(PathBuf),
-    /// Laufende Session anzeigen.
-    Show(SessionId),
+    /// Vorhandenen Inhalt anzeigen: laufende Session, Notizblock, Todo-Liste usw.
+    Show(Pane),
     /// Gespeicherte Claude-Session fortsetzen (`--resume`).
     Resume(String),
-    /// Notizblock zeigen.
-    Notepad,
-    /// Todo-Liste zeigen.
-    Todo,
-    /// Notizübersicht zeigen.
-    Notes,
     /// Claude-Session, deren Löschen bestätigt werden soll.
     Delete(String),
     /// Mehrere Claude-Sessions (markiert oder nach Alter), deren Löschen bestätigt werden soll.
     DeleteMany(Vec<String>),
     /// Claude-Session, die außerhalb von claude-tui läuft und trotzdem geöffnet werden soll; mit
-    /// Zielfenster (`None` = danach Fensterauswahl).
-    OpenElsewhere(String, Option<usize>),
+    /// Ziel (`None` = danach Fensterauswahl).
+    OpenElsewhere(String, Option<Spot>),
 }
 
 #[derive(Debug)]
@@ -374,8 +370,14 @@ impl Menu {
         }
     }
 
-    /// Fensterauswahl: jedes der vier Fenster, belegte ersetzen, freie neu öffnen.
+    /// Fensterauswahl: jedes der vier Fenster, belegte ersetzen, freie neu öffnen, dazu das
+    /// temporäre Fenster.
     pub fn pick_window(purpose: Purpose, title: String, occupied: [bool; MAX_WINDOWS]) -> Self {
+        let temporary = Item {
+            hotkey: '0',
+            label: "Temporary window".to_string(),
+            action: Action::PlaceTemporary,
+        };
         let items: Vec<Item> = (0..MAX_WINDOWS)
             .map(|i| Item {
                 hotkey: digit(i + 1),
@@ -386,6 +388,7 @@ impl Menu {
                 },
                 action: Action::Place(i),
             })
+            .chain([temporary])
             .collect();
         Self {
             title,
@@ -452,7 +455,7 @@ impl Menu {
 
     /// Rückfrage, bevor eine anderswo laufende Session ein zweites Mal gestartet wird. Enter wählt
     /// „No“: zwei Prozesse in einem Protokoll sollen nie aus Versehen entstehen.
-    pub fn confirm_open(title: &str, claude_id: String, slot: Option<usize>) -> Self {
+    pub fn confirm_open(title: &str, claude_id: String, spot: Option<Spot>) -> Self {
         let item = |c, label: &str, action| Item {
             hotkey: c,
             label: label.to_string(),
@@ -467,7 +470,7 @@ impl Menu {
                 item('n', "No", Action::Cancel),
             ],
             selected: 1,
-            purpose: Some(Purpose::OpenElsewhere(claude_id, slot)),
+            purpose: Some(Purpose::OpenElsewhere(claude_id, spot)),
         }
     }
 
@@ -706,11 +709,16 @@ mod tests {
             "Neu".into(),
             open(2),
         );
-        assert_eq!(menu.items.len(), 4);
+        assert_eq!(menu.items.len(), 5);
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('3'))),
             Outcome::Run(Action::Place(2))
         );
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('0'))),
+            Outcome::Run(Action::PlaceTemporary)
+        );
+        assert_eq!(menu.on_key(&key(KeyCode::Up)), Outcome::Stay);
         assert_eq!(menu.on_key(&key(KeyCode::Up)), Outcome::Stay);
         assert_eq!(
             menu.on_key(&key(KeyCode::Enter)),
@@ -745,9 +753,19 @@ mod tests {
                 "New Window 1",
                 "Replace Window 2",
                 "New Window 3",
-                "Replace Window 4"
+                "Replace Window 4",
+                "Temporary window"
             ]
         );
+    }
+
+    #[test]
+    fn temporary_window_for_every_content() {
+        for pane in [Pane::Session(7), Pane::Notepad, Pane::Todo, Pane::Notes] {
+            let menu = Menu::pick_window(Purpose::Show(pane), "Show".into(), open(0));
+            let last = menu.items.last().map(|i| (i.hotkey, i.action));
+            assert_eq!(last, Some(('0', Action::PlaceTemporary)));
+        }
     }
 
     #[test]
@@ -1056,11 +1074,11 @@ mod tests {
 
     #[test]
     fn open_elsewhere_needs_confirmation_and_enter_cancels() {
-        let mut menu = Menu::confirm_open("Analyse", "abc".into(), Some(1));
+        let mut menu = Menu::confirm_open("Analyse", "abc".into(), Some(Spot::Window(1)));
         assert_eq!(menu.title, "Analyse runs elsewhere – open anyway?");
         assert_eq!(
             menu.purpose,
-            Some(Purpose::OpenElsewhere("abc".into(), Some(1)))
+            Some(Purpose::OpenElsewhere("abc".into(), Some(Spot::Window(1))))
         );
         assert_eq!(
             menu.on_key(&key(KeyCode::Enter)),

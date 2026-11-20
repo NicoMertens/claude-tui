@@ -35,7 +35,7 @@ use crate::{
     trace, ui,
     update::{self, Available},
     waiting,
-    windows::{Focus, Pane, SessionId, Windows, MAX_WINDOWS},
+    windows::{Focus, Pane, SessionId, Spot, Windows, MAX_WINDOWS},
 };
 
 /// So oft wird `~/.claude/projects` nach neuen Sessions und Titeln durchsucht.
@@ -60,6 +60,14 @@ const LIST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Sichtbare Zeilen der Sessionliste aus dem letzten Zeichnen: Fläche und (Bildschirmzeile,
 /// Zeile als Cursor) je Session und Überschrift.
+/// Ein sichtbares Fenster: wo es liegt (Art des Fensters), was es zeigt (Quelle), wie groß es ist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct View {
+    pub spot: Spot,
+    pub pane: Pane,
+    pub rect: Rect,
+}
+
 #[derive(Debug, Default)]
 pub struct ListHits {
     pub area: Rect,
@@ -352,7 +360,7 @@ impl App {
             .open()
             .filter_map(|(_, pane)| pane.session())
             .collect();
-        if let Some(first) = self.focused_session() {
+        if let Some(first) = self.windows.focused_pane().and_then(Pane::session) {
             order.retain(|&id| id != first);
             order.insert(0, first);
         }
@@ -568,47 +576,101 @@ impl App {
         self.selected_entry().and_then(|e| e.running)
     }
 
-    /// Sichtbare Fenster als (Fensterindex, Inhalt, Rechteck) in Nummernreihenfolge; gezoomt nur
-    /// das gezoomte Fenster über die ganze Fensterfläche.
-    pub fn window_rects(&self) -> Vec<(usize, Pane, Rect)> {
-        layout::visible(
-            ui::windows_area(self.screen, self.list_hidden),
-            self.windows.occupied(),
-            self.windows.zoomed(),
-        )
-        .into_iter()
-        .filter_map(|(slot, rect)| Some((slot, self.windows.pane(slot)?, rect)))
-        .collect()
-    }
-
-    /// Sichtbare Session-Fenster wie [`Self::window_rects`], ohne Notizblock und Todo-Liste.
-    pub fn session_rects(&self) -> Vec<(usize, SessionId, Rect)> {
-        self.window_rects()
+    /// Sichtbare Fenster von unten nach oben: die Fensterplätze in Nummernreihenfolge (gezoomt nur
+    /// das gezoomte über die ganze Fensterfläche), darüber das temporäre Fenster. Einzige Quelle
+    /// für Zeichnen, Größen und Maus — wer hier nach Art des Fensters fragt, fragt nie nach der
+    /// Quelle und umgekehrt.
+    pub fn views(&self) -> Vec<View> {
+        let area = ui::windows_area(self.screen, self.list_hidden);
+        let slots = layout::visible(area, self.windows.occupied(), self.windows.zoomed())
             .into_iter()
-            .filter_map(|(slot, pane, rect)| Some((slot, pane.session()?, rect)))
-            .collect()
+            .filter_map(|(slot, rect)| {
+                Some(View {
+                    spot: Spot::Window(slot),
+                    pane: self.windows.pane(slot)?,
+                    rect,
+                })
+            });
+        let temporary = self.windows.temporary().map(|pane| View {
+            spot: Spot::Temporary,
+            pane,
+            rect: layout::temporary(area),
+        });
+        slots.chain(temporary).collect()
     }
 
-    /// Session im Fenster mit Fokus (`None` auch bei Notizblock und Todo-Liste).
-    fn focused_session(&self) -> Option<SessionId> {
-        self.windows.focused_pane().and_then(Pane::session)
-    }
-
-    /// Textfläche von Notizblock bzw. Todo-Liste (`pane`), falls sichtbar.
-    pub fn panel_rect(&self, pane: Pane) -> Option<Rect> {
-        let (_, _, rect) = self
-            .window_rects()
+    /// Oberstes sichtbares Fenster an der Position.
+    fn view_at(&self, position: Position) -> Option<View> {
+        self.views()
             .into_iter()
-            .find(|&(_, p, _)| p == pane)?;
-        Some(layout::panel_text(rect))
+            .rev()
+            .find(|v| v.rect.contains(position))
+    }
+
+    /// Rechteck des Fensters, in dem `pane` gerade sichtbar ist.
+    fn rect_of(&self, pane: Pane) -> Option<Rect> {
+        self.views()
+            .into_iter()
+            .find(|v| v.pane == pane)
+            .map(|v| v.rect)
+    }
+
+    /// Inhaltsfläche von `pane`, falls sichtbar.
+    fn content_of(&self, pane: Pane) -> Option<Rect> {
+        self.rect_of(pane).map(|rect| self.content_rect(pane, rect))
+    }
+
+    /// Inhaltsfläche einer Quelle im Fensterrechteck `rect`: Terminal der Session bzw. Textfläche.
+    pub fn content_rect(&self, pane: Pane, rect: Rect) -> Rect {
+        match pane {
+            Pane::Session(id) => self.window_content(id, rect).0,
+            Pane::Notepad | Pane::Todo | Pane::Notes => layout::panel_text(rect),
+        }
+    }
+
+    /// Session im Fenster, das die Eingaben bekommt (`None` auch bei Notizblock usw.).
+    fn input_session(&self) -> Option<SessionId> {
+        self.windows.input_pane().and_then(Pane::session)
+    }
+
+    /// Rechteck des temporären Fensters (auch wenn es gerade zu ist).
+    fn temporary_rect(&self) -> Rect {
+        layout::temporary(ui::windows_area(self.screen, self.list_hidden))
+    }
+
+    /// Zeigt `pane` an `spot`. Im temporären Fenster nur, wenn es kein eigenes Fenster hat —
+    /// sonst bekommt dieses den Fokus.
+    fn show_at(&mut self, pane: Pane, spot: Spot) {
+        match spot {
+            Spot::Window(slot) => self.place_pane(pane, slot),
+            Spot::Temporary => {
+                self.selection = None;
+                self.windows.show_temporary(pane);
+                self.after_layout_change();
+            }
+        }
+    }
+
+    fn close_temporary(&mut self) {
+        self.windows.close_temporary();
+        self.selection = None;
+    }
+
+    /// Klick in ein Fenster: ein Fensterplatz bekommt den Fokus (und schließt damit das
+    /// temporäre Fenster), das temporäre Fenster hat die Eingaben ohnehin.
+    fn activate(&mut self, spot: Spot) {
+        match spot {
+            Spot::Window(slot) => self.set_focus(Focus::Window(slot)),
+            Spot::Temporary => {}
+        }
     }
 
     /// Rechteck von Fenster `slot`, falls es sichtbar ist.
     pub fn window_rect(&self, slot: usize) -> Option<Rect> {
-        self.window_rects()
+        self.views()
             .into_iter()
-            .find(|&(s, _, _)| s == slot)
-            .map(|(_, _, rect)| rect)
+            .find(|v| v.spot == Spot::Window(slot))
+            .map(|v| v.rect)
     }
 
     /// Notiz der Claude-Session, falls sie eine hat.
@@ -623,15 +685,6 @@ impl App {
             .and_then(|s| self.note_of(&s.claude_id))
             .map_or(0, |note| note.lines().count());
         layout::window_content(rect, note_lines)
-    }
-
-    /// Terminalfläche von Fenster `slot`, falls es sichtbar ist.
-    fn term_rect(&self, slot: usize) -> Option<Rect> {
-        let (_, id, rect) = self
-            .session_rects()
-            .into_iter()
-            .find(|&(s, _, _)| s == slot)?;
-        Some(self.window_content(id, rect).0)
     }
 
     /// Hintergrundarbeit je Durchlauf der Hauptschleife. Liefert, ob sich etwas Sichtbares geändert
@@ -667,7 +720,8 @@ impl App {
         for (id, switch) in switches {
             self.follow_switch(id, switch);
         }
-        for id in waiting::newly_waiting(changes, self.focused_session()) {
+        let watched = self.input_session();
+        for id in waiting::newly_waiting(changes, watched) {
             self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
             self.ring_bell = waiting::bell_enabled();
         }
@@ -679,7 +733,8 @@ impl App {
             .map(|s| s.id)
             .collect();
         for id in exited {
-            if self.windows.window_of(id).is_some() {
+            let pane = Pane::Session(id);
+            if self.windows.slot_of(pane).is_some() || self.windows.temporary() == Some(pane) {
                 let title = self.title_of(id);
                 let last = self.session(id).and_then(Session::last_line);
                 self.notice = Some(match last {
@@ -947,6 +1002,7 @@ impl App {
         self.selection = None;
         if let Some(direction) = keys::focus_direction(&key) {
             self.close_overlays();
+            self.close_temporary();
             self.move_focus(direction);
             return Ok(());
         }
@@ -1003,6 +1059,17 @@ impl App {
             }
             return Ok(());
         }
+        if self.windows.temporary().is_some() {
+            if keys::is_temporary_toggle(&key) {
+                self.close_temporary();
+                return Ok(());
+            }
+            // Ctrl+A und Ctrl+Zahl wirken auf die Fenster darunter: erst schließen. Alt+Zahl und
+            // Ctrl+Leertaste gelten dem Inhalt des temporären Fensters.
+            if keys::is_prefix(&key) || matches!(keys::tag_key(&key), Some(TagKey::Show(_))) {
+                self.close_temporary();
+            }
+        }
         if keys::is_prefix(&key) {
             self.open_commands();
             return Ok(());
@@ -1021,17 +1088,26 @@ impl App {
             self.toggle_unread();
             return Ok(());
         }
-        match self.windows.focused_pane() {
-            Some(Pane::Session(id)) => {
+        match self.windows.input_pane() {
+            Some(pane) => self.pane_key(pane, key)?,
+            None => self.on_list_key(key)?,
+        }
+        Ok(())
+    }
+
+    /// Taste an den Inhalt eines Fensters — gleich, in welcher Art Fenster er liegt.
+    fn pane_key(&mut self, pane: Pane, key: KeyEvent) -> Result<()> {
+        match pane {
+            Pane::Session(id) => {
                 if let Some(session) = self.session_mut(id) {
                     if let Some(bytes) = keys::to_bytes(&key, session.application_cursor()) {
                         session.write(&bytes)?;
                     }
                 }
             }
-            Some(Pane::Notepad) => self.notepad.on_key(&key),
-            Some(Pane::Todo) => self.todo.on_key(&key),
-            Some(Pane::Notes) => {
+            Pane::Notepad => self.notepad.on_key(&key),
+            Pane::Todo => self.todo.on_key(&key),
+            Pane::Notes => {
                 let open = self
                     .note_list
                     .on_key(&key, &note_items(&self.groups, &self.notes));
@@ -1039,7 +1115,6 @@ impl App {
                     self.open_noted(open)?;
                 }
             }
-            None => self.on_list_key(key)?,
         }
         Ok(())
     }
@@ -1057,7 +1132,7 @@ impl App {
         {
             return false;
         }
-        match self.windows.focused_pane() {
+        match self.windows.input_pane() {
             Some(Pane::Session(_)) => true,
             Some(Pane::Todo) => !self.todo.is_editing(),
             Some(Pane::Notes) => true,
@@ -1082,7 +1157,7 @@ impl App {
             editor.paste(text);
             return Ok(());
         }
-        match self.windows.focused_pane() {
+        match self.windows.input_pane() {
             Some(Pane::Session(id)) => {
                 if let Some(session) = self.session_mut(id) {
                     if let Err(e) = session.paste(text) {
@@ -1114,6 +1189,11 @@ impl App {
             }
             return;
         }
+        let outside_temporary =
+            self.windows.temporary().is_some() && !self.temporary_rect().contains(position);
+        if outside_temporary && matches!(mouse.kind, MouseEventKind::Down(_)) {
+            self.close_temporary();
+        }
         if self.panel_mouse(mouse) {
             return;
         }
@@ -1140,11 +1220,11 @@ impl App {
                     self.on_list_click(cursor);
                     return;
                 }
-                let Some((slot, id, cell)) = self.window_at(position) else {
+                let Some((spot, id, cell)) = self.window_at(position) else {
                     return;
                 };
                 self.close_overlays();
-                self.set_focus(Focus::Window(slot));
+                self.activate(spot);
                 let double = self.last_click.is_some_and(|(at, last_id, last_cell)| {
                     at.elapsed() < DOUBLE_CLICK && last_id == id && last_cell == cell
                 });
@@ -1166,10 +1246,7 @@ impl App {
                     return;
                 };
                 // Auch außerhalb des Fensters weiterziehen, aber auf dessen Inhalt begrenzt.
-                let inner = self
-                    .windows
-                    .window_of(session)
-                    .and_then(|slot| self.term_rect(slot));
+                let inner = self.content_of(Pane::Session(session));
                 if let (Some(inner), Some(selection)) = (inner, self.selection.as_mut()) {
                     selection.head = cell_in(inner, position);
                 }
@@ -1202,18 +1279,20 @@ impl App {
                 if modifiers.alt || self.list_hits.borrow().at(position).is_some() {
                     return false;
                 }
-                let Some((slot, id, cell)) = self.window_at(position) else {
+                let Some((spot, id, cell)) = self.window_at(position) else {
                     return false;
                 };
                 // Klick auf Rahmen oder Titel setzt nur den Fokus (eigener Weg unten).
-                let on_content = self.term_rect(slot).is_some_and(|r| r.contains(position));
+                let on_content = self
+                    .content_of(Pane::Session(id))
+                    .is_some_and(|r| r.contains(position));
                 if !on_content || !self.session(id).is_some_and(Session::wants_mouse) {
                     return false;
                 }
                 self.close_overlays();
                 self.selection = None;
                 self.dragging = false;
-                self.set_focus(Focus::Window(slot));
+                self.activate(spot);
                 let button = mouse_button(button);
                 self.forwarding = Some((id, button));
                 (mouse::Action::Press(button), id, cell)
@@ -1223,11 +1302,7 @@ impl App {
                     return false;
                 };
                 // Auch außerhalb des Fensters weiterziehen, aber auf dessen Inhalt begrenzt.
-                let Some(inner) = self
-                    .windows
-                    .window_of(id)
-                    .and_then(|slot| self.term_rect(slot))
-                else {
+                let Some(inner) = self.content_of(Pane::Session(id)) else {
                     self.forwarding = None;
                     return true;
                 };
@@ -1255,19 +1330,19 @@ impl App {
         true
     }
 
-    /// Klick und Mausrad über Notizblock bzw. Todo-Liste: Fokus, Cursor bzw. Auswahl setzen,
-    /// scrollen. `true`, wenn das Ereignis damit erledigt ist; Ziehen und Loslassen gehören weiter
+    /// Klick und Mausrad über Notizblock, Todo-Liste bzw. Notizübersicht — in jeder Art Fenster:
+    /// Fokus, Cursor bzw. Auswahl setzen, scrollen. `true`, wenn das Ereignis damit erledigt ist;
+    /// Sessions gehen eigene Wege (Markieren, Weiterleiten), Ziehen und Loslassen gehören weiter
     /// einer laufenden Markierung.
     fn panel_mouse(&mut self, mouse: MouseEvent) -> bool {
         let position = Position::new(mouse.column, mouse.row);
-        let Some((slot, pane)) = self
-            .window_rects()
-            .into_iter()
-            .find(|&(_, pane, rect)| pane.session().is_none() && rect.contains(position))
-            .map(|(slot, pane, _)| (slot, pane))
-        else {
+        let Some(view) = self.view_at(position) else {
             return false;
         };
+        let pane = view.pane;
+        if pane.session().is_some() {
+            return false;
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let up = mouse.kind == MouseEventKind::ScrollUp;
@@ -1276,15 +1351,17 @@ impl App {
                     Pane::Notes => self
                         .note_list
                         .wheel(up, &note_items(&self.groups, &self.notes)),
-                    Pane::Notepad | Pane::Session(_) => self.notepad.wheel(up),
+                    Pane::Notepad => self.notepad.wheel(up),
+                    Pane::Session(_) => return false,
                 }
             }
             MouseEventKind::Down(button) => {
                 self.close_overlays();
                 self.selection = None;
                 self.dragging = false;
-                self.set_focus(Focus::Window(slot));
-                let text = self.panel_rect(pane).filter(|r| r.contains(position));
+                self.activate(view.spot);
+                let text =
+                    Some(self.content_rect(pane, view.rect)).filter(|r| r.contains(position));
                 if let (Some(text), MouseButton::Left) = (text, button) {
                     let cell = cell_in(text, position);
                     let (row, col) = (cell.row.into(), cell.col.into());
@@ -1299,7 +1376,8 @@ impl App {
                                 }
                             }
                         }
-                        Pane::Notepad | Pane::Session(_) => self.notepad.click(row, col),
+                        Pane::Notepad => self.notepad.click(row, col),
+                        Pane::Session(_) => return false,
                     }
                 }
             }
@@ -1365,15 +1443,13 @@ impl App {
         self.note_editor = None;
     }
 
-    /// Fenster unter der Mausposition: Fensterindex, Session und Zelle im Fensterinhalt.
-    fn window_at(&self, position: Position) -> Option<(usize, SessionId, Cell)> {
-        self.session_rects()
-            .into_iter()
-            .find(|(_, _, rect)| rect.contains(position))
-            .map(|(slot, id, rect)| {
-                let (term, _) = self.window_content(id, rect);
-                (slot, id, cell_in(term, position))
-            })
+    /// Session-Fenster obenauf unter der Mausposition: wo es liegt, Session und Zelle im
+    /// Terminal.
+    fn window_at(&self, position: Position) -> Option<(Spot, SessionId, Cell)> {
+        let view = self.view_at(position)?;
+        let id = view.pane.session()?;
+        let term = self.content_rect(view.pane, view.rect);
+        Some((view.spot, id, cell_in(term, position)))
     }
 
     fn copy_selection(&mut self) {
@@ -1417,11 +1493,13 @@ impl App {
         self.resize_windows();
     }
 
-    /// Claude-ID der Session im Fenster mit Fokus bzw. der in der Liste gewählten.
+    /// Claude-ID der Session im Fenster mit den Eingaben bzw. der in der Liste gewählten.
     fn focused_claude_id(&self) -> Option<String> {
-        match self.windows.focused_pane() {
-            Some(Pane::Session(id)) => self.session(id).map(|s| s.claude_id.clone()),
-            Some(Pane::Notepad | Pane::Todo | Pane::Notes) => None,
+        match self.windows.input_pane() {
+            Some(pane) => pane
+                .session()
+                .and_then(|id| self.session(id))
+                .map(|s| s.claude_id.clone()),
             None => self.selected_entry().map(|e| e.claude_id.clone()),
         }
     }
@@ -1472,7 +1550,7 @@ impl App {
         }
         match (entry.running, focused_slot) {
             (Some(id), Some(slot)) => self.place(id, slot),
-            (None, Some(slot)) => self.open_stored(&entry, Some(slot))?,
+            (None, Some(slot)) => self.open_stored(&entry, Some(Spot::Window(slot)))?,
             (_, None) => {
                 let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
                 self.on_list_key(enter)?;
@@ -1497,10 +1575,12 @@ impl App {
             }
             _ => match self.visible_cursor() {
                 Some(Cursor::Heading(heading)) => self.on_heading_key(key, heading),
-                Some(Cursor::Notepad) => self.on_panel_row_key(key, Pane::Notepad),
-                Some(Cursor::Todo) => self.on_panel_row_key(key, Pane::Todo),
-                Some(Cursor::Notes) => self.on_panel_row_key(key, Pane::Notes),
-                _ => self.on_entry_key(key)?,
+                Some(Cursor::Session(_)) | None => self.on_entry_key(key)?,
+                Some(cursor) => {
+                    if let Some(pane) = self.cursor_pane(&cursor) {
+                        self.on_panel_row_key(key, pane);
+                    }
+                }
             },
         }
         Ok(())
@@ -1534,32 +1614,51 @@ impl App {
         }
     }
 
-    /// Zeile des Notizblocks bzw. der Todo-Liste: Enter zeigt sie (Fokus auf ihr Fenster bzw.
-    /// Fensterauswahl), 1–4 legt sie in dieses Fenster.
-    fn on_panel_row_key(&mut self, key: KeyEvent, pane: Pane) {
-        match key.code {
-            KeyCode::Enter => match self.windows.slot_of(pane) {
-                Some(slot) => self.set_focus(Focus::Window(slot)),
-                None => self.show_panel(pane),
-            },
-            KeyCode::Char(d @ '1'..='4') => {
-                self.place_pane(pane, d as usize - '1' as usize);
-            }
-            _ => {}
+    /// Inhalt hinter einer Listenzeile: laufende Session bzw. Notizblock, Todo-Liste, Notizübersicht.
+    fn cursor_pane(&self, cursor: &Cursor) -> Option<Pane> {
+        match cursor {
+            Cursor::Session(claude_id) => self
+                .sessions
+                .iter()
+                .find(|s| &s.claude_id == claude_id)
+                .map(|s| Pane::Session(s.id)),
+            Cursor::Heading(_) => None,
+            Cursor::Notepad => Some(Pane::Notepad),
+            Cursor::Todo => Some(Pane::Todo),
+            Cursor::Notes => Some(Pane::Notes),
         }
     }
 
-    /// Notizblock bzw. Todo-Liste in ein Fenster: ohne offenes Fenster direkt in Fenster 1, sonst
-    /// Fensterauswahl.
+    /// Fenster des Inhalts der gewählten Listenzeile, falls er eines hat.
+    fn selected_slot(&self) -> Option<usize> {
+        let pane = self.cursor_pane(&self.visible_cursor()?)?;
+        self.windows.slot_of(pane)
+    }
+
+    /// Zeile des Notizblocks, der Todo-Liste bzw. der Notizübersicht: Öffnen-Tasten wie bei einer
+    /// Session ([`keys::destination`]).
+    fn on_panel_row_key(&mut self, key: KeyEvent, pane: Pane) {
+        if let Some(spot) = keys::destination(&key) {
+            self.open_pane(pane, spot);
+        }
+    }
+
+    /// Zeigt einen vorhandenen Inhalt an `spot`; ohne Ziel bekommt sein Fenster den Fokus, sonst
+    /// kommt die Fensterauswahl (ohne offenes Fenster gleich Fenster 1).
+    fn open_pane(&mut self, pane: Pane, spot: Option<Spot>) {
+        match (spot, self.windows.slot_of(pane)) {
+            (Some(spot), _) => self.show_at(pane, spot),
+            (None, Some(slot)) => self.set_focus(Focus::Window(slot)),
+            (None, None) => self.show_panel(pane),
+        }
+    }
+
+    /// Inhalt in ein Fenster: ohne offenes Fenster direkt in Fenster 1, sonst Fensterauswahl.
     fn show_panel(&mut self, pane: Pane) {
         if self.windows.count() == 0 {
             self.place_pane(pane, 0);
         } else {
-            self.open_pick(match pane {
-                Pane::Todo => Purpose::Todo,
-                Pane::Notes => Purpose::Notes,
-                Pane::Notepad | Pane::Session(_) => Purpose::Notepad,
-            });
+            self.open_pick(Purpose::Show(pane));
         }
     }
 
@@ -1575,27 +1674,22 @@ impl App {
                 }
                 self.move_cursor(1);
             }
-            KeyCode::Enter => self.open_entry(&entry, None)?,
-            KeyCode::Char(d @ '1'..='4') => {
-                self.open_entry(&entry, Some(d as usize - '1' as usize))?;
+            _ => {
+                if let Some(spot) = keys::destination(&key) {
+                    self.open_entry(&entry, spot)?;
+                }
             }
-            _ => {}
         }
         Ok(())
     }
 
-    /// Session einer Listenzeile zeigen: in Fenster `slot`, sonst wie Enter — ein vorhandenes
-    /// Fenster bekommt den Fokus, sonst kommt die Fensterauswahl (ohne offenes Fenster gleich
-    /// Fenster 1); eine gespeicherte Session wird fortgesetzt.
-    fn open_entry(&mut self, entry: &Entry, slot: Option<usize>) -> Result<()> {
-        match (entry.running, slot) {
-            (Some(id), Some(slot)) => self.place(id, slot),
-            (Some(id), None) => match self.windows.window_of(id) {
-                Some(slot) => self.set_focus(Focus::Window(slot)),
-                None if self.windows.count() == 0 => self.place(id, 0),
-                None => self.open_pick(Purpose::Show(id)),
-            },
-            (None, slot) => self.open_stored(entry, slot)?,
+    /// Session einer Listenzeile zeigen: in Fenster bzw. temporärem Fenster `spot`, sonst wie
+    /// Enter — ein vorhandenes Fenster bekommt den Fokus, sonst kommt die Fensterauswahl (ohne
+    /// offenes Fenster gleich Fenster 1); eine gespeicherte Session wird fortgesetzt.
+    fn open_entry(&mut self, entry: &Entry, spot: Option<Spot>) -> Result<()> {
+        match entry.running {
+            Some(id) => self.open_pane(Pane::Session(id), spot),
+            None => self.open_stored(entry, spot)?,
         }
         Ok(())
     }
@@ -1605,13 +1699,15 @@ impl App {
         note_items(&self.groups, &self.notes)
     }
 
-    /// Öffnet die in der Notizübersicht gewählte Session wie aus der Sessionliste.
+    /// Öffnet die in der Notizübersicht gewählte Session wie aus der Sessionliste. Lag die
+    /// Übersicht im temporären Fenster, geht es zu: die Session soll nicht darunter verschwinden.
     fn open_noted(&mut self, open: notelist::Open) -> Result<()> {
+        self.close_temporary();
         let entry = list::flatten(&self.groups)
             .find(|e| e.claude_id == open.claude_id)
             .cloned();
         match entry {
-            Some(entry) => self.open_entry(&entry, open.slot),
+            Some(entry) => self.open_entry(&entry, open.slot.map(Spot::Window)),
             None => Ok(()),
         }
     }
@@ -1643,19 +1739,19 @@ impl App {
         self.cursor = rows.into_iter().nth(next);
     }
 
-    /// Öffnet eine gespeicherte Session in `slot` (`None`: Fensterauswahl, ohne offenes Fenster
+    /// Öffnet eine gespeicherte Session in `spot` (`None`: Fensterauswahl, ohne offenes Fenster
     /// Fenster 1). Läuft sie anderswo, kommt erst die Rückfrage — außer bei einer
     /// Hintergrund-Session: `claude attach` startet keine zweite Instanz.
-    fn open_stored(&mut self, entry: &Entry, slot: Option<usize>) -> Result<()> {
+    fn open_stored(&mut self, entry: &Entry, spot: Option<Spot>) -> Result<()> {
         if entry.external && self.job_of(&entry.claude_id).is_none() {
             self.menu = Some(Menu::confirm_open(
                 &entry.title,
                 entry.claude_id.clone(),
-                slot,
+                spot,
             ));
             return Ok(());
         }
-        self.open_confirmed(entry.claude_id.clone(), slot)
+        self.open_confirmed(entry.claude_id.clone(), spot)
     }
 
     /// Job-ID, falls `claude_id` gerade als Hintergrund-Session außerhalb von claude-tui läuft.
@@ -1666,10 +1762,10 @@ impl App {
         self.claimed.get(claude_id)?.as_deref()
     }
 
-    fn open_confirmed(&mut self, claude_id: String, slot: Option<usize>) -> Result<()> {
-        match slot {
-            Some(slot) => self.resume_into(&claude_id, slot),
-            None if self.windows.count() == 0 => self.resume_into(&claude_id, 0),
+    fn open_confirmed(&mut self, claude_id: String, spot: Option<Spot>) -> Result<()> {
+        match spot {
+            Some(spot) => self.resume_into(&claude_id, spot),
+            None if self.windows.count() == 0 => self.resume_into(&claude_id, Spot::Window(0)),
             None => {
                 self.open_pick(Purpose::Resume(claude_id));
                 Ok(())
@@ -1678,8 +1774,8 @@ impl App {
     }
 
     /// Setzt eine gespeicherte Session in ihrem Verzeichnis fort (bzw. verbindet sich mit ihr, wenn
-    /// sie als Hintergrund-Session läuft) und legt sie in `slot`.
-    fn resume_into(&mut self, claude_id: &str, slot: usize) -> Result<()> {
+    /// sie als Hintergrund-Session läuft) und zeigt sie in `spot`.
+    fn resume_into(&mut self, claude_id: &str, spot: Spot) -> Result<()> {
         let stored = self
             .store
             .get(claude_id)
@@ -1690,7 +1786,7 @@ impl App {
             None => Launch::Resume(claude_id.to_string()),
         };
         let id = self.spawn(&cwd, launch)?;
-        self.place(id, slot);
+        self.show_at(Pane::Session(id), spot);
         Ok(())
     }
 
@@ -1720,34 +1816,12 @@ impl App {
                 let default = self.recent.first().unwrap_or(&self.start_dir);
                 self.dir_picker = Some(DirPicker::new(target, self.recent.clone(), default));
             }
-            Action::Place(slot) => match purpose {
-                Some(Purpose::NewSession(dir)) => {
-                    let id = self.spawn(&dir, Launch::New)?;
-                    self.place(id, slot);
-                }
-                Some(Purpose::Show(id)) => self.place(id, slot),
-                Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, slot)?,
-                Some(Purpose::Notepad) => self.place_pane(Pane::Notepad, slot),
-                Some(Purpose::Todo) => self.place_pane(Pane::Todo, slot),
-                Some(Purpose::Notes) => self.place_pane(Pane::Notes, slot),
-                Some(Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..))
-                | None => {}
-            },
+            Action::Place(slot) => self.place_for(purpose, Spot::Window(slot))?,
+            Action::PlaceTemporary => self.place_for(purpose, Spot::Temporary)?,
             Action::CloseWindow => {
                 let slot = match self.windows.focus() {
                     Focus::Window(slot) => Some(slot),
-                    Focus::List if self.visible_cursor() == Some(Cursor::Notepad) => {
-                        self.windows.slot_of(Pane::Notepad)
-                    }
-                    Focus::List if self.visible_cursor() == Some(Cursor::Todo) => {
-                        self.windows.slot_of(Pane::Todo)
-                    }
-                    Focus::List if self.visible_cursor() == Some(Cursor::Notes) => {
-                        self.windows.slot_of(Pane::Notes)
-                    }
-                    Focus::List => self
-                        .selected_running()
-                        .and_then(|id| self.windows.window_of(id)),
+                    Focus::List => self.selected_slot(),
                 };
                 if let Some(slot) = slot {
                     self.windows.close(slot);
@@ -1829,27 +1903,45 @@ impl App {
         Ok(())
     }
 
-    /// Laufende Session, auf die sich c/x beziehen: die im Fenster mit Fokus, sonst die in der
-    /// Liste gewählte.
+    /// Ziel der Fensterauswahl an `spot` zeigen.
+    fn place_for(&mut self, purpose: Option<Purpose>, spot: Spot) -> Result<()> {
+        match purpose {
+            Some(Purpose::NewSession(dir)) => {
+                let id = self.spawn(&dir, Launch::New)?;
+                self.show_at(Pane::Session(id), spot);
+            }
+            Some(Purpose::Show(pane)) => self.show_at(pane, spot),
+            Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, spot)?,
+            Some(Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..))
+            | None => {}
+        }
+        Ok(())
+    }
+
+    /// Titel der Fensterauswahl für einen Inhalt, vor „in“.
+    fn pane_title(&self, pane: Pane) -> String {
+        match pane {
+            Pane::Session(id) => format!("Show {}", self.title_of(id)),
+            Pane::Notepad => "Notepad".to_string(),
+            Pane::Todo => "Todo list".to_string(),
+            Pane::Notes => "Notes overview".to_string(),
+        }
+    }
+
+    /// Laufende Session, auf die sich c/x beziehen: die im Fenster mit den Eingaben, sonst die in
+    /// der Liste gewählte.
     fn context_session(&self) -> Option<SessionId> {
-        match self.windows.focused_pane() {
-            Some(Pane::Session(id)) => Some(id),
-            Some(Pane::Notepad | Pane::Todo | Pane::Notes) => None,
+        match self.windows.input_pane() {
+            Some(pane) => pane.session(),
             None => self.selected_running(),
         }
     }
 
     fn open_commands(&mut self) {
-        let selected = self.selected_running();
         self.menu = Some(Menu::commands(&Context {
             focus: self.windows.focus(),
             windows: self.windows.occupied(),
-            selected_has_window: match self.visible_cursor() {
-                Some(Cursor::Notepad) => self.windows.slot_of(Pane::Notepad).is_some(),
-                Some(Cursor::Todo) => self.windows.slot_of(Pane::Todo).is_some(),
-                Some(Cursor::Notes) => self.windows.slot_of(Pane::Notes).is_some(),
-                _ => selected.is_some_and(|id| self.windows.window_of(id).is_some()),
-            },
+            selected_has_window: self.selected_slot().is_some(),
             panel_focused: self
                 .windows
                 .focused_pane()
@@ -2043,10 +2135,7 @@ impl App {
     fn open_pick(&mut self, purpose: Purpose) {
         let title = match &purpose {
             Purpose::NewSession(_) => "New session in".to_string(),
-            Purpose::Notepad => "Notepad in".to_string(),
-            Purpose::Todo => "Todo list in".to_string(),
-            Purpose::Notes => "Notes overview in".to_string(),
-            &Purpose::Show(id) => format!("Show {} in", self.title_of(id)),
+            &Purpose::Show(pane) => format!("{} in", self.pane_title(pane)),
             Purpose::Resume(claude_id) => list::flatten(&self.groups)
                 .find(|e| e.claude_id == *claude_id)
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
@@ -2181,7 +2270,7 @@ impl App {
     fn toggle_unread(&mut self) {
         if self
             .windows
-            .focused_pane()
+            .input_pane()
             .is_some_and(|p| p.session().is_none())
         {
             return;
@@ -2269,24 +2358,27 @@ impl App {
         let _ = state::save(&state);
     }
 
-    /// Jede sichtbare Session bekommt die Innenmaße ihres Fensters; Hintergrund-Sessions und
-    /// beim Zoom verdeckte Fenster behalten ihre letzte Größe.
+    /// Jeder sichtbare Inhalt bekommt die Maße seines Fensters, gleich welcher Art; Inhalte ohne
+    /// Fenster und beim Zoom verdeckte behalten ihre letzte Größe.
     fn resize_windows(&mut self) {
-        if let Some(text) = self.panel_rect(Pane::Notepad) {
-            self.notepad.set_view(text.width.into(), text.height.into());
+        for view in self.views() {
+            let content = self.content_rect(view.pane, view.rect);
+            self.pane_resize(view.pane, content);
         }
-        if let Some(text) = self.panel_rect(Pane::Todo) {
-            self.todo.set_view(text.width.into(), text.height.into());
-        }
-        if let Some(text) = self.panel_rect(Pane::Notes) {
-            self.note_list
-                .set_view(text.width.into(), text.height.into());
-        }
-        for (_, id, rect) in self.session_rects() {
-            let (inner, _) = self.window_content(id, rect);
-            if let Some(session) = self.session_mut(id) {
-                session.resize(inner.height.max(1), inner.width.max(1));
+    }
+
+    /// Neue Inhaltsfläche einer Quelle.
+    fn pane_resize(&mut self, pane: Pane, content: Rect) {
+        let (width, height) = (content.width, content.height);
+        match pane {
+            Pane::Session(id) => {
+                if let Some(session) = self.session_mut(id) {
+                    session.resize(height.max(1), width.max(1));
+                }
             }
+            Pane::Notepad => self.notepad.set_view(width.into(), height.into()),
+            Pane::Todo => self.todo.set_view(width.into(), height.into()),
+            Pane::Notes => self.note_list.set_view(width.into(), height.into()),
         }
     }
 

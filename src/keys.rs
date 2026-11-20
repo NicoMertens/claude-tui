@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::layout::Direction;
+use crate::{layout::Direction, windows::Spot};
 
 pub const PREFIX_HINT: &str = "Ctrl+A";
 
@@ -13,6 +13,28 @@ pub fn is_prefix(key: &KeyEvent) -> bool {
 /// Ctrl+Space setzt die Session mit Fokus auf gelesen bzw. ungelesen; erreicht Claude daher nie.
 pub fn is_toggle_unread(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL
+}
+
+/// Ctrl+Enter öffnet in der Sessionliste das temporäre Fenster und schließt es wieder. Nur
+/// Windows meldet die Taste unterscheidbar; andere Terminals schicken ohne erweitertes
+/// Tastaturprotokoll ein einfaches Enter.
+pub fn is_temporary_toggle(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Enter && key.modifiers == KeyModifiers::CONTROL
+}
+
+/// Ziel einer Zeile der Sessionliste (Session, Notizblock, Todo-Liste …) je Taste: `Enter` wie
+/// gewohnt (`None`: vorhandenes Fenster bzw. Fensterauswahl), `1`–`4` dieses Fenster, `0` und
+/// `Ctrl+Enter` das temporäre Fenster. Keine Öffnen-Taste: `None`.
+pub fn destination(key: &KeyEvent) -> Option<Option<Spot>> {
+    if is_temporary_toggle(key) {
+        return Some(Some(Spot::Temporary));
+    }
+    match key.code {
+        KeyCode::Enter => Some(None),
+        KeyCode::Char('0') => Some(Some(Spot::Temporary)),
+        KeyCode::Char(d @ '1'..='4') => Some(Some(Spot::Window(d as usize - '1' as usize))),
+        _ => None,
+    }
 }
 
 /// Übersetzt einen Tastendruck in die Bytefolge, die ein xterm-kompatibles Terminal senden würde.
@@ -177,6 +199,30 @@ pub fn is_paste(chars: &[char], since_paste: Option<Duration>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_keys_name_window_or_temporary_window() {
+        let dest = |code, mods| destination(&KeyEvent::new(code, mods));
+        assert_eq!(dest(KeyCode::Enter, KeyModifiers::NONE), Some(None));
+        let temporary = Some(Some(Spot::Temporary));
+        assert_eq!(dest(KeyCode::Enter, KeyModifiers::CONTROL), temporary);
+        assert_eq!(dest(KeyCode::Char('0'), KeyModifiers::NONE), temporary);
+        let window_3 = Some(Some(Spot::Window(2)));
+        assert_eq!(dest(KeyCode::Char('3'), KeyModifiers::NONE), window_3);
+        assert_eq!(dest(KeyCode::Char('5'), KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn only_ctrl_enter_toggles_the_temporary_window() {
+        let toggles = |mods| is_temporary_toggle(&KeyEvent::new(KeyCode::Enter, mods));
+        assert!(toggles(KeyModifiers::CONTROL));
+        assert!(!toggles(KeyModifiers::NONE));
+        assert!(!toggles(KeyModifiers::SHIFT));
+        assert!(!is_temporary_toggle(&KeyEvent::new(
+            KeyCode::Char('j'),
+            KeyModifiers::CONTROL
+        )));
+    }
 
     #[test]
     fn pasted_chars_include_enter_tab_and_altgr_but_not_shortcuts() {
