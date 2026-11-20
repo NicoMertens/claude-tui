@@ -472,11 +472,16 @@ fn todo_line(app: &App, width: usize) -> Line<'static> {
     )
 }
 
-/// Zeile der Notizübersicht unter der Todo-Liste: `▤ Notes (Sessions mit Notiz)`.
+/// Zeile der Notizübersicht unter der Todo-Liste: `☷Notes (Sessions mit Notiz)`.
 fn notes_line(app: &App, width: usize) -> Line<'static> {
     let title = format!("Notes ({})", app.note_items().len());
-    let icon = format!("{} ", theme::NOTES_ICON);
-    panel_line(app, Pane::Notes, (&icon, theme::NOTE), &title, width)
+    panel_line(
+        app,
+        Pane::Notes,
+        (theme::NOTES_ICON, theme::NOTE),
+        &title,
+        width,
+    )
 }
 
 /// `icon` samt Abstand zum Namen; ohne Abstand rückt der Name nach links, die Fensterspalte

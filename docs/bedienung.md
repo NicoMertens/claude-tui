@@ -73,7 +73,7 @@ Betriebssystems; unter Linux muss `curl` installiert sein.
 
 Links die **Sessionliste**: alle gespeicherten Claude-Code-Sessions (`~/.claude/projects`). Ganz
 oben stehen der [Notizblock](#notizblock) (`✎ Notepad (N)`), die [Todo-Liste](#todo-liste)
-(`☰Todo (N)`) und die [Notizübersicht](#notizübersicht) (`▤ Notes (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
+(`☰Todo (N)`) und die [Notizübersicht](#notizübersicht) (`☷Notes (N)`), darunter die [eigenen Gruppen](#gruppen) (⚑, alphabetisch), darunter die übrigen Sessions gruppiert
 nach Arbeitsverzeichnis (▾, alphabetisch). Jede Überschrift zeigt
 die Anzahl ihrer Sessions, z. B. `▾ C:\dev\webshop (3) ────`. In jedem Abschnitt
 stehen laufende Sessions zuerst (in der Reihenfolge, in der sie gestartet wurden, damit sie
@@ -436,10 +436,10 @@ nicht lesen, meldet claude-tui das beim Start und überschreibt die Datei nicht.
 
 ### Notizübersicht
 
-Unter der Todo-Liste steht die **Notizübersicht**: `▤ Notes (2)` mit der Anzahl der Sessions, die
+Unter der Todo-Liste steht die **Notizübersicht**: `☷Notes (2)` mit der Anzahl der Sessions, die
 eine [Notiz](#notizen) haben. Auf ihrer Zeile wirken `Enter`, `1`–`4`, Doppelklick und `c` wie beim
 Notizblock; `m` im Menü zeigt sie in einem Fenster nach Wahl. Die Fensterleiste zeigt
-`[N] ▤ Notes (2)`.
+`[N] ☷Notes (2)`.
 
 Sie zeigt die Notizen aller Sessions in der Reihenfolge der Sessionliste: je Session deren Zeile
 wie in der Liste (Zustand, Titel in der Sessionfarbe, Schnellwahl-Nummer, Fensternummer, Zeit),

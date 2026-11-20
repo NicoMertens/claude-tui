@@ -63,7 +63,7 @@ const OVERVIEW: &[Row] = &[
     ),
     Text(
         "And the notes overview (Ctrl+A m): the notes of all sessions, each under the session's \
-         row as in the list. Its row sits under the todo list (▤ Notes with the number of \
+         row as in the list. Its row sits under the todo list (☷Notes with the number of \
          sessions that have a note).",
     ),
     Heading("States"),

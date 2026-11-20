@@ -43,7 +43,9 @@ pub const OPEN_ICON: &str = "☐";
 pub const DONE_ICON: &str = "✓";
 
 /// Notizübersicht aller Sessions: Symbol in Sessionliste und Fensterleiste (Farbe der Notizen).
-pub const NOTES_ICON: &str = "▤";
+/// Aus derselben Zeichengruppe wie `☰`, damit es gleich groß wirkt (`▤` war deutlich kleiner); wie
+/// dort ohne Leerzeichen vor „Notes“.
+pub const NOTES_ICON: &str = "☷";
 
 pub const WAITING: Color = Color::Rgb(0xE5, 0xC0, 0x7B);
 /// Rot für „arbeitet“ (Fensterleiste und Sessionliste).
