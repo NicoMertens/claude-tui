@@ -56,6 +56,10 @@ pub enum Action {
     Place(usize),
     /// Fensterauswahl: ins temporäre Fenster.
     PlaceTemporary,
+    /// Auswahl der zuletzt geschlossenen Fenster öffnen.
+    RecentlyClosed,
+    /// Zuletzt geschlossenes Fenster wieder öffnen: Index in [Purpose::Reopen].
+    Reopen(usize),
 }
 
 /// Eintrag der gemeinsamen Tabelle für Menü und Hilfe: Taste, Grundbeschriftung im Menü und
@@ -98,6 +102,11 @@ pub const CLOSE_WINDOW: Entry = entry(
     'c',
     "Close window",
     "Close the window; the session keeps running in the background",
+);
+pub const RECENTLY_CLOSED: Entry = entry(
+    'r',
+    "Recently closed …",
+    "Reopen a running session whose window was closed; in a window it replaces that window",
 );
 pub const DELETE: Entry = entry(
     'x',
@@ -176,9 +185,10 @@ pub const QUIT: Entry = entry(
 );
 
 /// Alle Punkte des Befehlsmenüs in Menüreihenfolge.
-pub const ENTRIES: [&Entry; 18] = [
+pub const ENTRIES: [&Entry; 19] = [
     &NEW_SESSION,
     &CLOSE_WINDOW,
+    &RECENTLY_CLOSED,
     &DELETE,
     &GROUP,
     &NOTE,
@@ -220,6 +230,8 @@ pub enum Purpose {
     /// Claude-Session, die außerhalb von claude-tui läuft und trotzdem geöffnet werden soll; mit
     /// Ziel (`None` = danach Fensterauswahl).
     OpenElsewhere(String, Option<Spot>),
+    /// Claude-IDs der zuletzt geschlossenen Fenster, wie sie die Auswahl zeigt.
+    Reopen(Vec<String>),
 }
 
 #[derive(Debug)]
@@ -263,6 +275,8 @@ pub struct Context<'a> {
     pub any_expanded: bool,
     /// Mindestens ein Abschnitt ist eingeklappt.
     pub any_collapsed: bool,
+    /// Es gibt zuletzt geschlossene Fenster zum Wiederöffnen.
+    pub recently_closed: bool,
 }
 
 impl Menu {
@@ -286,6 +300,13 @@ impl Menu {
         add(&NEW_SESSION, NEW_SESSION.label, Action::NewSession);
         if in_window || ctx.selected_has_window {
             add(&CLOSE_WINDOW, CLOSE_WINDOW.label, Action::CloseWindow);
+        }
+        if ctx.recently_closed {
+            add(
+                &RECENTLY_CLOSED,
+                RECENTLY_CLOSED.label,
+                Action::RecentlyClosed,
+            );
         }
         // Markierte Sessions gelten nur mit Fokus auf der Liste; im Fenster meint x dessen Session.
         if !in_window && ctx.marked > 0 {
@@ -413,6 +434,29 @@ impl Menu {
             ],
             selected: 0,
             purpose: Some(Purpose::Delete(claude_id)),
+        }
+    }
+
+    /// Zuletzt geschlossene Fenster: `(Claude-ID, Beschriftung)`, neueste zuerst, Tasten 1–9.
+    pub fn recently_closed(sessions: Vec<(String, String)>) -> Self {
+        let (ids, items) = sessions
+            .into_iter()
+            .take(9)
+            .enumerate()
+            .map(|(i, (claude_id, label))| {
+                let item = Item {
+                    hotkey: digit(i + 1),
+                    label,
+                    action: Action::Reopen(i),
+                };
+                (claude_id, item)
+            })
+            .unzip();
+        Self {
+            title: "Recently closed".to_string(),
+            items,
+            selected: 0,
+            purpose: Some(Purpose::Reopen(ids)),
         }
     }
 
@@ -587,6 +631,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         let actions: Vec<Action> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&Action::CloseWindow));
@@ -611,6 +656,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         assert_eq!(menu.title, "Menue 2");
     }
@@ -631,6 +677,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         assert!(menu.items.iter().all(|i| i.action != Action::CloseWindow));
     }
@@ -650,6 +697,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         menu.items
             .iter()
@@ -685,6 +733,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         menu.items
             .iter()
@@ -783,6 +832,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         let focus: Vec<String> = menu
             .items
@@ -808,6 +858,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         let hotkeys: String = menu.items.iter().map(|i| i.hotkey).collect();
         for absent in ['x', 'g', 't'] {
@@ -834,6 +885,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         };
         let label = |menu: Menu| {
             menu.items
@@ -867,6 +919,7 @@ mod tests {
             collapsed,
             any_expanded,
             any_collapsed,
+            recently_closed: false,
         };
         let items = |menu: Menu| {
             menu.items
@@ -916,6 +969,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         };
         let label = |menu: Menu| {
             menu.items
@@ -963,6 +1017,7 @@ mod tests {
                 collapsed: None,
                 any_expanded: false,
                 any_collapsed: false,
+                recently_closed: false,
             });
             for item in menu.items {
                 let known = item.hotkey.is_ascii_digit() || hotkeys.contains(&item.hotkey);
@@ -987,6 +1042,7 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         });
         assert_eq!(
             menu.on_key(&key(KeyCode::Char('h'))),
@@ -1010,10 +1066,24 @@ mod tests {
             collapsed: None,
             any_expanded: false,
             any_collapsed: false,
+            recently_closed: false,
         };
         let has_older = |menu: Menu| menu.items.iter().any(|i| i.action == Action::DeleteOlder);
         assert!(has_older(Menu::commands(&ctx(Focus::List))));
         assert!(!has_older(Menu::commands(&ctx(Focus::Window(0)))));
+        let has_closed = |menu: Menu| {
+            menu.items
+                .iter()
+                .any(|i| (i.hotkey, i.action) == ('r', Action::RecentlyClosed))
+        };
+        assert!(!has_closed(Menu::commands(&ctx(Focus::List))));
+        for focus in [Focus::List, Focus::Window(0)] {
+            let menu = Menu::commands(&Context {
+                recently_closed: true,
+                ..ctx(focus)
+            });
+            assert!(has_closed(menu));
+        }
     }
 
     #[test]
@@ -1024,6 +1094,24 @@ mod tests {
             Outcome::Run(Action::DeleteOlderThan(7))
         );
         assert_eq!(age_label(30), "1 month");
+    }
+
+    #[test]
+    fn recently_closed_numbers_sessions_newest_first() {
+        let sessions = (0..12)
+            .map(|i| (format!("id{i}"), format!("s{i}")))
+            .collect();
+        let mut menu = Menu::recently_closed(sessions);
+        assert_eq!(menu.items.len(), 9);
+        assert_eq!(menu.items[0].hotkey, '1');
+        assert_eq!(
+            menu.on_key(&key(KeyCode::Char('3'))),
+            Outcome::Run(Action::Reopen(2))
+        );
+        let Some(Purpose::Reopen(ids)) = menu.purpose else {
+            panic!("purpose")
+        };
+        assert_eq!(ids[2], "id2");
     }
 
     #[test]

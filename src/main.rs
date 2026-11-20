@@ -1,5 +1,6 @@
 mod app;
 mod claude_store;
+mod closed;
 mod dirpick;
 mod external;
 mod filesync;
@@ -132,6 +133,7 @@ fn run(terminal: &mut Term, command: String) -> Result<()> {
 
     while !app.should_quit {
         changed |= app.tick();
+        app.track_closed();
         let due = redraw_due(
             changed,
             app.latest_output(),

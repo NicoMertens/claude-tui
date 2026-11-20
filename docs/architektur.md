@@ -32,6 +32,7 @@ ratatui 0.29 (exakt 0.2.0) ausschließt — daher ratatui 0.30.
 | `help.rs` | Hilfeseite (`Ctrl+A h`): Aufbau, Zustände, alle Tasten, Menüpunkte aus `menu::ENTRIES`, Maus; Umbruch nach Anzeigebreite und Scrollen |
 | `dirpick.rs` | Verzeichnisauswahl vor einer neuen Session: Eingabe mit Tab-Ergänzung, zuletzt genutzte |
 | `recent.rs` | zuletzt genutzte Startverzeichnisse laden, merken, speichern |
+| `closed.rs` | zuletzt geschlossene Fenster laufender Sessions (Ctrl+A r): gleicht die Sessions in Fenstern je Durchlauf der Ereignisschleife ab (`App::track_closed`), damit jeder Weg des Schließens erfasst ist |
 | `claude_store.rs` | liest `~/.claude/projects/*/*.jsonl` inkrementell: Arbeitsverzeichnis und Titel je Claude-Session; Lesestand als `sessions-cache.json`, beim Start im Hintergrund nachgelesen |
 | `list.rs` | baut die Sessionliste aus gespeicherten Sessions und laufenden Prozessen: eigene Gruppen alphabetisch oben, die übrigen nach Verzeichnis (ebenfalls alphabetisch, Sessions darin zeitlich); sichtbare Zeilen (Überschriften und, sofern nicht eingeklappt, Sessions) und der Listen-Cursor, der auf einer Session oder einer Überschrift steht |
 | `groups.rs` | eigene Gruppen: Claude-ID → Gruppenname, Namen bereinigen (eine Schreibweise je Gruppe), zuletzt verwendete Gruppen |

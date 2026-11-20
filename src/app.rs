@@ -12,6 +12,7 @@ use ratatui::layout::{Margin, Position, Rect};
 
 use crate::{
     claude_store::{self, Store},
+    closed,
     dirpick::{DirPicker, Outcome as DirOutcome, Target},
     external,
     grouppick::{GroupPicker, Outcome as GroupOutcome},
@@ -120,6 +121,11 @@ pub struct App {
     unread: BTreeSet<String>,
     /// Zuletzt verwendete Gruppennamen, neueste zuerst.
     recent_groups: Vec<String>,
+    /// Claude-IDs laufender Sessions, deren Fenster zuletzt zuging, neueste zuerst (Ctrl+A r,
+    /// siehe `closed.rs`).
+    closed: Vec<String>,
+    /// Sessions in Fenstern beim letzten [`Self::track_closed`].
+    shown: Vec<(SessionId, String)>,
     /// Notiz je Claude-ID (Ctrl+A t); bleibt über `state.json` erhalten.
     pub notes: BTreeMap<String, String>,
     /// Gruppen-Dialog (Ctrl+A g).
@@ -228,6 +234,8 @@ impl App {
             group_of: Assignments::new(),
             unread: BTreeSet::new(),
             recent_groups: Vec::new(),
+            closed: Vec::new(),
+            shown: Vec::new(),
             notes: BTreeMap::new(),
             group_picker: None,
             note_editor: None,
@@ -1818,6 +1826,33 @@ impl App {
             }
             Action::Place(slot) => self.place_for(purpose, Spot::Window(slot))?,
             Action::PlaceTemporary => self.place_for(purpose, Spot::Temporary)?,
+            Action::RecentlyClosed => {
+                let sessions = self
+                    .closed_entries()
+                    .into_iter()
+                    .map(|e| (e.claude_id.clone(), e.title.clone()))
+                    .collect();
+                self.menu = Some(Menu::recently_closed(sessions));
+            }
+            Action::Reopen(index) => {
+                let Some(Purpose::Reopen(claude_ids)) = purpose else {
+                    return Ok(());
+                };
+                let entry = claude_ids.get(index).and_then(|claude_id| {
+                    list::flatten(&self.groups)
+                        .find(|e| e.claude_id == *claude_id)
+                        .cloned()
+                });
+                // Aus einem Fenster heraus ersetzt sie dieses, aus der Liste kommt die Fensterauswahl.
+                let spot = match self.windows.focus() {
+                    Focus::Window(slot) => Some(Spot::Window(slot)),
+                    Focus::List => None,
+                };
+                match entry {
+                    Some(entry) => self.open_entry(&entry, spot)?,
+                    None => self.notice = Some("The session no longer exists".to_string()),
+                }
+            }
             Action::CloseWindow => {
                 let slot = match self.windows.focus() {
                     Focus::Window(slot) => Some(slot),
@@ -1912,7 +1947,12 @@ impl App {
             }
             Some(Purpose::Show(pane)) => self.show_at(pane, spot),
             Some(Purpose::Resume(claude_id)) => self.resume_into(&claude_id, spot)?,
-            Some(Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..))
+            Some(
+                Purpose::Delete(_)
+                | Purpose::DeleteMany(_)
+                | Purpose::OpenElsewhere(..)
+                | Purpose::Reopen(_),
+            )
             | None => {}
         }
         Ok(())
@@ -1958,6 +1998,7 @@ impl App {
             collapsed: self.selected_group().map(|g| self.is_collapsed(g)),
             any_expanded: self.groups.iter().any(|g| !self.is_collapsed(g)),
             any_collapsed: self.groups.iter().any(|g| self.is_collapsed(g)),
+            recently_closed: !self.closed_entries().is_empty(),
         }));
     }
 
@@ -2139,7 +2180,10 @@ impl App {
             Purpose::Resume(claude_id) => list::flatten(&self.groups)
                 .find(|e| e.claude_id == *claude_id)
                 .map_or_else(String::new, |e| format!("Open {} in", e.title)),
-            Purpose::Delete(_) | Purpose::DeleteMany(_) | Purpose::OpenElsewhere(..) => return,
+            Purpose::Delete(_)
+            | Purpose::DeleteMany(_)
+            | Purpose::OpenElsewhere(..)
+            | Purpose::Reopen(_) => return,
         };
         self.menu = Some(Menu::pick_window(purpose, title, self.windows.occupied()));
     }
@@ -2323,6 +2367,43 @@ impl App {
         if per_session.forget_unknown(known) {
             self.save_state();
         }
+    }
+
+    /// Sessions in Fenstern, auch im temporären, samt Claude-ID.
+    fn shown_sessions(&self) -> Vec<(SessionId, String)> {
+        self.windows
+            .slots()
+            .iter()
+            .copied()
+            .chain([self.windows.temporary()])
+            .flatten()
+            .filter_map(Pane::session)
+            .filter_map(|id| self.session(id).map(|s| (id, s.claude_id.clone())))
+            .collect()
+    }
+
+    /// Merkt sich laufende Sessions, deren Fenster seit dem letzten Aufruf zuging (Ctrl+A r);
+    /// einmal je Durchlauf der Ereignisschleife, damit jeder Weg erfasst ist — Schließen, Ersetzen,
+    /// temporäres Fenster. Endet oder verschwindet der Prozess (auch beim Löschen), fällt die
+    /// Session heraus.
+    pub fn track_closed(&mut self) {
+        let now = self.shown_sessions();
+        let sessions = &self.sessions;
+        let running = |claude_id: &str| {
+            sessions
+                .iter()
+                .any(|s| s.claude_id == claude_id && s.status != Status::Exited)
+        };
+        closed::record(&mut self.closed, &self.shown, &now, running);
+        self.shown = now;
+    }
+
+    /// Listeneinträge der zuletzt geschlossenen Fenster, neueste zuerst.
+    fn closed_entries(&self) -> Vec<&Entry> {
+        self.closed
+            .iter()
+            .filter_map(|id| list::flatten(&self.groups).find(|e| e.claude_id == *id))
+            .collect()
     }
 
     fn save_state(&self) {

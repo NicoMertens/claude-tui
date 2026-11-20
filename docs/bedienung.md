@@ -230,6 +230,7 @@ vom Fokus ab:
 |---|---|---|
 | `n` | neue Session: Verzeichnis, dann Fensterauswahl | neue Session: Verzeichnis, dann in diesem Fenster |
 | `c` | Fenster der gewählten Session schließen | Fenster schließen |
+| `r` | zuletzt geschlossene Fenster wieder öffnen (siehe unten) | wie links |
 | `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
 | `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
 | `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
@@ -278,6 +279,14 @@ auch für `claude --resume` weg.
 
 Beide fragen vorher nach („Delete N sessions …?“). Anders als beim Einzellöschen wählt `Enter` hier
 „No“ — bestätigt wird mit `y`.
+
+**Zuletzt geschlossene Fenster:** `r` („Recently closed …“) listet die laufenden Sessions, deren
+Fenster zuletzt zuging, die neueste zuerst (höchstens 9, Tasten `1`–`9`). Dazu zählt jedes
+Schließen: `c`, Ersetzen durch einen anderen Inhalt, Schließen des
+[temporären Fensters](#temporäres-fenster). Aus einem Fenster heraus ersetzt die Wahl dieses Fenster, aus der Sessionliste
+kommt die Fensterauswahl. Endet ihr Prozess oder bekommt sie wieder ein Fenster, fällt sie heraus; ohne
+Einträge fehlt der Menüpunkt. Notizblock, Todo-Liste und Notizübersicht werden nicht gemerkt, und
+nach einem Neustart ist die Auswahl leer (dann läuft keine Session mehr).
 
 **Verzeichnisauswahl:** Vor jeder neuen Session (`n`) fragt claude-tui im Overlay, in
 welchem Verzeichnis sie starten soll — erst danach kommt, falls nötig, die Fensterauswahl.
