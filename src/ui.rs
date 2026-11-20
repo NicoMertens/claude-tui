@@ -1035,14 +1035,23 @@ fn draw_session(f: &mut Frame, app: &App, id: SessionId, chrome: &Chrome) {
         ));
     }
     let mut block = chrome.block(app, title, plain);
+    // Rechts oben: Gruppe der Session (wie in der Liste mit ⚑), dahinter die Claude-Code-Version.
+    let mut right = Vec::new();
+    if let Some(group) = app.group_of.get(&session.claude_id) {
+        right.push(Span::styled(
+            format!(" {GROUP_ICON} {group} "),
+            Style::default().fg(theme::TEXT),
+        ));
+    }
     if let Some(version) = app.version_of(&session.claude_id) {
-        block = block.title(
-            Line::from(Span::styled(
-                format!(" v{version} "),
-                Style::default().fg(theme::MUTED),
-            ))
-            .right_aligned(),
-        );
+        let sep = if right.is_empty() { " " } else { "· " };
+        right.push(Span::styled(
+            format!("{sep}v{version} "),
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    if !right.is_empty() {
+        block = block.title(Line::from(right).right_aligned());
     }
     f.render_widget(block, rect);
     let (inner, note_row) = app.window_content(id, rect);

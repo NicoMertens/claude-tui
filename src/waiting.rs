@@ -9,7 +9,7 @@ pub fn bell_enabled() -> bool {
     std::env::var_os(NO_BELL_ENV).is_none()
 }
 
-/// Sessions, die gerade auf „waiting for you“ gewechselt sind — außer der im fokussierten Fenster,
+/// Sessions, die gerade auf „waiting“ gewechselt sind — außer der im fokussierten Fenster,
 /// die man ohnehin sieht. `changes` liefert je Session (ID, Zustand vorher, Zustand jetzt).
 pub fn newly_waiting(
     changes: impl IntoIterator<Item = (SessionId, Status, Status)>,

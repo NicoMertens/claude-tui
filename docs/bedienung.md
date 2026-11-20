@@ -116,11 +116,12 @@ Neustart erhalten (`state.json`). Der Bereich mit dem **Fokus** (ein Fenster
 oder die Sessionliste) hat einen blauen Rahmen (`#009fda`, wie das Menü), alle anderen einen
 grauen.
 
-Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting for
-you** (gelb), **ready** (grau) — z. B. `[1] claude-tui-rust #3 · ✻ working` (`#3` nur mit
+Die Fensterleiste zeigt Nummer, Titel und den Zustand als Text: **working** (rot), **waiting**
+(gelb), **ready** (grau) — z. B. `[1] claude-tui-rust #3 · ✻ working` (`#3` nur mit
 Schnellwahl-Nummer) — mit demselben Symbol wie in der Sessionliste. Die Sessionliste nutzt dieselben Farben.
 Rechts in der Fensterleiste steht die Claude-Code-Version der Session (z. B. `v2.1.326`), gelesen aus
-ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehalten hat.
+ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehalten hat. Gehört die
+Session zu einer Gruppe, steht davor deren Name mit ⚑ (z. B. `⚑ Kunde A · v2.1.326`).
 
 ## Tasten
 
@@ -132,7 +133,7 @@ ihrem Protokoll; sie erscheint, sobald Claude die erste Nachricht dort festgehal
 | `Ctrl+A` | öffnet das Menü mittig über dem Bereich mit dem Fokus (Fenster oder Sessionliste) |
 | `Alt+1`–`Alt+9` | Schnellwahl-Nummer für die Session mit Fokus vergeben bzw. mit derselben Zahl wieder entfernen |
 | `Ctrl+1`–`Ctrl+9` | Session mit dieser Schnellwahl-Nummer zeigen |
-| `Ctrl+Space` | fertige Antwort der Session mit Fokus (bzw. der in der Liste gewählten) als gelesen setzen (aus **waiting for you** wird **ready**) bzw. wieder als ungelesen (siehe [Zustände](#zustände-in-der-seitenleiste)) |
+| `Ctrl+Space` | fertige Antwort der Session mit Fokus (bzw. der in der Liste gewählten) als gelesen setzen (aus **waiting** wird **ready**) bzw. wieder als ungelesen (siehe [Zustände](#zustände-in-der-seitenleiste)) |
 
 `Ctrl+Pfeil`, `Alt+Zahl`, `Ctrl+Zahl` und `Ctrl+Space` erreichen Claude dadurch nie; Wortsprünge im Eingabefeld
 gehen über `Alt+←/→`.
@@ -234,9 +235,9 @@ vom Fokus ab:
 | `x` | gewählte Session endgültig löschen; sind Sessions markiert, alle markierten | Session dieses Fensters endgültig löschen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
 | `g` | gewählte Session einer [Gruppe](#gruppen) zuordnen; sind Sessions markiert, alle markierten | Session dieses Fensters einer Gruppe zuordnen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
 | `t` | [Notiz](#notizen) der gewählten Session schreiben, bearbeiten oder entfernen | Notiz der Session dieses Fensters schreiben, bearbeiten oder entfernen (nicht in Notizblock, Todo-Liste und Notizübersicht) |
-| `p` | [Notizblock](#notizblock) in einem Fenster zeigen: Fensterauswahl (ohne offenes Fenster gleich in Fenster 1) | wie links |
-| `d` | [Todo-Liste](#todo-liste) in einem Fenster zeigen, wie `p` | wie links |
-| `m` | [Notizübersicht](#notizübersicht) in einem Fenster zeigen, wie `p` | wie links |
+| `p` | [Notizblock](#notizblock) in einem Fenster zeigen: Fensterauswahl (ohne offenes Fenster gleich in Fenster 1) | Notizblock in diesem Fenster zeigen (ersetzt dessen Inhalt) |
+| `d` | [Todo-Liste](#todo-liste) in einem Fenster zeigen, wie `p` | Todo-Liste in diesem Fenster zeigen, wie `p` |
+| `m` | [Notizübersicht](#notizübersicht) in einem Fenster zeigen, wie `p` | Notizübersicht in diesem Fenster zeigen, wie `p` |
 | `f` | Abschnitt der Auswahl ein- bzw. ausklappen („Collapse group“ / „Expand group“) | — |
 | `a` | alle Abschnitte einklappen (solange einer ausgeklappt ist) | — |
 | `e` | alle Abschnitte ausklappen (solange einer eingeklappt ist) | — |
@@ -377,7 +378,7 @@ Fensternummer. Auf dieser Zeile zeigt `Enter` ihn (Fokus auf sein Fenster bzw. F
 `1`–`4` legt ihn in dieses Fenster, `0` bzw. `Ctrl+Enter` zeigt ihn im temporären Fenster, ein Doppelklick wirkt wie `Enter` und `c` im Menü schließt sein
 Fenster. Hat sein Fenster den Fokus, steht die Listenauswahl auf dieser Zeile.
 
-`p` im Menü zeigt ihn in einem Fenster nach Wahl — wie eine Session: Er nimmt einen der
+`p` im Menü zeigt ihn in einem Fenster nach Wahl, aus einem Fenster heraus direkt in diesem — wie eine Session: Er nimmt einen der
 vier Plätze ein, tauscht beim Verschieben den Platz, lässt sich zoomen und mit `c` schließen. Die
 Fensterleiste zeigt `[N] ✎ Notepad`. Es gibt nur einen Notizblock; ein zweites `p` verschiebt ihn.
 
@@ -411,7 +412,7 @@ beim Start und überschreibt die Datei nicht.
 
 Unter dem Notizblock steht die **Todo-Liste**: `☰Todo (3)` mit der Anzahl der offenen Einträge
 und, falls sichtbar, der Fensternummer. Auf ihrer Zeile wirken `Enter`, `1`–`4`, Doppelklick und
-`c` wie beim Notizblock; `d` im Menü zeigt sie in einem Fenster nach Wahl. Die Fensterleiste zeigt
+`c` wie beim Notizblock; `d` im Menü zeigt sie in einem Fenster nach Wahl (aus einem Fenster heraus in diesem). Die Fensterleiste zeigt
 `[N] ☰Todo (3 open · 2 done)`.
 
 Die Reihenfolge bestimmt man selbst: Abhaken lässt einen Eintrag an seiner Stelle, erledigte
@@ -447,7 +448,7 @@ nicht lesen, meldet claude-tui das beim Start und überschreibt die Datei nicht.
 
 Unter der Todo-Liste steht die **Notizübersicht**: `☷Notes (2)` mit der Anzahl der Sessions, die
 eine [Notiz](#notizen) haben. Auf ihrer Zeile wirken `Enter`, `1`–`4`, Doppelklick und `c` wie beim
-Notizblock; `m` im Menü zeigt sie in einem Fenster nach Wahl. Die Fensterleiste zeigt
+Notizblock; `m` im Menü zeigt sie in einem Fenster nach Wahl (aus einem Fenster heraus in diesem). Die Fensterleiste zeigt
 `[N] ☷Notes (2)`.
 
 Sie zeigt die Notizen aller Sessions in der Reihenfolge der Sessionliste: je Session deren Zeile
@@ -510,7 +511,7 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 | Symbol | Farbe | Zustand | Bedeutung |
 |---|---|---|---|
 | ✻ (animiert) | rot | working | Claude bearbeitet einen Prompt oder nutzt ein Tool. |
-| ▲ | gelb | waiting for you | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe — oder hat eine Antwort fertig, die noch nicht als gelesen gesetzt ist. |
+| ▲ | gelb | waiting | Claude fragt nach einer Freigabe (Berechtigungsdialog) oder braucht eine Eingabe — oder hat eine Antwort fertig, die noch nicht als gelesen gesetzt ist. |
 | ● | grau | ready | Claude ist fertig, die Antwort ist gelesen, es wartet auf den nächsten Prompt. |
 | (keins) | grau (Titel) | gespeichert | Läuft nicht, lässt sich fortsetzen. Endet ein Prozess von selbst, schließt sich sein Fenster und die Session steht wieder so in der Liste. |
 | ⇄ (statt Fensternummer) | orange | läuft anderswo | Ein Claude-Prozess außerhalb von claude-tui (z. B. in einem anderen Terminal) hat die Session offen. Öffnen fragt erst nach (Hintergrund-Sessions: `claude attach`, ohne Rückfrage). |
@@ -518,10 +519,10 @@ claude-tui fängt dafür die Maus ab; die Markierung des Terminals selbst gibt e
 Die Formen unterscheiden sich auch ohne Farbe.
 
 **Ungelesene Antworten:** Wird Claude mit einer Arbeit fertig (working → ready), steht die Session
-auf **waiting for you**, bis man die Antwort mit `Ctrl+Space` als gelesen setzt oder Claude wieder
+auf **waiting**, bis man die Antwort mit `Ctrl+Space` als gelesen setzt oder Claude wieder
 arbeitet — auch wenn die Session im Fenster mit Fokus liegt. `Ctrl+Space` auf einer Session im
-Zustand **ready** setzt sie wieder als ungelesen. Eine echte Rückfrage bleibt dagegen **waiting for
-you**, bis sie beantwortet ist; `Ctrl+Space` ändert daran nichts.
+Zustand **ready** setzt sie wieder als ungelesen. Eine echte Rückfrage bleibt dagegen **waiting**,
+bis sie beantwortet ist; `Ctrl+Space` ändert daran nichts.
 
 Ungelesene Sessions stehen in `state.json` und bleiben so über einen Neustart erhalten, auch über das
 Schließen eines Fensters. Auch gespeicherte Sessions, die nicht laufen, zeigen dann ▲ in der Liste
@@ -556,19 +557,19 @@ Endet ein Prozess in einem Fenster, nennt der Hinweis „… has exited: …“ 
 den Bildschirm geschrieben hat (meist die Fehlermeldung).
 
 **Hinweis auf wartende Sessions:** Wechselt eine Session, die nicht im Fenster mit Fokus liegt
-(auch eine Hintergrund-Session ohne Fenster), auf **waiting for you**, läutet claude-tui einmal die
-Terminal-Glocke (BEL) und zeigt unten in der Sessionliste `"<Titel>" is waiting for you`. Das
+(auch eine Hintergrund-Session ohne Fenster), auf **waiting**, läutet claude-tui einmal die
+Terminal-Glocke (BEL) und zeigt unten in der Sessionliste `"<Titel>" is waiting`. Das
 passiert nur beim Wechsel, nicht dauerhaft.
 `CLAUDE_TUI_NO_BELL=1` schaltet die Glocke ab; der Hinweis bleibt. Ob und wie die Glocke zu hören
 oder zu sehen ist, stellt das Terminal ein (Windows Terminal: `bellStyle`).
 
 Den Zustand meldet Claude Code selbst über **Hooks**: claude-tui startet jede Session mit
 `--settings` und eigenen Hook-Einträgen, die per HTTP an claude-tui melden (Prompt abgeschickt
-oder Tool genutzt = working, Freigabedialog = waiting for you, Antwort fertig = ready). Liegt für
+oder Tool genutzt = working, Freigabedialog = waiting, Antwort fertig = ready). Liegt für
 eine Session (noch) keine Meldung vor — etwa bei einem eigenen Befehl ohne Hook-Unterstützung —,
 greift die frühere Heuristik: Ausgabe in den letzten 1,5 s = working (ohne das Neuzeichnen kurz
 nach Scrollen oder Klicken mit der Maus), Rückfrage-Text auf dem
-Bildschirm („Do you want to …“) = waiting for you, sonst ready. Nach einer Eingabe in eine Session,
+Bildschirm („Do you want to …“) = waiting, sonst ready. Nach einer Eingabe in eine Session,
 die gerade wartet oder arbeitet, entscheidet bis zur nächsten Meldung ebenfalls die Heuristik
 (z. B. nach einer abgelehnten Freigabe oder einem Abbruch mit `Esc`). Details in
 [Architektur](architektur.md#hooks).

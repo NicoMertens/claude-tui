@@ -730,7 +730,7 @@ impl App {
         }
         let watched = self.input_session();
         for id in waiting::newly_waiting(changes, watched) {
-            self.notice = Some(format!("\"{}\" is waiting for you", self.title_of(id)));
+            self.notice = Some(format!("\"{}\" is waiting", self.title_of(id)));
             self.ring_bell = waiting::bell_enabled();
         }
         // Beendete Prozesse verschwinden; die Claude-Session bleibt in der Liste.
@@ -1661,6 +1661,24 @@ impl App {
         }
     }
 
+    /// Ziel für Inhalte aus dem Menü: aus einem Fenster heraus ersetzen sie dieses, aus der
+    /// Sessionliste kommt die Fensterauswahl (`None`).
+    fn focused_spot(&self) -> Option<Spot> {
+        match self.windows.focus() {
+            Focus::Window(slot) => Some(Spot::Window(slot)),
+            Focus::List => None,
+        }
+    }
+
+    /// Inhalt aus dem Menü: ersetzt das Fenster mit Fokus, aus der Sessionliste wie
+    /// [`Self::show_panel`].
+    fn show_from_menu(&mut self, pane: Pane) {
+        match self.focused_spot() {
+            Some(spot) => self.show_at(pane, spot),
+            None => self.show_panel(pane),
+        }
+    }
+
     /// Inhalt in ein Fenster: ohne offenes Fenster direkt in Fenster 1, sonst Fensterauswahl.
     fn show_panel(&mut self, pane: Pane) {
         if self.windows.count() == 0 {
@@ -1843,11 +1861,7 @@ impl App {
                         .find(|e| e.claude_id == *claude_id)
                         .cloned()
                 });
-                // Aus einem Fenster heraus ersetzt sie dieses, aus der Liste kommt die Fensterauswahl.
-                let spot = match self.windows.focus() {
-                    Focus::Window(slot) => Some(Spot::Window(slot)),
-                    Focus::List => None,
-                };
+                let spot = self.focused_spot();
                 match entry {
                     Some(entry) => self.open_entry(&entry, spot)?,
                     None => self.notice = Some("The session no longer exists".to_string()),
@@ -1904,9 +1918,9 @@ impl App {
             }
             Action::SetGroup => self.open_group_picker(),
             Action::EditNote => self.open_note_editor(),
-            Action::ShowNotepad => self.show_panel(Pane::Notepad),
-            Action::ShowTodo => self.show_panel(Pane::Todo),
-            Action::ShowNotes => self.show_panel(Pane::Notes),
+            Action::ShowNotepad => self.show_from_menu(Pane::Notepad),
+            Action::ShowTodo => self.show_from_menu(Pane::Todo),
+            Action::ShowNotes => self.show_from_menu(Pane::Notes),
             Action::ToggleCollapsed => {
                 if let Some(group) = self.selected_group() {
                     let (key, collapsed) = (group.heading.key(), self.is_collapsed(group));

@@ -1,11 +1,11 @@
 # claude-tui
 
 Ein Terminal-Arbeitsplatz für mehrere Claude-Code-Sessions, geschrieben in Rust. Links eine
-Seitenleiste mit allen Sessions und ihrem Zustand (working, waiting for you, ready),
+Seitenleiste mit allen Sessions und ihrem Zustand (working, waiting, ready),
 rechts bis zu vier Sessions in echten PTYs. Die Idee stammt von
 [herdr](https://github.com/ogulcancelik/herdr); Code ist nicht übernommen.
 
-![claude-tui mit drei Sessions: working, waiting for you, ready](docs/screenshot.png)
+![claude-tui mit drei Sessions: working, waiting, ready](docs/screenshot.png)
 
 ## Features
 
@@ -47,13 +47,13 @@ Details zu allem stehen in der [Bedienung](docs/bedienung.md).
 
 **Zustände**
 
-- **working** (rot, animiert), **waiting for you** (gelb), **ready** (grau), gespeichert, **läuft
+- **working** (rot, animiert), **waiting** (gelb), **ready** (grau), gespeichert, **läuft
   anderswo** (`⇄`), in der Liste und in der Fensterleiste.
 - Zustand kommt über **Hooks** direkt von Claude Code. Die eigene `~/.claude/settings.json` bleibt
   dabei unverändert, und ohne Hook-Meldung greift eine Heuristik.
 - **Hinweis auf wartende Sessions:** Terminal-Glocke und Meldung, wenn eine Session außerhalb des
   Fokus auf dich wartet.
-- **Ungelesene Antworten:** Eine fertige Antwort bleibt **waiting for you**, bis du sie mit
+- **Ungelesene Antworten:** Eine fertige Antwort bleibt **waiting**, bis du sie mit
   `Ctrl+Space` als gelesen setzt (oder wieder als ungelesen); gilt auch für gespeicherte Sessions
   und über einen Neustart hinweg.
 - Erkennt Sessions, die **außerhalb von claude-tui** laufen, und fragt vor dem Öffnen nach.

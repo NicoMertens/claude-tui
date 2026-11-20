@@ -73,7 +73,7 @@ pub fn status_label(status: Status) -> (&'static str, Color) {
     match status {
         Status::Starting => ("starting", MUTED),
         Status::Working => ("working", BUSY),
-        Status::Waiting => ("waiting for you", WAITING),
+        Status::Waiting => ("waiting", WAITING),
         Status::Idle => ("ready", MUTED),
         Status::Exited => ("exited", MUTED),
     }

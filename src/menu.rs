@@ -126,17 +126,17 @@ pub const NOTE: Entry = entry(
 pub const NOTEPAD: Entry = entry(
     'p',
     "Notepad",
-    "Show the notepad in a window of your choice: free text, independent of sessions, saved automatically",
+    "Show the notepad in this window, or from the list in a window of your choice: free text, independent of sessions, saved automatically",
 );
 pub const TODO: Entry = entry(
     'd',
     "Todo list",
-    "Show the todo list in a window of your choice: items to tick off, independent of sessions, saved automatically",
+    "Show the todo list in this window, or from the list in a window of your choice: items to tick off, independent of sessions, saved automatically",
 );
 pub const NOTES: Entry = entry(
     'm',
     "Notes overview",
-    "Show the notes of all sessions in a window of your choice; Enter or 1…4 opens a session",
+    "Show the notes of all sessions in this window, or from the list in a window of your choice; Enter or 1…4 opens a session",
 );
 pub const COLLAPSE: Entry = Entry {
     hotkey: 'f',
